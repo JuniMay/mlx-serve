@@ -1,6 +1,22 @@
 import Foundation
+import SwiftUI
 
 extension AppState {
+    @MainActor
+    func selectInteractionModel(_ row: ModelPaletteRow, using openWindow: OpenWindowAction) {
+        switch row.interaction {
+        case .chat:
+            applyChatModelPick(row.tag)
+            showConversation()
+        case .media(let modality):
+            guard let model = localModels.first(where: { $0.path == row.tag }) else { return }
+            selectMediaModel(modality: modality, name: model.name, path: model.path)
+        case .decision:
+            decisionsModelPath = row.tag
+            AppActivation.openWindow(id: "decisions", using: openWindow)
+        }
+    }
+
     /// Selects a media model without changing drafts or loading a chat engine.
     @MainActor
     func selectMediaModel(modality: MediaModality, name: String, path: String = "",

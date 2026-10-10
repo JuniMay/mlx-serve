@@ -111,6 +111,7 @@ final class VoiceModeControllerTests: XCTestCase {
         let rec = FakeRecognizer(); let syn = FakeSynth(); let cue = FakeCue()
         let c = VoiceModeController(recognizer: rec, synthesizer: syn,
                                     voices: Self.testVoices, loadingCue: cue, chime: FakeWakeChime())
+        c.wakePhrase = "hey loki"
         c.requireWakeWord = false   // these tests exercise the turn pipeline, not the wake gate
         return (c, rec, syn, cue)
     }
@@ -118,6 +119,7 @@ final class VoiceModeControllerTests: XCTestCase {
     private func make() -> (VoiceModeController, FakeRecognizer, FakeSynth) {
         let rec = FakeRecognizer(); let syn = FakeSynth()
         let c = VoiceModeController(recognizer: rec, synthesizer: syn, chime: FakeWakeChime())
+        c.wakePhrase = "hey loki"
         c.requireWakeWord = false
         return (c, rec, syn)
     }
@@ -127,6 +129,7 @@ final class VoiceModeControllerTests: XCTestCase {
     private func makeRunnable() -> (VoiceModeController, FakeRecognizer, FakeSynth, FakeRunner, UUID) {
         let rec = FakeRecognizer(); let syn = FakeSynth(); let runner = FakeRunner()
         let c = VoiceModeController(recognizer: rec, synthesizer: syn, voices: Self.testVoices, chime: FakeWakeChime())
+        c.wakePhrase = "hey loki"
         c.requireWakeWord = false
         let sid = UUID()
         c.runner = runner
@@ -140,6 +143,7 @@ final class VoiceModeControllerTests: XCTestCase {
         let rec = FakeRecognizer(); let syn = FakeSynth(); let runner = FakeRunner(); let timer = FakeFollowUpTimer()
         let c = VoiceModeController(recognizer: rec, synthesizer: syn, voices: Self.testVoices,
                                     followUpTimer: timer, chime: FakeWakeChime())
+        c.wakePhrase = "hey loki"
         c.requireWakeWord = true
         c.runner = runner
         c.turnContext = { (UUID(), nil) }
@@ -151,6 +155,7 @@ final class VoiceModeControllerTests: XCTestCase {
     private func makeChimed() -> (VoiceModeController, FakeRecognizer, FakeRunner, FakeWakeChime) {
         let rec = FakeRecognizer(); let syn = FakeSynth(); let runner = FakeRunner(); let chime = FakeWakeChime()
         let c = VoiceModeController(recognizer: rec, synthesizer: syn, voices: Self.testVoices, chime: chime)
+        c.wakePhrase = "hey loki"
         c.requireWakeWord = true
         c.runner = runner
         c.turnContext = { (UUID(), nil) }
@@ -603,6 +608,15 @@ final class VoiceModeControllerTests: XCTestCase {
     }
 
     // MARK: Wake word
+
+    func testMissingWakePhraseDoesNotStartMicrophone() async {
+        let (controller, recognizer, _) = make()
+        controller.requireWakeWord = true
+        controller.wakePhrase = ""
+        let started = await controller.begin()
+        XCTAssertFalse(started)
+        XCTAssertEqual(recognizer.startCount, 0)
+    }
 
     func testWakeWordDefaultsOn() {
         // A fresh controller with no stored preference requires the wake word.

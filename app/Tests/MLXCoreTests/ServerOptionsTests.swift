@@ -908,14 +908,12 @@ extension ServerOptionsTests {
         }
     }
 
-    /// The voice wake phrase is an app-side setting (like the voice-clone
-    /// fields): defaults to "hey loki", survives a legacy config blob that
-    /// predates the field, and round-trips a custom value.
+    /// An absent wake phrase stays unset; a custom phrase survives decoding.
     func testWakePhraseDefaultsAndDecodesTolerantly() throws {
-        XCTAssertEqual(ServerOptions().wakePhrase, "hey loki")
+        XCTAssertEqual(ServerOptions().wakePhrase, "")
 
         let legacy = try JSONDecoder().decode(ServerOptions.self, from: Data("{}".utf8))
-        XCTAssertEqual(legacy.wakePhrase, "hey loki")
+        XCTAssertEqual(legacy.wakePhrase, "")
 
         var o = ServerOptions()
         o.wakePhrase = "hey jarvis"

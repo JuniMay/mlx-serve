@@ -1,7 +1,7 @@
 import XCTest
 @testable import MLXCore
 
-/// Guards for Settings ▸ Interface wiring — the two places a display pref can
+/// Guards for Settings ▸ Appearance wiring — the two places a display pref can
 /// silently stop applying: a window scene that forgets `.appAppearance()`,
 /// and the transcript, whose metrics read UserDefaults with no SwiftUI
 /// dependency of their own.
@@ -15,7 +15,7 @@ final class AppearanceSettingsTests: XCTestCase {
     }
 
     /// `.appAppearance()` is applied per scene BY HAND, so a new `Window` can
-    /// forget it and ship a window that ignores Settings ▸ Interface — the
+    /// forget it and ship a window that ignores Settings ▸ Appearance — the
     /// same class as the window-injection rules.
     func testEveryWindowSceneAppliesTheAppAppearance() throws {
         let text = try source("Sources/MLXServe/MLXServeApp.swift")
@@ -28,16 +28,10 @@ final class AppearanceSettingsTests: XCTestCase {
         }
     }
 
-    /// `ChatMetrics` reads the text-size and compact-mode keys straight off
-    /// UserDefaults — no SwiftUI dependency — so a Settings change re-renders
-    /// the transcript only because `ChatDetailView` observes the same keys
-    /// via `@AppStorage` and re-ids the row stack. Without that, old rows
-    /// keep the old font while new rows get the new one.
+    // Existing transcript rows update when the text size changes.
     func testTheTranscriptObservesTheInterfaceKeysItRendersWith() throws {
         let text = try source("Sources/MLXServe/Views/ChatView.swift")
         XCTAssertTrue(text.contains("@AppStorage(InterfacePrefKey.textSize)"),
                       "ChatDetailView does not observe the text-size key")
-        XCTAssertTrue(text.contains("@AppStorage(InterfacePrefKey.compactMode)"),
-                      "ChatDetailView does not observe the compact-mode key")
     }
 }

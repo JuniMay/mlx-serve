@@ -24,18 +24,14 @@ struct MLXCoreEntryPoint {
 
 struct MLXCoreApp: App {
     private static let menuBarIcon: NSImage = {
-        guard let img = BundledAsset.image("tray.png") else {
-            return NSImage(systemSymbolName: "brain.head.profile", accessibilityDescription: "MLX-Serve")!
-        }
+        let img = NSImage(systemSymbolName: "bubble.left.and.bubble.right",
+                          accessibilityDescription: "MLX-Serve")!
         img.size = NSSize(width: 18, height: 18)
         img.isTemplate = true
         return img
     }()
 
     @NSApplicationDelegateAdaptor(MLXCoreAppDelegate.self) private var appDelegate
-    /// The View ▸ Interface menu writes the same keys the Settings rows do.
-    @AppStorage(InterfacePrefKey.chatColumn) private var chatColumnRaw = ChatColumnWidth.wide.rawValue
-    @AppStorage(InterfacePrefKey.compactMode) private var compactMode = false
     /// Held, NOT observed: `AppState` publishes every streamed chat delta, and
     /// an observing App body rebuilds every scene root per delta. What the
     /// scene graph reads from it lives in the small observing views below.
@@ -327,33 +323,6 @@ struct MLXCoreApp: App {
                     .font(.app(.body)) }
             }
 
-            // View ▸ Interface: the same `@AppStorage` keys the Settings rows
-            // write. `CommandGroup`, not `CommandMenu("View")`, which would
-            // build a second View menu beside the system one.
-            CommandGroup(after: .sidebar) {
-                Menu {
-                    ForEach(ChatColumnWidth.allCases) { width in
-                        Toggle(isOn: Binding(
-                            get: { chatColumnRaw == width.rawValue },
-                            set: { if $0 { chatColumnRaw = width.rawValue } }
-                        )) {
-                            Text("\(width.label) chat column")
-                        }
-                        .keyboardShortcut(width.menuShortcut, modifiers: [.command, .option])
-                    }
-
-                    Divider()
-
-                    // Never a bare Control combo: menu key equivalents run
-                    // before keyDown, so ⌃C would be stolen from the embedded
-                    // terminal.
-                    Toggle("Compact mode", isOn: $compactMode)
-                        .keyboardShortcut("c", modifiers: [.command, .option])
-                } label: {
-                    Label("Interface", systemImage: "paintbrush")
-                }
-            }
-
             CommandMenu("Tools") {
                 // ⌘L opens the global model chooser and brings the main window forward.
                 Button { appState.showModelPalette() } label: { Text("Switch Model…")
@@ -388,15 +357,6 @@ struct MLXCoreApp: App {
                         .font(.app(.body)) }
                 }
 
-                // No .keyboardShortcut here: ⌃Space is registered as a GLOBAL
-                // Carbon hotkey (QuickLauncherController); a menu key
-                // equivalent on the same combo would race it while the app is
-                // frontmost, so the combo rides the title instead.
-                Button {
-                    if !appState.quickLauncherEnabled { appState.quickLauncherEnabled = true }
-                    appState.quickLauncher.show()
-                } label: { Text("Quick Launcher (\(QuickLauncherHotKey.display))")
-                    .font(.app(.body)) }
             }
         }
     }

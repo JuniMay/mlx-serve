@@ -49,6 +49,7 @@ struct TurnLedger {
         var liveTokens: Int = 0
         /// The user switched Tools off while this turn ran.
         var toolsRevoked = false
+        var mcpRevoked = false
         var allToolsRevoked = false
     }
 
@@ -94,6 +95,12 @@ struct TurnLedger {
         turns[session]?.toolsRevoked ?? false
     }
 
+    mutating func revokeMCP(session: UUID) {
+        turns[session]?.mcpRevoked = true
+    }
+
+    func mcpRevoked(session: UUID) -> Bool { turns[session]?.mcpRevoked ?? false }
+
     mutating func revokeAllTools(session: UUID) {
         turns[session]?.toolsRevoked = true
         turns[session]?.allToolsRevoked = true
@@ -137,7 +144,7 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
 
     /// True while ANY session's turn is in flight. Kept as the coarse signal
     /// for surfaces that only care about GPU business (TaskScheduler's defer
-    /// gate, TelegramBridge's own-instance wait); per-chat UI reads
+    /// gate); per-chat UI reads
     /// `composerState(for:)` / `activeTurnSessionIds` instead.
     @Published private(set) var isGenerating = false
 
@@ -204,13 +211,15 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
                                         approval: @escaping (APIClient.ToolCall) async -> Bool) {
         // Read before `endTurn` drops the turn that carries it.
         let revoked = ledger.toolsRevoked(session: sessionId)
+        let mcpRevoked = ledger.mcpRevoked(session: sessionId)
         let allRevoked = ledger.allToolsRevoked(session: sessionId)
         guard endTurn(sessionId: sessionId, token: token),
               session(sessionId) != nil,
               Self.canRunTurn(serverRunning: server.status == .running, apple: appState.useAppleModel),
               let note = steering.take(for: sessionId) else { return }
         runTurn(sessionId: sessionId, userText: note, images: nil, videos: nil, audio: nil,
-                config: config.revokingTools(revoked).revokingAllTools(allRevoked), approval: approval)
+                config: config.revokingTools(revoked).revokingMCP(mcpRevoked)
+                    .revokingAllTools(allRevoked), approval: approval)
     }
 
     /// The turn table: token-identified turn per session (see `TurnLedger`)
@@ -285,8 +294,8 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
 
     /// Per-turn configuration. Every field is DECIDED before it gets here —
     /// build it with `TurnConfig.from(_:)` out of a `ResolvedAgentSettings`
-    /// rather than reading globals at the call site. Five surfaces start turns
-    /// (chat tab, voice tray, scheduled task, Telegram, Quick Launcher) and a
+    /// rather than reading globals at the call site. Turn sources
+    /// (chat, voice, and scheduled tasks) share this resolution; a
     /// per-surface read is exactly how one of them ends up silently ignoring the
     /// active agent.
     struct TurnConfig {
@@ -299,11 +308,6 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
         /// folder attached — advertises the searchDocuments tool and, with both
         /// Agent and MCP off, routes the turn through the loop in docs-only mode.
         var documentIndex: DocumentIndex? = nil
-        /// Set when this turn is driven by the Telegram bridge — the originating
-        /// chat id. Threaded into any `createTask` the agent makes so the task's
-        /// result is pushed back to that chat. nil for in-app / voice turns.
-        var telegramChatId: Int64? = nil
-
         // MARK: The agent (persona) driving this turn
 
         /// nil = no agent, i.e. today's behavior in every respect.
@@ -341,8 +345,7 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
         /// The one builder every turn site goes through.
         static func from(_ r: ResolvedAgentSettings,
                          voiceStyle: Bool = false,
-                         documentIndex: DocumentIndex? = nil,
-                         telegramChatId: Int64? = nil) -> TurnConfig {
+                         documentIndex: DocumentIndex? = nil) -> TurnConfig {
             TurnConfig(
                 agentMode: r.toolsEnabled,
                 mcpMode: r.mcpEnabled,
@@ -350,7 +353,6 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
                 voiceStyle: voiceStyle,
                 workingDirectory: r.workingDirectory,
                 documentIndex: documentIndex,
-                telegramChatId: telegramChatId,
                 agentId: r.agentId,
                 systemPromptPrefix: r.systemPromptPrefix,
                 tools: r.tools,
@@ -420,6 +422,13 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
             guard revoked else { return self }
             var c = self
             c.agentMode = false
+            return c
+        }
+
+        func revokingMCP(_ revoked: Bool) -> TurnConfig {
+            guard revoked else { return self }
+            var c = self
+            c.mcpMode = false
             return c
         }
 
@@ -536,6 +545,10 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
     /// tool call see it (the turn itself keeps going for MCP or a folder).
     func revokeTools(sessionId: UUID) {
         ledger.revokeTools(session: sessionId)
+    }
+
+    func revokeMCP(sessionId: UUID) {
+        ledger.revokeMCP(session: sessionId)
     }
 
     func revokeAllTools(sessionId: UUID) {
@@ -883,7 +896,7 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
         // Under the App Sandbox a user-picked working folder outside the
         // container is unreachable after a relaunch until its security-scoped
         // bookmark is resolved. This is the single seam every agent turn passes
-        // through (chat window, Quick Launcher, voice), so shell/file tools and
+        // through (chat and voice), so shell/file tools and
         // MCP servers below always run with the grant live. No bookmark stored
         // (default workspace, DMG build) → no-op.
         SecurityScopedBookmark.startAccessOnce(name: SecurityScopedBookmark.workingFolderName(sessionId))
@@ -895,7 +908,8 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
             guard let self else { return }
             guard !Task.isCancelled, self.ledger.owns(session: sessionId, token: token) else { return }
             // Lazy-spawn MCP servers if MCP mode is on. Idempotent — already-connected servers are skipped.
-            if config.mcpMode && !self.ledger.allToolsRevoked(session: sessionId) {
+            if config.mcpMode && !self.ledger.mcpRevoked(session: sessionId)
+                && !self.ledger.allToolsRevoked(session: sessionId) {
                 // Inherit the chat's working directory so filesystem/shell MCP servers anchor at the
                 // same dir the agent's built-in tools use. Per-entry `cwd` in mcp.json still wins.
                 self.mcpManager.defaultCwd = config.workingDirectory
@@ -909,7 +923,7 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
                         .map { "• **\($0.key)**: \($0.value)" }
                         .joined(separator: "\n")
                     let hint = self.mcpManager.sessions.isEmpty
-                        ? "No MCP servers are connected — the model has no MCP tools available for this turn. Open the gear icon on the MCP pill to fix or disable broken servers."
+                        ? "No MCP servers are connected — the model has no MCP tools available for this turn. Open Tools & MCP in Settings to fix or disable broken servers."
                         : "Some MCP servers couldn't start. The model will only see tools from the ones that did connect."
                     let warning = ChatMessage(
                         role: .assistant,
@@ -985,6 +999,7 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
             // Tools switched off mid-turn withdraw the OFFER; the system prompt
             // stays the turn's, so it never claims a folder that is not there.
             let config = turnConfig.revokingTools(ledger.toolsRevoked(session: sessionId))
+                .revokingMCP(ledger.mcpRevoked(session: sessionId))
                 .revokingAllTools(ledger.allToolsRevoked(session: sessionId))
 
             // Session deleted mid-turn → the turn is orphaned. Bail before
@@ -1416,6 +1431,7 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
                 // loop forever (it routes to `mcpManager` internally via
                 // `MCPToolRouting`).
                 let dispatchConfig = config.revokingTools(ledger.toolsRevoked(session: sessionId))
+                    .revokingMCP(ledger.mcpRevoked(session: sessionId))
                     .revokingAllTools(ledger.allToolsRevoked(session: sessionId))
                 let result = await AgentEngine.executeToolCall(
                     tc, workingDirectory: &workingDirectory,
@@ -1427,7 +1443,7 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
                     createTask: { [weak self] goal, schedule in
                         await self?.createTaskFromAgent(
                             goal: goal, schedule: schedule,
-                            telegramChatId: config.telegramChatId
+                            useMCP: dispatchConfig.mcpMode
                         ) ?? "Error: task creation unavailable."
                     },
                     generateMedia: { [weak self] kind, mediaArgs in
@@ -1551,25 +1567,14 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
 
     // MARK: - createTask tool (agent-scheduled background tasks)
 
-    /// Backs the agent's `createTask` tool: build a `ScheduledTask` from a goal +
-    /// optional natural-language schedule and hand it to the `TaskScheduler`. A
-    /// one-shot ("now" / omitted) is created disabled and run immediately; a
-    /// recurring schedule is added enabled and fires on its own. `telegramChatId`
-    /// (set on Telegram-driven turns) is stamped on the task so each finished run
-    /// reports back to that chat. Returns a short confirmation / error string for
-    /// the model to relay.
-    func createTaskFromAgent(goal: String, schedule: String?, telegramChatId: Int64?) async -> String {
+    /// Creates an immediate or scheduled task with the originating turn's MCP access.
+    func createTaskFromAgent(goal: String, schedule: String?, useMCP: Bool) async -> String {
         let trimmedGoal = goal.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedGoal.isEmpty else {
             return "Error: createTask needs a non-empty \"goal\" — the full instruction the task should carry out (it has no memory of this conversation)."
         }
         let scheduler = appState.taskScheduler
         let title = TaskScheduler.deriveTitle(from: trimmedGoal)
-        let willNotify = telegramChatId != nil ? "message you here" : "notify you on the desktop"
-        // Inherit MCP exposure from the originating context: the bot's MCP toggle
-        // for Telegram-created tasks, the app's MCP mode for in-app ones.
-        let useMCP = telegramChatId != nil ? appState.serverOptions.telegram.useMCP : appState.mcpMode
-
         switch TaskScheduler.scheduleIntent(schedule) {
         case .invalid:
             return "Couldn't understand the schedule “\(schedule ?? "")”. Use a phrase like “every day at 9am”, “every hour”, or “Mon Wed Fri at 8am” — or omit it / say “now” to run once immediately."
@@ -1581,18 +1586,17 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
                 trigger: .dailyAt(hour: cal.component(.hour, from: now),
                                   minute: cal.component(.minute, from: now)),
                 scheduleText: "once", autonomy: .fullAuto, useMCP: useMCP, enabled: false,
-                originTelegramChatId: telegramChatId, deleteAfterRun: true)
+                deleteAfterRun: true)
             scheduler.addTask(task)
             scheduler.runNow(task)
-            return "✅ Created and started task “\(title)”. I'll \(willNotify) with the result when it finishes."
+            return "✅ Created and started task “\(title)”. I'll notify you on the desktop with the result when it finishes."
         case .recurring(let trigger):
             let task = ScheduledTask(
                 title: title, goal: trimmedGoal, trigger: trigger,
                 scheduleText: schedule?.trimmingCharacters(in: .whitespacesAndNewlines),
-                autonomy: .fullAuto, useMCP: useMCP, enabled: true,
-                originTelegramChatId: telegramChatId)
+                autonomy: .fullAuto, useMCP: useMCP, enabled: true)
             scheduler.addTask(task)
-            return "✅ Scheduled task “\(title)” to run \(ScheduleParser.describe(trigger)). I'll \(willNotify) with each result."
+            return "✅ Scheduled task “\(title)” to run \(ScheduleParser.describe(trigger)). I'll notify you on the desktop with each result."
         }
     }
 

@@ -18,11 +18,17 @@ send anything in personal conversations during layout checks.
 6. Inspect sidebar groups and selection. Group collapse, row ordering and
    multi-selection must still behave as before; do not reorder personal data
    during a read-only check.
-   The New menu sits above Sessions and opens the existing creation actions.
-   Its icon stays visible in light and dark appearances. Models, Agents and
-   Tasks appear under Manage. Opening New keeps the current session selected.
-   Accessibility exposes New as one control, without repeating its title for
-   the icon and chevron.
+   New opens one empty interaction directly. The Sessions add menu offers
+   terminal sessions. Models, Agents and Tasks appear under Manage.
+   Session selection uses a neutral highlight, including while the sidebar
+   has keyboard focus. Move between sessions with the keyboard and verify
+   that focus and selection remain visible.
+7. Verify that model selection appears in the input dock. Open its model list
+   and verify that chat and media models identify their capabilities. A media
+   selection opens its corresponding workspace without generating output.
+8. Open Tools & MCP. Verify that Tools, MCP, and Plain Chat are switches and
+   remain left aligned. Plain Chat disables both tool switches. Dismiss without
+   changing a personal conversation's saved settings.
 
 Use an isolated fixture profile to activate Branch. Verify the new conversation
 ends at the latest complete boundary, keeps its settings and leaves the source

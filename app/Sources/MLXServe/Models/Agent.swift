@@ -3,7 +3,7 @@ import Foundation
 /// A named persona: a saved system prompt plus the settings a conversation with
 /// it should run under. You describe the assistant you want, a model writes the
 /// prompt (`AgentWriter`), and every surface that can start a turn — chat tabs,
-/// the voice tray, scheduled tasks, Telegram, the Quick Launcher — can run as
+/// the voice tray, and scheduled tasks — can run as
 /// that agent.
 ///
 /// The field names in the first block are byte-identical to the iPhone app's

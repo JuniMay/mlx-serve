@@ -25,7 +25,7 @@ Needs macOS 26.2+ on Apple Silicon.
 
 ### Use the app (recommended)
 
-**MLX-Serve** is a signed, notarized macOS menu-bar app that bundles the server. Browse and download models with a progress UI, chat, run agent mode with MCP tools, generate images / video / music / speech / 3D, and tune every server flag from a Settings window. No terminal, nothing to configure. The server underneath is the same binary the CLI runs, on the same `http://localhost:11234`, so Claude Code and any OpenAI or Anthropic client can point at it while the app is running.
+**MLX-Serve** is a signed, notarized macOS menu-bar app that bundles the server. Choose a model to open its chat or media workspace, attach supported inputs, and work from a compact input dock. Browse and download models, use agent tools and MCP, and adjust server options in Settings. The server underneath is the same binary the CLI runs, on the same `http://localhost:11234`, so Claude Code and any OpenAI or Anthropic client can point at it while the app is running.
 
 [<img src="website/appiconb.png" width="48" align="center">](https://github.com/ddalcu/mlx-serve/releases/latest) **[Download MLX-Serve.app](https://github.com/ddalcu/mlx-serve/releases/latest)** — latest release for macOS (Apple Silicon)
 
@@ -130,15 +130,16 @@ It goes well beyond text-to-X: photo editing by instruction, image-to-image, ani
 
 ## MLX Core (macOS app)
 
-Menu-bar app that wraps the server with a full UI:
+The app combines a stable sidebar, a main workspace and a separate Settings window:
 
-- **Chat + agent mode:** multi-session chat, PDFs and images, 10 built-in tools with per-tool approvals, an MCP marketplace, prompt-based skills, persistent memory, folder RAG.
-- **Agents:** named assistants with their own personality, voice, model, tools, workspace and wake phrase.
-- **Agent Sandbox:** one toggle and every agent shell command runs in an isolated Linux VM that boots in under a second. Your Mac stays untouched.
-- **Model browser:** resumable multi-connection downloads, finds your existing LM Studio models so nothing re-downloads.
-- **Hands-free Voice Mode:** say "Hey Loki" and talk; replies in 54 Kokoro voices or a clone of your own.
-- **Reach it from anywhere:** ⌃Space Quick Launcher over any app, a Telegram bridge to your phone, scheduled tasks in plain English, LAN sharing between your Macs.
-- **Server management:** every launch flag in an engine-aware Settings window, live logs, start/stop.
+- **Chat and media workspaces:** choose a model for chat, images, video, speech, music, sound or 3D. Results occupy the main canvas; prompts and attachments stay in a floating input dock. Generation parameters open in a trailing inspector.
+- **Chat tools:** file and shell tools, web access, media tools, per-tool approvals, MCP servers, prompt-based skills, persistent memory and folder search. Settings supplies global defaults; Plain Chat disables tools for one conversation.
+- **Agents:** named assistants with their own prompt, voice, model, tools, workspace, sampling and optional wake phrase.
+- **Agent Sandbox and terminals:** run shell commands in an isolated Linux VM or open a coding-agent terminal. Shared workspace files remain editable on the Mac.
+- **Model browser:** resumable downloads and discovery of existing local model folders and Hugging Face caches.
+- **Voice Mode:** on-device speech recognition with system speech by default; Kokoro and Qwen3-TTS voice cloning are available. Choose a wake phrase or turn off Require Wake Phrase before starting.
+- **Tasks and LAN sharing:** schedule agent work with saved transcripts, and use models shared by other Macs on the local network.
+- **Server settings:** engine-specific controls, separate cache and performance sections, live logs and start/stop actions.
 
 The full feature list is in [docs/app.md](docs/app.md).
 

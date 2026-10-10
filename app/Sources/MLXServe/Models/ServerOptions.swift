@@ -250,11 +250,7 @@ struct ServerOptions: Codable, Equatable {
     var perRequestEnablePLD: TriState = .auto
     var perRequestEnableDrafter: TriState = .auto
 
-    // MARK: Messaging bridge (app-level — NOT a server-launch flag, NOT per-request)
-    /// Telegram bot bridge: message your local model from your phone. The bridge
-    /// runs *inside* the app (long-polls Telegram over outbound HTTPS), so it is
-    /// deliberately excluded from `serverLaunchEquals` — toggling it must never
-    /// prompt a server restart.
+    /// Stored for compatibility when existing settings are decoded and saved.
     var telegram: TelegramConfig = TelegramConfig()
 
     // MARK: Agent sandbox (app-level — NOT a server-launch flag, NOT per-request)
@@ -262,8 +258,8 @@ struct ServerOptions: Codable, Equatable {
     /// instead of directly on host macOS. The sandbox is a lightweight Linux
     /// guest booted on Apple's Virtualization.framework (see `VzGuest`); only
     /// the working directory is shared in, so a destructive command can't reach
-    /// the rest of the Mac. It's consumed by the app-side tool executor, so —
-    /// like `telegram` — it's deliberately excluded from `serverLaunchEquals`:
+    /// the rest of the Mac. It's consumed by the app-side tool executor and
+    /// excluded from `serverLaunchEquals`:
     /// toggling it must never prompt a server restart.
     var sandbox: SandboxConfig = SandboxConfig()
 
@@ -275,8 +271,8 @@ struct ServerOptions: Codable, Equatable {
     /// WAV) that hands-free voice mode speaks with, via Qwen3-TTS zero-shot
     /// cloning (`/v1/audio/speech` + `ref_audio`). Empty = no clone — voice
     /// mode uses the macOS system voice. Recorded/picked in Settings ▸ Voice.
-    /// Consumed app-side by `ClonedVoiceSynthesizer`, so — like `telegram` and
-    /// `sandbox` — it's deliberately excluded from `serverLaunchEquals` and
+    /// Consumed app-side by `ClonedVoiceSynthesizer`, so like `sandbox`,
+    /// it's excluded from `serverLaunchEquals` and
     /// `toCLIArgs`: changing it must never prompt a server restart.
     var voiceClonePath: String = ""
     /// Whether voice mode actually speaks with the clone. Selecting a system
@@ -303,10 +299,7 @@ struct ServerOptions: Codable, Equatable {
     /// (`"af_bella,af_sky"`) — the reference's own convention, passed through
     /// verbatim.
     var kokoroVoice: String = "af_heart"
-    /// Wake phrase for hands-free voice mode ("hey loki" by default). Stored
-    /// as the user typed it in Settings ▸ Voice; consumers normalize through
-    /// `WakeWord.normalizePhrase` (blank → default). App-side like the other
-    /// voice fields — never a server-launch flag.
+    /// Optional user-chosen phrase for hands-free voice. Never sent as a server flag.
     var wakePhrase: String = WakeWord.defaultPhrase
 
     enum LogLevel: String, Codable, CaseIterable, Identifiable {
@@ -380,58 +373,15 @@ struct ServerOptions: Codable, Equatable {
         }
     }
 
-    /// Telegram bot bridge settings. The user creates the bot via @BotFather
-    /// (`/newbot`) and pastes the token here. The bridge long-polls Telegram
-    /// (outbound HTTPS only — no public URL or port-forward, so it works behind
-    /// home NAT). `allowedChatIds` locks the bot to specific chats; empty means
-    /// "adopt the first chat that messages" (trust-on-first-use), so setup is
-    /// just: paste token, message the bot once.
+    /// Saved Telegram configuration retained for settings compatibility.
     struct TelegramConfig: Codable, Equatable {
         var enabled: Bool = false
         var botToken: String = ""
-        /// false = plain chat (default, safe). true = the full agent loop with
-        /// tools (shell / file / web) executing on this Mac, driven from the
-        /// phone. Opt-in; the Settings UI warns about the implications.
         var agentMode: Bool = false
-        /// Expose the user's enabled MCP servers to the bot (and to the tasks it
-        /// creates). Opt-in; works alongside or independently of `agentMode`.
         var useMCP: Bool = false
         var enableThinking: Bool = false
-        /// The agent (persona) the bot answers as; nil = none, i.e. the app's own
-        /// settings and the three flags above verbatim.
         var agentId: UUID?
-        /// Telegram chat IDs allowed to use the bot. Empty = adopt the first
-        /// chat that messages (TOFU); the bridge appends the adopted id here.
         var allowedChatIds: [Int64] = []
-
-        /// True when the config is actually runnable (enabled + a non-blank token).
-        var isRunnable: Bool {
-            enabled && !botToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }
-
-        /// The bot token with surrounding whitespace stripped — what the bridge
-        /// actually sends to the Telegram API (users paste with trailing newlines).
-        var trimmedToken: String {
-            botToken.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-
-        /// Access decision for an incoming chat id. Pure — drives the bridge's
-        /// gate and is unit-tested without any network.
-        func access(forChatId chatId: Int64) -> TelegramAccess {
-            if allowedChatIds.contains(chatId) { return .allowed }
-            if allowedChatIds.isEmpty { return .adopt }
-            return .rejected
-        }
-    }
-
-    /// Outcome of the bot's per-message access check. See `TelegramConfig.access`.
-    enum TelegramAccess: Equatable {
-        /// Chat is on the allow-list — answer it.
-        case allowed
-        /// No allow-list yet — adopt this chat (add to `allowedChatIds`) then answer.
-        case adopt
-        /// An allow-list exists and this chat isn't on it — refuse.
-        case rejected
     }
 
     /// Agent execution sandbox. When `enabled`, the agent's shell commands run
@@ -970,16 +920,7 @@ extension ServerOptions.SandboxConfig {
 // MARK: - Reset to defaults
 
 extension ServerOptions {
-    /// The value the Settings screen's "Reset to Defaults" button installs.
-    ///
-    /// Everything returns to `ServerOptions()` except the Telegram bot token,
-    /// which is a credential the user obtained from @BotFather and cannot
-    /// re-derive from anything on this machine — wiping it turns a stray reset
-    /// into a trip back to Telegram. Every other field (including the rest of
-    /// the Telegram block: the enable toggle, agent mode, and the adopted chat
-    /// ids, which re-adopt on the next message) is re-derivable and is
-    /// deliberately restored. Pure so `SettingsResetTests` can pin the scope of
-    /// the carve-out against future fields.
+    /// Restores server options while retaining the stored Telegram credential.
     static func resetToDefaults(preserving current: ServerOptions) -> ServerOptions {
         var fresh = ServerOptions()
         fresh.telegram.botToken = current.telegram.botToken

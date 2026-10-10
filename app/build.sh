@@ -490,20 +490,6 @@ if [ "$STAGE_FRAMEWORKS" = "1" ]; then
     # libllama (llama.cpp GGUF engine) — single self-contained dylib staged by
     # scripts/fetch-llama.sh. Bundled + signed exactly like the others.
     [ -f "$PROJECT_ROOT/lib/llama/lib/libllama.dylib" ] && cp "$PROJECT_ROOT/lib/llama/lib/libllama.dylib" "$CONTENTS/Frameworks/"
-
-    # SwiftOGG's binary deps: YbridOpus + YbridOgg dynamic frameworks (libopus +
-    # libogg). VoicePreprocessor uses them to decode Telegram Ogg/Opus voice notes,
-    # which AVFoundation can't read. SwiftPM fetches them as xcframeworks under
-    # .build/artifacts; embed the macOS slice so the shipped app resolves
-    # @rpath/Ybrid*.framework at runtime (without this the app won't launch).
-    for fwname in YbridOpus YbridOgg; do
-        fwsrc=$(find "$SCRIPT_DIR/.build/artifacts" -path "*macos-arm64*/$fwname.framework" -type d 2>/dev/null | head -1)
-        if [ -n "$fwsrc" ]; then
-            cp -R "$fwsrc" "$CONTENTS/Frameworks/"
-        else
-            echo "  WARNING: $fwname.framework not found under .build/artifacts (Telegram voice decode will fail)"
-        fi
-    done
 fi
 
 # Fix rpaths on mlx-serve binary. This one always runs: mlx-serve is re-copied
@@ -548,14 +534,6 @@ if [ -f "$CONTENTS/Frameworks/libllama.dylib" ]; then
         "@rpath/libllama.dylib" \
         "@executable_path/../Frameworks/libllama.dylib" \
         "$CONTENTS/MacOS/mlx-serve" 2>/dev/null || true
-fi
-
-# MLXCore (the Swift app) loads YbridOpus/YbridOgg via @rpath/Ybrid*.framework.
-# Point @rpath at the bundled Frameworks dir — SwiftPM's dev rpath into
-# .build/artifacts doesn't survive into the shipped binary, so without this
-# added rpath dyld can't find the frameworks and the app fails to launch.
-if [ -d "$CONTENTS/Frameworks/YbridOpus.framework" ] || [ -d "$CONTENTS/Frameworks/YbridOgg.framework" ]; then
-    install_name_tool -add_rpath "@executable_path/../Frameworks" "$CONTENTS/MacOS/MLXCore" 2>/dev/null || true
 fi
 
 rm -rf "$ICON_DIR"
@@ -626,8 +604,7 @@ if [ "$STAGE_FRAMEWORKS" = "1" ]; then
         [ -f "$fw" ] && codesign "${SIGN_OPTS[@]}" "$fw" && echo "  Signed: $(basename "$fw")"
     done
 
-    # Sign embedded .framework bundles (YbridOpus/YbridOgg) — re-sign over the
-    # vendor signature with our identity so dyld accepts them under hardened runtime.
+    # Sign embedded frameworks with our identity for the hardened runtime.
     for fw in "$CONTENTS/Frameworks/"*.framework; do
         [ -d "$fw" ] && codesign "${SIGN_OPTS[@]}" "$fw" && echo "  Signed: $(basename "$fw")"
     done

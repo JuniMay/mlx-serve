@@ -40,18 +40,36 @@ struct ChatToolDefaults: Codable, Equatable, Sendable {
 struct ChatToolPreferences: Codable, Equatable, Sendable {
     var followsDefaults: Bool = true
     var plainChat: Bool = false
+    var toolsEnabled: Bool?
+    var mcpEnabled: Bool?
 
-    init(followsDefaults: Bool = true, plainChat: Bool = false) {
+    init(followsDefaults: Bool = true, plainChat: Bool = false,
+         toolsEnabled: Bool? = nil, mcpEnabled: Bool? = nil) {
         self.followsDefaults = followsDefaults
         self.plainChat = plainChat
+        self.toolsEnabled = toolsEnabled
+        self.mcpEnabled = mcpEnabled
     }
 
-    private enum CodingKeys: String, CodingKey { case followsDefaults, plainChat }
+    private enum CodingKeys: String, CodingKey { case followsDefaults, plainChat, toolsEnabled, mcpEnabled }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         followsDefaults = try values.decodeIfPresent(Bool.self, forKey: .followsDefaults) ?? true
         plainChat = try values.decodeIfPresent(Bool.self, forKey: .plainChat) ?? false
+        toolsEnabled = try values.decodeIfPresent(Bool.self, forKey: .toolsEnabled)
+        mcpEnabled = try values.decodeIfPresent(Bool.self, forKey: .mcpEnabled)
+    }
+
+    /// Conversation switches can remove access that an agent owns, never grant it.
+    func applying(to resolved: ResolvedAgentSettings) -> ResolvedAgentSettings {
+        var result = resolved
+        if toolsEnabled == false {
+            result.toolsEnabled = false
+            result.tools = result.tools.intersection([.searchDocuments])
+        }
+        if mcpEnabled == false { result.mcpEnabled = false }
+        return result
     }
 }
 
@@ -60,10 +78,11 @@ extension ChatSession {
 
     /// Legacy conversations keep their saved choices until they explicitly opt in.
     func effectiveToolPreferences(defaults: ChatToolDefaults) -> ChatToolDefaults {
-        guard toolPreferences?.followsDefaults == true else {
-            return ChatToolDefaults(toolsEnabled: mode == .agent, mcpEnabled: useMCP,
-                                    disabledTools: disabledTools)
-        }
-        return defaults
+        var result = toolPreferences?.followsDefaults == true ? defaults
+            : ChatToolDefaults(toolsEnabled: mode == .agent, mcpEnabled: useMCP,
+                               disabledTools: disabledTools)
+        if let tools = toolPreferences?.toolsEnabled { result.toolsEnabled = tools }
+        if let mcp = toolPreferences?.mcpEnabled { result.mcpEnabled = mcp }
+        return result
     }
 }

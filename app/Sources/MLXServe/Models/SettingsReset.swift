@@ -12,34 +12,14 @@ struct SettingsFieldReset {
     let apply: (inout ServerOptions, ServerOptions) -> Void
 }
 
-/// Scoped "Reset to Defaults" for the Settings screen.
-///
-/// Before the sidebar there was one global button. With a sidebar, that button
-/// sits at the bottom of whatever single section you're viewing, where "Reset to
-/// Defaults" unavoidably reads as "reset THIS section" — so it now does exactly
-/// that, and the confirmation says which scope it's about to apply
-/// (`confirmMessage`). "All Settings" keeps the original whole-screen behavior.
-///
-/// The map below must stay COMPLETE: a field no section claims could never be
-/// reset from the UI again, and one claimed twice would be clobbered from the
-/// wrong pane. That's enforced by reflection, not by review.
+/// Each active option belongs to one reset scope. Dormant connection data is preserved.
 enum SettingsReset {
 
     /// Fields restored when `category`'s Reset button is pressed. Empty for
     /// sections with nothing of their own to reset.
     static func fields(for category: SettingsCategory) -> [SettingsFieldReset] {
         switch category {
-        // Model Folders' two paths live in `ModelRoots` (UserDefaults), not in
-        // ServerOptions, and each row carries its own Clear/Reset button beside
-        // the path it clears; Updates holds no settings, and About is links
-        // only. None offers a section Reset button (`isResettable`), rather
-        // than a button that does nothing. Interface is the same shape:
-        // `@AppStorage`-backed display prefs, not a `ServerOptions` field —
-        // each of its rows (appearance/accent/text size/compact/shortcut)
-        // carries its own control default or Reset (the shortcut row's).
-        // Providers live in providers.json; General's startup preferences live
-        // in UserDefaults rather than ServerOptions.
-        case .general, .modelFolders, .updates, .about, .interface, .providers, .tools:
+        case .general, .modelFolders, .about, .appearance, .providers, .tools:
             return []
 
         case .server:
@@ -75,6 +55,7 @@ enum SettingsReset {
                 f("enableMTP") { $0.enableMTP = $1.enableMTP },
                 f("mtpDepth") { $0.mtpDepth = $1.mtpDepth },
                 f("enableDSpark") { $0.enableDSpark = $1.enableDSpark },
+                f("llamaMtpDrafts") { $0.llamaMtpDrafts = $1.llamaMtpDrafts },
             ]
 
         case .memory:
@@ -84,25 +65,26 @@ enum SettingsReset {
                 f("maxResidentMemGB") { $0.maxResidentMemGB = $1.maxResidentMemGB },
                 f("maxResidentModels") { $0.maxResidentModels = $1.maxResidentModels },
                 f("idleEvictSecs") { $0.idleEvictSecs = $1.idleEvictSecs },
+                f("pleGpu") { $0.pleGpu = $1.pleGpu },
+            ]
+
+        case .cache:
+            return [
                 f("kvQuant") { $0.kvQuant = $1.kvQuant },
                 f("hotPrefixCacheEnabled") { $0.hotPrefixCacheEnabled = $1.hotPrefixCacheEnabled },
                 f("prefixCacheEntries") { $0.prefixCacheEntries = $1.prefixCacheEntries },
                 f("prefixCacheMem") { $0.prefixCacheMem = $1.prefixCacheMem },
-                f("pleGpu") { $0.pleGpu = $1.pleGpu },
-            ]
-
-        // One section, so one reset: the universal knob and the MLX-only ones.
-        case .performance:
-            return [
-                f("tokenizeCacheEntries") { $0.tokenizeCacheEntries = $1.tokenizeCacheEntries },
-                f("maxConcurrent") { $0.maxConcurrent = $1.maxConcurrent },
-                f("decodeAttnQuantChoice") { $0.decodeAttnQuantChoice = $1.decodeAttnQuantChoice },
                 f("enablePrefixCacheDisk") { $0.enablePrefixCacheDisk = $1.enablePrefixCacheDisk },
                 f("prefixCacheDisk") { $0.prefixCacheDisk = $1.prefixCacheDisk },
+                f("tokenizeCacheEntries") { $0.tokenizeCacheEntries = $1.tokenizeCacheEntries },
+                f("llamaKvQuant") { $0.llamaKvQuant = $1.llamaKvQuant },
+                f("llamaCacheEntries") { $0.llamaCacheEntries = $1.llamaCacheEntries },
             ]
 
-        case .neuralEngine:
+        case .performance:
             return [
+                f("maxConcurrent") { $0.maxConcurrent = $1.maxConcurrent },
+                f("decodeAttnQuantChoice") { $0.decodeAttnQuantChoice = $1.decodeAttnQuantChoice },
                 f("anePrefill") { $0.anePrefill = $1.anePrefill },
                 f("aneImage") { $0.aneImage = $1.aneImage },
                 f("aneVideo") { $0.aneVideo = $1.aneVideo },
@@ -112,9 +94,6 @@ enum SettingsReset {
         case .engines:
             return [
                 f("mlxGguf") { $0.mlxGguf = $1.mlxGguf },
-                f("llamaKvQuant") { $0.llamaKvQuant = $1.llamaKvQuant },
-                f("llamaCacheEntries") { $0.llamaCacheEntries = $1.llamaCacheEntries },
-                f("llamaMtpDrafts") { $0.llamaMtpDrafts = $1.llamaMtpDrafts },
                 f("llamaUbatch") { $0.llamaUbatch = $1.llamaUbatch },
                 f("ssdStreaming") { $0.ssdStreaming = $1.ssdStreaming },
             ]
@@ -154,17 +133,6 @@ enum SettingsReset {
                 f("toolsOnlyWhenAsked") { $0.toolsOnlyWhenAsked = $1.toolsOnlyWhenAsked },
             ]
 
-        case .messaging:
-            return [
-                // The bot token is the one thing a reset must NOT take: only
-                // @BotFather can reissue it, and nothing on this Mac can
-                // re-derive it. Same carve-out the global reset has always made.
-                f("telegram") { current, fresh in
-                    let token = current.telegram.botToken
-                    current.telegram = fresh.telegram
-                    current.telegram.botToken = token
-                },
-            ]
         }
     }
 
@@ -189,9 +157,11 @@ enum SettingsReset {
         return out
     }
 
-    /// Restore everything — the original whole-screen behavior, Telegram token kept.
+    /// Restore active settings while preserving dormant connection data.
     static func applyAll(to current: ServerOptions) -> ServerOptions {
-        ServerOptions.resetToDefaults(preserving: current)
+        var reset = ServerOptions.resetToDefaults(preserving: current)
+        reset.telegram = current.telegram
+        return reset
     }
 
     /// Apply whatever the sidebar has selected.
@@ -221,14 +191,11 @@ enum SettingsReset {
     static func confirmMessage(_ selection: SettingsSelection) -> String {
         switch selection {
         case .all:
-            return "This resets server options, Generation Defaults, Voice, Agent Sandbox, and Messaging settings across every section. Tools & MCP defaults, startup, appearance, model folders, providers, your workspace folder, per-model rules, and your Telegram bot token are kept. Generation defaults apply to the next request; server options apply after a restart."
+            return "This resets server options, Generation Defaults, Voice, and Agent Sandbox settings across every section. Tools & MCP defaults, startup, appearance, model folders, providers, your workspace folder, and per-model rules are kept. Generation defaults apply to the next request; server options apply after a restart."
         case .category(let c):
             let scope = "This resets only the \(c.sidebarLabel) section. Every other section is left untouched."
-            let tail = c == .messaging
-                ? " Your Telegram bot token is kept, since only @BotFather can reissue it."
-                : ""
             if c == .requestDefaults { return scope + " Generation defaults apply to the next request without a restart. Per-model rules are kept." }
-            return scope + tail + " The running server keeps its current flags until you hit Restart Now."
+            return scope + " The running server keeps its current flags until you hit Restart Now."
         }
     }
 }

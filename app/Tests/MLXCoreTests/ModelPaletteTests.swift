@@ -278,19 +278,4 @@ final class ModelPaletteTests: XCTestCase {
         XCTAssertEqual(chat.components(separatedBy: "ModelPaletteSheet(").count - 1, 1)
     }
 
-    /// Applying a pick is ONE method. The tray and the pill each had their own
-    /// copy of "clear the LAN id, then set the path"; a third would be the
-    /// per-surface-copy class the tag semantics themselves were centralised to
-    /// avoid.
-    func testEverySurfaceAppliesAPickThroughTheOneMethod() throws {
-        for file in ["Sources/MLXServe/Views/ChatModelPill.swift",
-                     "Sources/MLXServe/Views/StatusMenuView.swift",
-                     "Sources/MLXServe/Views/ModelPaletteSheet.swift"] {
-            let text = try source(file)
-            XCTAssertTrue(text.contains("applyChatModelPick("),
-                          "\(file) must apply a pick through AppState.applyChatModelPick")
-            XCTAssertFalse(text.contains("appState.selectedModelPath ="),
-                           "\(file) must not re-implement what picking a model means")
-        }
-    }
 }

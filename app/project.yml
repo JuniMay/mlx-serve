@@ -20,9 +20,6 @@ packages:
   swift-collections:
     url: https://github.com/apple/swift-collections.git
     majorVersion: 1.0.0
-  swift-ogg:
-    url: https://github.com/element-hq/swift-ogg.git
-    majorVersion: 0.0.4
   SwiftTerm:
     url: https://github.com/migueldeicaza/SwiftTerm.git
     minVersion: 1.14.0
@@ -52,8 +49,6 @@ targets:
         product: MCP
       - package: swift-collections
         product: OrderedCollections
-      - package: swift-ogg
-        product: SwiftOGG
       - package: SwiftTerm
         product: SwiftTerm
       - package: SwaTex

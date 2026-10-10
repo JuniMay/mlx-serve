@@ -20,10 +20,6 @@ let package = Package(
         // Already pulled transitively by swift-sdk; declared here so we can use OrderedDictionary
         // directly to preserve user-edited key order in mcp.json.
         .package(url: "https://github.com/apple/swift-collections.git", from: "1.0.0"),
-        // libopus + libogg wrapper (Element/Matrix team) — decodes Telegram's
-        // Ogg/Opus voice notes, which AVFoundation can't read. Used only by
-        // `VoicePreprocessor`; statically linked, so no dylib bundling/signing.
-        .package(url: "https://github.com/element-hq/swift-ogg.git", from: "0.0.4"),
         // Terminal emulator for the Sandbox window's embedded terminal
         // (agent CLIs over ssh into the guest). Imported by exactly ONE file —
         // EmbeddedTerminalView — so a libghostty-backed view can replace it
@@ -40,7 +36,6 @@ let package = Package(
             dependencies: [
                 .product(name: "MCP", package: "swift-sdk"),
                 .product(name: "OrderedCollections", package: "swift-collections"),
-                .product(name: "SwiftOGG", package: "swift-ogg"),
                 .product(name: "SwiftTerm", package: "SwiftTerm"),
                 .product(name: "SwaTexRender", package: "SwaTex"),
             ],
@@ -51,9 +46,6 @@ let package = Package(
             name: "MLXCoreTests",
             dependencies: [
                 "MLXCore",
-                // Used only to synthesise an Ogg/Opus fixture for the
-                // VoicePreprocessor round-trip test.
-                .product(name: "SwiftOGG", package: "swift-ogg"),
             ],
             path: "Tests/MLXCoreTests",
             // The GLB test fixture is loaded by source-relative path (#filePath),

@@ -44,8 +44,7 @@ extension AppState {
             thinkingEnabled: thinkingEnabled,
             autoApprove: autoApprove,
             tools: Set(AgentToolKind.allCases),
-            // The chat tab's own Tools menu. Surfaces without one (tasks,
-            // Telegram, the tray) pass nothing and are unaffected.
+            // Chat-specific exclusions do not affect other turn sources.
             disabledTools: disabledTools,
             workingDirectory: workingDirectory,
             // nil = whatever model is selected right now. A surface with its own
@@ -66,16 +65,28 @@ extension AppState {
     func resolvedChatSettings(for session: ChatSession, autoApprove: Bool = false,
                               thinkingEnabled: Bool? = nil) -> ResolvedAgentSettings {
         let tools = session.effectiveToolPreferences(defaults: chatToolDefaults)
-        return resolvedAgentSettings(
+        let thinking = thinkingPreference(for: session)
+        let resolved = resolvedAgentSettings(
             agentId: session.agentId,
             toolsEnabled: tools.toolsEnabled,
             mcpEnabled: tools.mcpEnabled,
-            thinkingEnabled: thinkingEnabled ?? session.enableThinking,
+            thinkingEnabled: thinkingEnabled ?? thinking.enabled,
             autoApprove: autoApprove,
             workingDirectory: session.workingDirectory,
             disabledTools: ChatSession.disabledToolKinds(tools.disabledTools),
-            reasoningEffort: session.reasoningEffort,
+            reasoningEffort: thinking.effort,
             plainChat: session.isPlainChat)
+        return session.toolPreferences?.applying(to: resolved) ?? resolved
+    }
+
+    var thinkingModelID: String {
+        ModelThinkingPreferences.modelID(selectedPath: selectedModelPath,
+            lanID: server.lanChatModelId, apple: useAppleModel)
+    }
+
+    func thinkingPreference(for session: ChatSession) -> ModelThinkingPreference {
+        modelThinkingPreferences.preference(for: thinkingModelID,
+            fallback: ModelThinkingPreference(enabled: session.enableThinking, effort: session.reasoningEffort))
     }
 
     /// The agent a chat tab is talking to (nil = none).

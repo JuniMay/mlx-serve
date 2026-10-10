@@ -30,13 +30,9 @@ struct ChatSession: Identifiable, Codable {
     /// chat sidebar and never persisted to chat-history.json — the conversation
     /// lives on the messaging platform, not in the app's chat list.
     var isExternalBridge: Bool
-    /// Per-session toolbar toggles. Persisted here (not as view `@State` or the
-    /// app-global `mcpMode`) so each chat tab remembers its own Think/MCP choice
-    /// across tab switches and relaunches — `mode` already does the same for the
-    /// Agent toggle. See PerSessionUIStateTests.
+    /// Saved conversation fallback when no model thinking preference exists.
     var enableThinking: Bool
-    /// The brain disc's right-click pick: `reasoning_effort` for this chat's
-    /// turns while thinking is on.
+    /// ModelThinkingPreferences takes precedence over this saved fallback.
     var reasoningEffort: ReasoningEffort
     var useMCP: Bool
     // The composer's create mode (`createMode`) is retired: sessions saved by
@@ -462,8 +458,7 @@ struct ModelInfo {
     var supportsAudio: Bool = false
     /// True when the model advertises the `vision` capability (a SigLIP-style
     /// encoder is loaded) — `false` for text-only models AND when the server
-    /// was launched with `--no-vision`. The Telegram bridge reads this to
-    /// decide whether to forward an incoming photo or refuse it.
+    /// was launched with `--no-vision`.
     var supportsVision: Bool = false
     /// True when the model advertises `video` in `input_modalities` (Qwen3-VL-
     /// family checkpoints that declare `video_token_id` alongside vision).

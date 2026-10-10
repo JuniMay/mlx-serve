@@ -31,7 +31,7 @@ final class UpdateChecker: ObservableObject {
     /// The embedded llama.cpp release the bundle ships (the GGUF engine). KEEP
     /// IN SYNC with `LLAMA_TAG` in `scripts/fetch-llama.sh` — that script is the
     /// source of truth for the version staged into `Frameworks/libllama.dylib`;
-    /// this mirror only surfaces it in Settings ▸ Updates. Documented duplication.
+    /// this mirror only surfaces it in Settings ▸ About. Documented duplication.
     nonisolated static let bundledLlamaTag = "b10034"
     nonisolated static let autoCheckInterval: TimeInterval = 24 * 3600
     nonisolated static let lastCheckKey = "lastUpdateCheckAt"
@@ -199,6 +199,7 @@ final class UpdateChecker: ObservableObject {
     /// Each tick re-applies the persisted daily throttle, so the network is
     /// hit at most once per `autoCheckInterval` regardless of app relaunches.
     func startAutoCheck() {
+        guard BuildFeatures.current.selfUpdate else { return }
         // Never under the xctest host — unit tests must not touch the network.
         guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return }
         maybeAutoCheck()
@@ -222,9 +223,7 @@ final class UpdateChecker: ObservableObject {
     /// surface them plus an explicit "up to date".
     @discardableResult
     func check(userInitiated: Bool = false) async -> AppUpdate? {
-        // The Mac App Store updates the app itself; a self-updater that
-        // downloads and swaps the bundle is forbidden (App Review 2.5.2). No
-        // network check, no install path.
+        // Keep the network path inactive while self-update is suspended.
         guard BuildFeatures.current.selfUpdate else { return nil }
         switch phase {
         case .checking, .downloading, .installing: return available
@@ -255,6 +254,7 @@ final class UpdateChecker: ObservableObject {
     /// bundle, and relaunch. Any failure lands in `.failed`; the
     /// not-replaceable case (dev build) opens the DMG in Finder instead.
     func downloadAndInstall() async {
+        guard BuildFeatures.current.selfUpdate else { return }
         guard let update = available else { return }
         switch phase {
         case .downloading, .installing: return

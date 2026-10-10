@@ -86,7 +86,7 @@ final class AgentSessionThreadTests: XCTestCase {
         XCTAssertNil(route(chef, [taskRun], active: nil))
     }
 
-    func testATelegramBridgeSessionIsNeverAdopted() {
+    func testAnExternalBridgeSessionIsNeverAdopted() {
         let chef = UUID()
         let bridge = session(agent: chef, updated: 300, bridge: true)
         XCTAssertNil(route(chef, [bridge], active: nil))

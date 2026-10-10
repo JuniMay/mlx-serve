@@ -14,27 +14,15 @@ import Foundation
 /// …) are honored *only* when a greeting precedes them; a bare, greeting-less
 /// match requires the exact name.
 enum WakeWord {
-    static let defaultPhrase = "hey loki"
+    static let defaultPhrase = ""
 
-    /// Normalize a user-typed phrase from Settings ("  Hey,  JARVIS! " →
-    /// "hey jarvis"). Returns nil when no word survives — callers fall back
-    /// to `defaultPhrase` so a blank field can never produce a gate that
-    /// matches nothing.
+    /// Normalize a user-chosen phrase. Blank input does not supply a wake word.
     static func normalizePhrase(_ raw: String) -> String? {
         let toks = tokenize(raw).map(\.norm)
         return toks.isEmpty ? nil : toks.joined(separator: " ")
     }
 
-    /// The phrase hands-free mode should listen for right now.
-    ///
-    /// An agent's own phrase wins over the Settings one: voice launched from a
-    /// chat adopts that chat's agent — persona, voice, tools — and the phrase
-    /// has to come along, or an agent that introduces itself by name still only
-    /// answers to "hey loki" and the "Say “…”" hint tells the user to say the
-    /// wrong thing. Both sides go through `normalizePhrase`, so a half-saved or
-    /// whitespace-only agent field defers to the global setting instead of
-    /// producing a gate that never matches, and an empty global still yields
-    /// `defaultPhrase` rather than "" (which `strip` would match on everything).
+    /// The agent phrase takes precedence over the global phrase when present.
     static func activePhrase(agentPhrase: String?, global: String) -> String {
         agentPhrase.flatMap(normalizePhrase)
             ?? normalizePhrase(global)

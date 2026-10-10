@@ -10,7 +10,7 @@ layout. Keep the server stopped and leave saved setting values unchanged.
 2. Select Memory and scroll to the top.
 3. Select General.
 4. Verify that the sidebar search field and General row remain below the toolbar.
-5. Verify that General's heading and Start server row are fully visible.
+5. Verify that General's toolbar title and Start server row are fully visible.
 6. Verify that the reset caption and button remain inside the window's bottom edge,
    with comfortable bottom spacing and the button aligned to the form's right inset.
 7. Select About MLX-Serve, Memory, and General in that order. Repeat checks 4–6.
@@ -34,7 +34,7 @@ appearance when those configurations are available.
 4. Open its information button and verify that the explanation is readable.
 5. Dismiss the help and search for `resets`. Only the global reset footer should
    remain; unrelated section headings and All parameters must be absent.
-6. Search for `General`. Its heading and six rows should appear without unrelated
+6. Search for `General`. Its category heading and matching rows should appear without unrelated
    headings, generation controls, or the reset footer.
 7. Search for `temperature`. Verify that matching rows remain reachable and that
    no All parameters control can change parameters hidden by the search.
@@ -50,16 +50,36 @@ appearance when those configurations are available.
 1. Select General. Verify that each information button sits beside its option
    name, on the first text baseline, rather than after the option's control.
 2. Compare switches in rows with and without information buttons. Their trailing
-   edges must align, including Quick Launcher and the startup options.
+   edges must align, including the startup options.
 3. Open an information button. Verify that its complete explanation is readable
    and that closing the popover does not change the option value.
 4. Repeat the alignment check in Memory and LAN Sharing with sliders and switches.
-   In Memory, compare the memory-reserve and KV-quantization menu buttons: their
+   Compare memory-reserve in Memory and KV quantization in Cache: their
    visible right edges must align despite differently sized selected labels.
-   Check the same menu alignment in General, Server, Engines, Interface and
-   Messaging. Voice menus in the leading custom groups should stay left aligned.
-   In Interface, verify that Appearance and Chat Column show every segment in
-   full and keep their right edges clear of the card's rounded corner.
+   Check the same menu alignment in General, Server, Engines and Appearance. Voice menus in the leading custom groups should stay left aligned.
+   In Appearance, verify that Color Mode shows every segment in full and keeps
+   its right edge clear of the card's rounded corner.
 5. Narrow the window until a long option name wraps. Verify that its information
    button remains beside the first line, the caption stays below the name, and
    the control remains reachable without overlapping either.
+
+## Settings hierarchy and saved preferences
+
+1. Verify that selected categories display their title only in the toolbar.
+   Search results must include category headings when showing multiple sections.
+2. Open Tools & MCP. Check that the switches lead their labels, including the
+   global Tools and MCP switches. Workspace tool choices and memory/task features
+   must have distinct groups; no row should float in the middle of a section.
+3. Open Providers. Add an unsaved provider. Verify that each editor row has two
+   columns: the option name and its editor. Placeholder text must appear inside
+   the editor, not as a third column. Repeat at minimum window width. Do not save
+   the blank entry or change existing credentials or provider configuration.
+4. Open Server. Context size must show Auto as an explicit menu choice, retain
+   a custom saved value, and display the active server limit separately.
+5. Verify that Cache owns KV and prefix-cache controls, and Performance groups
+   Neural Engine settings under hardware acceleration.
+6. Open Generation Defaults. Verify that saved per-model thinking preferences can be
+   read and that reset controls are clearly associated with their model. Use
+   unit tests or an isolated fixture profile to change them.
+7. Open About. Bundled engines and dependencies must remain readable and links
+   must identify their destination. There must be no active update controls.

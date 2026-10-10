@@ -34,10 +34,8 @@ final class VoiceAgentWakePhraseTests: XCTestCase {
                        "hey chef")
     }
 
-    func testAnEmptyGlobalStillYieldsAUsablePhrase() {
-        // Never return "" — `strip` would match everything and every stray
-        // noise would count as a wake.
-        XCTAssertEqual(WakeWord.activePhrase(agentPhrase: nil, global: ""), WakeWord.defaultPhrase)
+    func testAnEmptyGlobalLeavesWakePhraseUnset() {
+        XCTAssertEqual(WakeWord.activePhrase(agentPhrase: nil, global: ""), "")
     }
 
     func testTheResolvedPhraseActuallyStripsThatAgentsWake() {

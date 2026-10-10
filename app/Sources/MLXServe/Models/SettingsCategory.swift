@@ -1,126 +1,72 @@
 import Foundation
 
-/// One section of the Settings screen — and one row of its sidebar.
-///
-/// The category is the SINGLE source of truth for a section's identity: the
-/// sidebar row and the section header both read `title`/`sidebarLabel` from
-/// here, so they can't drift, and a section declared without a category would
-/// have no sidebar entry at all (pinned by `testEverySettingsSectionDeclaresACategory`).
-///
-/// Case order IS render order — the sidebar lists them top to bottom exactly as
-/// the form lays them out.
+/// Sidebar destinations in the same order as the Settings form.
 enum SettingsCategory: String, CaseIterable, Identifiable, Hashable {
     case general
     case modelFolders
     case server
     case lanSharing
     case providers
-    case specDecode
-    /// Every engine memory knob; the MLX-only rows inside it hide on GGUF/DSV4.
     case memory
-    /// The universal knobs AND the MLX-only ones, in one section: two adjacent
-    /// cards both called "Performance" was a distinction only the maintainers
-    /// cared about. The MLX-only rows inside it still hide when a GGUF/DSV4
-    /// model is serving (they'd silently no-op), so the section always has
-    /// something in it while never offering a knob that does nothing.
+    case cache
     case performance
-    /// The Neural Engine offloads: LM prefill plus the three media DiT seams.
-    /// Always listed — the media rows apply to generation models, which are
-    /// not the text `engine` the other gates key on.
-    case neuralEngine
-    /// Every embedded engine's launch flags: mlx-serve-gguf, llama.cpp, ds4.
+    case specDecode
     case engines
     case requestDefaults
-    case interface
+    case appearance
     case voice
     case tools
     case sandbox
-    case messaging
-    case updates
-    /// Links out to the project. Deliberately its own category rather than
-    /// rows inside Updates: that section is `selfUpdate`-gated, so on a Mac
-    /// App Store build these would never render.
     case about
 
     var id: String { rawValue }
 
-    /// The section header, verbatim. Long and explicit on purpose — it names the
-    /// engine a knob applies to.
     var title: String {
         switch self {
-        case .general:           return "General"
-        case .modelFolders:      return "Model Folders"
-        case .server:            return "Server"
-        case .lanSharing:        return "LAN Sharing"
-        case .providers:         return "Providers"
-        case .memory:            return "Memory"
-        case .performance:       return "Performance"
-        case .neuralEngine:      return "Neural Engine"
-        case .specDecode:        return "Speculative Decoding (MLX only)"
-        case .engines:           return "Engines"
-        case .requestDefaults:   return "Generation Defaults"
-        case .interface:         return "Interface"
-        case .voice:             return "Voice"
-        case .tools:             return "Tools & MCP"
-        case .sandbox:           return "Agent Sandbox"
-        case .messaging:         return "Messaging — Telegram bot"
-        case .updates:           return "Updates"
-        case .about:             return "About MLX-Serve"
+        case .general: return "General"
+        case .modelFolders: return "Model Folders"
+        case .server: return "Server"
+        case .lanSharing: return "LAN Sharing"
+        case .providers: return "Providers"
+        case .memory: return "Memory"
+        case .cache: return "Cache"
+        case .performance: return "Performance"
+        case .specDecode: return "Speculative Decoding"
+        case .engines: return "Engines"
+        case .requestDefaults: return "Generation Defaults"
+        case .appearance: return "Appearance"
+        case .voice: return "Voice"
+        case .tools: return "Tools & MCP"
+        case .sandbox: return "Agent Sandbox"
+        case .about: return "About MLX-Serve"
         }
     }
 
-    /// The sidebar row. Short enough for the column — the header keeps the long
-    /// form (the sidebar is already grouped by engine context).
-    var sidebarLabel: String {
-        switch self {
-        case .specDecode:        return "Speculative Decoding"
-        case .messaging:         return "Messaging"
-        default:                 return title
-        }
-    }
+    var sidebarLabel: String { title }
 
-    /// SF Symbol for the sidebar row (free with the OS — no assets).
     var icon: String {
         switch self {
-        case .general:           return "gearshape"
-        case .modelFolders:      return "folder"
-        case .server:            return "server.rack"
-        case .lanSharing:        return "antenna.radiowaves.left.and.right"
-        case .providers:         return "cloud"
-        case .memory:            return "memorychip"
-        case .performance:       return "speedometer"
-        case .neuralEngine:      return "cpu"
-        case .specDecode:        return "hare"
-        case .engines:           return "engine.combustion"
-        case .requestDefaults:   return "slider.horizontal.3"
-        case .interface:         return "paintbrush"
-        case .voice:             return "waveform"
-        case .tools:             return "wrench.and.screwdriver"
-        case .sandbox:           return "shield.lefthalf.filled"
-        case .messaging:         return "paperplane"
-        case .updates:           return "arrow.down.circle"
-        case .about:             return "star"
+        case .general: return "gearshape"
+        case .modelFolders: return "folder"
+        case .server: return "server.rack"
+        case .lanSharing: return "antenna.radiowaves.left.and.right"
+        case .providers: return "cloud"
+        case .memory: return "memorychip"
+        case .cache: return "internaldrive"
+        case .performance: return "speedometer"
+        case .specDecode: return "hare"
+        case .engines: return "engine.combustion"
+        case .requestDefaults: return "slider.horizontal.3"
+        case .appearance: return "paintbrush"
+        case .voice: return "waveform"
+        case .tools: return "wrench.and.screwdriver"
+        case .sandbox: return "shield.lefthalf.filled"
+        case .about: return "info.circle"
         }
     }
 
-    /// Categories the form actually renders right now, in render order.
-    ///
-    /// Engine-specific sections hide themselves when they don't apply (flipping
-    /// `--kv-quant` on a GGUF model silently no-ops, so we'd rather not show the
-    /// picker than mislead) — the sidebar mirrors that, or it would offer rows
-    /// that lead nowhere. `engine == nil` (no model loaded) shows everything so
-    /// the user can pre-tune, exactly like `EngineAwareSections`.
-    static func visible(engine: ServerEngine?, selfUpdate: Bool) -> [SettingsCategory] {
-        allCases.filter { category in
-            switch category {
-            case .specDecode:      return engine?.isMlxPath ?? true
-            case .updates:         return selfUpdate
-            // `.performance` is always listed: its universal rows apply to every
-            // engine. Only the MLX-only rows INSIDE it come and go.
-            default:               return true
-            }
-        }
-    }
+    /// Categories remain stable; their rows describe the engines they configure.
+    static func visible(engine: ServerEngine?, selfUpdate: Bool) -> [SettingsCategory] { allCases }
 }
 
 /// One category while browsing, or all categories while searching.
@@ -156,9 +102,7 @@ enum SettingsSelection: Hashable {
         reconciled(requested.map(SettingsSelection.category) ?? current, visible: visible)
     }
 
-    /// Drop a selection whose category is no longer on offer — e.g. "MLX
-    /// Performance" is selected and the user loads a GGUF model. Leaving it
-    /// selected would show a section that no longer renders: a blank pane.
+    /// Restore a visible destination when a requested category is unavailable.
     static func reconciled(_ selection: SettingsSelection, visible: [SettingsCategory]) -> SettingsSelection {
         switch selection {
         case .all:

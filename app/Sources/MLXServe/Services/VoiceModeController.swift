@@ -270,8 +270,7 @@ final class VoiceModeController: ObservableObject {
 
         // Wake phrase, applied live: the ACTIVE agent's own phrase when it has
         // one, else Settings ▸ Voice. Both are normalized ("Hey, Jarvis!" →
-        // "hey jarvis"), and a blank field falls back rather than producing a
-        // never-matching gate (`WakeWord.activePhrase`).
+        // "hey jarvis"). A blank field leaves the global phrase unset.
         //
         // It tracks `defaultAgentId` because that is what every route to "who is
         // answering" already sets — the tray's pick, a spoken handover
@@ -382,6 +381,11 @@ final class VoiceModeController: ObservableObject {
     /// Authorize, open the mic and enter the listening state. Returns false if
     /// permission was denied or the mic couldn't start.
     func begin() async -> Bool {
+        if requireWakeWord, WakeWord.normalizePhrase(wakePhrase) == nil,
+           !(agentPhrases?() ?? []).contains(where: { WakeWord.normalizePhrase($0.phrase) != nil }) {
+            send(.failed("Choose a wake phrase in Settings → Voice, or turn off Require Wake Phrase."))
+            return false
+        }
         // Non-invasive pre-flight: check the three prerequisites (mic + speech
         // permission, on-device dictation model) and, if one is missing, surface
         // a precise notice in the panel instead of opening a dead mic. No modal.
@@ -760,7 +764,9 @@ final class VoiceModeController: ObservableObject {
     /// the wake word is off.
     var listeningPrompt: String {
         if awaitingWakeQuery { return "Go ahead…" }
-        if requireWakeWord { return "Say “\(wakePhraseDisplay)”…" }
+        if requireWakeWord {
+            return wakePhrase.isEmpty ? "Say an agent’s wake phrase…" : "Say “\(wakePhraseDisplay)”…"
+        }
         return "Listening…"
     }
 

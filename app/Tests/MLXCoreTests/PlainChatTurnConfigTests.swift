@@ -41,6 +41,33 @@ final class PlainChatTurnConfigTests: XCTestCase {
         XCTAssertTrue(original.revokingAllTools(false).mcpMode)
     }
 
+    func testRevokingMCPKeepsBuiltInToolsAndAttachedDocuments() {
+        let documentIndex = index()
+        let original = ChatTurnEngine.TurnConfig.from(
+            ResolvedAgentSettings(tools: [.shell, .searchDocuments], toolsEnabled: true, mcpEnabled: true),
+            documentIndex: documentIndex)
+        let revoked = original.revokingMCP(true)
+        XCTAssertFalse(revoked.mcpMode)
+        XCTAssertTrue(revoked.agentMode)
+        XCTAssertEqual(revoked.dispatchTools, original.dispatchTools)
+        XCTAssertTrue(revoked.documentIndex === documentIndex)
+        XCTAssertTrue(original.revokingMCP(false).mcpMode)
+    }
+
+    func testMCPRevocationIsScopedAndEndsWithTheTurn() {
+        var ledger = TurnLedger()
+        let first = UUID(), other = UUID()
+        let token = ledger.begin(session: first)
+        _ = ledger.begin(session: other)
+        ledger.revokeMCP(session: first)
+        XCTAssertTrue(ledger.mcpRevoked(session: first))
+        XCTAssertFalse(ledger.toolsRevoked(session: first))
+        XCTAssertFalse(ledger.mcpRevoked(session: other))
+        ledger.end(session: first, token: token)
+        _ = ledger.begin(session: first)
+        XCTAssertFalse(ledger.mcpRevoked(session: first))
+    }
+
     func testAllToolRevocationIsScopedAndEndsWithTheTurn() {
         var ledger = TurnLedger()
         let first = UUID(), other = UUID()

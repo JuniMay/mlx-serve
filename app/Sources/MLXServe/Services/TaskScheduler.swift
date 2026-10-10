@@ -332,11 +332,8 @@ final class TaskScheduler: ObservableObject {
 
     private func drain() {
         guard !running, !queue.isEmpty else { return }
-        // Interactive turns win the single generation slot — wait for them to go
-        // idle. That's the in-app chat engine AND the Telegram bridge's engine
-        // (e.g. a createTask spawned from a Telegram turn must not run a second
-        // engine against the model while that turn is still generating).
-        if appState.chatEngine.isGenerating || appState.telegramBridge.isProcessing {
+        // Interactive turns finish before scheduled work takes the generation slot.
+        if appState.chatEngine.isGenerating {
             Task { [weak self] in
                 try? await Task.sleep(nanoseconds: 500_000_000)
                 self?.drain()
@@ -590,10 +587,7 @@ final class TaskScheduler: ObservableObject {
         return nil
     }
 
-    /// Latest non-empty assistant message, in FULL — the task's actual result.
-    /// Used where the whole answer matters (e.g. relaying to Telegram, which
-    /// chunks long replies itself). The `prefix(280)` cap in `lastAssistantText`
-    /// is purely for the one-line timeline row, so never reuse it here.
+    /// The full task result. The timeline uses a shortened copy.
     nonisolated static func fullLastAssistantText(_ messages: [ChatMessage]) -> String? {
         for msg in messages.reversed() where msg.role == .assistant {
             let trimmed = msg.content.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -698,15 +692,7 @@ final class TaskScheduler: ObservableObject {
             case .failed: TaskNotifier.shared.notifyFailed(task: task, run: run)
             default: break
             }
-            // Bridge-created tasks also report back to the Telegram chat that made
-            // them — in ADDITION to the desktop notification above.
-            if let chatId = task.originTelegramChatId,
-               run.status == .completed || run.status == .failed {
-                appState.telegramBridge.deliverTaskResult(chatId: chatId, task: task, run: run)
-            }
-            // One-shot ("run now") tasks created by the agent clean themselves up so
-            // they don't pile up as disabled entries in the Tasks list — the result
-            // already went to Telegram + the desktop notification above.
+            // Remove completed one-shot entries after delivering the notification.
             if task.deleteAfterRun { deleteTask(taskId) }
         }
     }

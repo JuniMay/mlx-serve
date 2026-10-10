@@ -17,10 +17,43 @@ import XCTest
 /// resets another's setting.
 final class SettingsSectionResetTests: XCTestCase {
 
+    func testCacheResetOwnsAllCacheFieldsAndPreservesResidencyAndAcceleration() throws {
+        let cache = try XCTUnwrap(SettingsCategory(rawValue: "cache"))
+        XCTAssertEqual(Set(SettingsReset.fields(for: cache).map(\.name)),
+                       ["kvQuant", "hotPrefixCacheEnabled", "prefixCacheEntries", "prefixCacheMem",
+                        "enablePrefixCacheDisk", "prefixCacheDisk", "tokenizeCacheEntries",
+                        "llamaKvQuant", "llamaCacheEntries"])
+        var before = mutated()
+        before.maxResidentModels = 5
+        before.aneImage = true
+        let after = SettingsReset.apply(cache, to: before)
+        let defaults = ServerOptions()
+        XCTAssertEqual(after.kvQuant, defaults.kvQuant)
+        XCTAssertEqual(after.prefixCacheMem, defaults.prefixCacheMem)
+        XCTAssertEqual(after.llamaKvQuant, defaults.llamaKvQuant)
+        XCTAssertEqual(after.maxResidentModels, 5)
+        XCTAssertTrue(after.aneImage)
+    }
+
+    func testSpeculationOwnsPredictionSettingsAndPerformanceOwnsHardwareAcceleration() {
+        let speculation = Set(SettingsReset.fields(for: .specDecode).map(\.name))
+        XCTAssertTrue(speculation.contains("llamaMtpDrafts"))
+        XCTAssertFalse(SettingsReset.fields(for: .engines).map(\.name).contains("llamaMtpDrafts"))
+        let performance = Set(SettingsReset.fields(for: .performance).map(\.name))
+        for field in ["anePrefill", "aneImage", "aneVideo", "aneAudio"] {
+            XCTAssertTrue(performance.contains(field), field)
+        }
+    }
+
+    func testGlobalResetPreservesDormantTelegramConfiguration() {
+        let before = mutated()
+        XCTAssertEqual(SettingsReset.applyAll(to: before).telegram, before.telegram)
+    }
+
     /// Every stored property of `ServerOptions`, by reflection — so a field
     /// added next year is covered without anyone remembering to update a list.
     private var allFieldNames: Set<String> {
-        Set(Mirror(reflecting: ServerOptions()).children.compactMap { $0.label })
+        Set(Mirror(reflecting: ServerOptions()).children.compactMap { $0.label }).subtracting(["telegram"])
     }
 
     private func value(_ options: ServerOptions, _ field: String) -> String {
@@ -90,8 +123,6 @@ final class SettingsSectionResetTests: XCTestCase {
         for category in SettingsCategory.allCases {
             let reset = SettingsReset.apply(category, to: mutated())
             for field in SettingsReset.fields(for: category) {
-                // The Telegram token is deliberately preserved — see below.
-                if field.name == "telegram" { continue }
                 XCTAssertEqual(value(reset, field.name), value(defaults, field.name),
                                "\(category).\(field.name) was claimed but not reset")
             }
@@ -115,32 +146,28 @@ final class SettingsSectionResetTests: XCTestCase {
         XCTAssertEqual(after.telegram.botToken, "123:secret")
     }
 
-    /// Resetting Messaging still keeps the bot token — @BotFather is the only
-    /// place it can come from, exactly as the global reset has always done.
-    func testResettingMessagingKeepsTheBotToken() {
-        let after = SettingsReset.apply(.messaging, to: mutated())
-        XCTAssertEqual(after.telegram.botToken, "123:secret", "the token is not re-derivable")
-        XCTAssertFalse(after.telegram.enabled, "everything else in the section resets")
-        XCTAssertEqual(after.telegram.allowedChatIds, [])
+    func testActiveSectionResetsPreserveDormantTelegramConfiguration() {
+        let before = mutated()
+        for category in SettingsCategory.allCases {
+            XCTAssertEqual(SettingsReset.apply(category, to: before).telegram, before.telegram)
+        }
     }
 
-    // MARK: - Global reset is unchanged
-
-    /// "All Settings" keeps doing exactly what the button always did.
-    func testGlobalResetStillMatchesTheOldBehavior() {
+    func testGlobalResetRestoresActiveOptionsAndKeepsDormantData() {
         let current = mutated()
-        XCTAssertEqual(SettingsReset.applyAll(to: current),
-                       ServerOptions.resetToDefaults(preserving: current))
+        var expected = ServerOptions.resetToDefaults(preserving: current)
+        expected.telegram = current.telegram
+        XCTAssertEqual(SettingsReset.applyAll(to: current), expected)
     }
 
     // MARK: - Sections with nothing to reset
 
     /// Model Folders' custom path lives on `DownloadManager`, not `ServerOptions`,
-    /// and Updates has no settings at all — offering a dead "Reset" button on
+    /// and About has no settings at all — offering a dead "Reset" button on
     /// those panes would be a lie.
     func testSectionsWithNoFieldsAreNotResettable() {
         XCTAssertFalse(SettingsReset.isResettable(.modelFolders))
-        XCTAssertFalse(SettingsReset.isResettable(.updates))
+        XCTAssertFalse(SettingsReset.isResettable(.about))
         XCTAssertTrue(SettingsReset.isResettable(.server))
         XCTAssertTrue(SettingsReset.isResettable(.voice))
     }

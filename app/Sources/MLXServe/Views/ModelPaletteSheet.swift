@@ -231,17 +231,7 @@ struct ModelPaletteSheet: View {
     private func apply(_ tag: String) {
         guard let row = rows.first(where: { $0.tag == tag }) else { return }
         close()
-        switch row.interaction {
-        case .chat:
-            appState.applyChatModelPick(tag)
-            appState.showConversation()
-        case .media(let modality):
-            guard let model = appState.localModels.first(where: { $0.path == tag }) else { return }
-            appState.selectMediaModel(modality: modality, name: model.name, path: model.path)
-        case .decision:
-            appState.decisionsModelPath = tag
-            AppActivation.openWindow(id: "decisions", using: openWindow)
-        }
+        appState.selectInteractionModel(row, using: openWindow)
     }
 
     private func close() { appState.modelPalettePresented = false }

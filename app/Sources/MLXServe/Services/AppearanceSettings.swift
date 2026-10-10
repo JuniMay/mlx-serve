@@ -86,17 +86,6 @@ enum AppAppearanceMode: String, CaseIterable, Identifiable {
         case .dark: return .dark
         }
     }
-    /// The AppKit twin, for windows whose chrome SwiftUI does not own (the
-    /// Quick Launcher's NSPanel + its NSVisualEffectView material — forced-dark
-    /// content over a system-light vibrancy reads as a broken half-theme).
-    var nsAppearance: NSAppearance? {
-        switch self {
-        case .system: return nil
-        case .light: return NSAppearance(named: .aqua)
-        case .dark: return NSAppearance(named: .darkAqua)
-        }
-    }
-
     static var current: AppAppearanceMode {
         AppAppearanceMode(rawValue: UserDefaults.standard.string(forKey: InterfacePrefKey.appearanceMode) ?? "") ?? .system
     }

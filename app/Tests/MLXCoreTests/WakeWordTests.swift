@@ -8,45 +8,45 @@ import XCTest
 final class WakeWordTests: XCTestCase {
 
     func testExactPhraseReturnsRemainder() {
-        XCTAssertEqual(WakeWord.strip("Hey Loki, what's the weather?"), "what's the weather?")
+        XCTAssertEqual(WakeWord.strip("Hey Loki, what's the weather?", phrase: "hey loki"), "what's the weather?")
     }
 
     func testCaseAndPunctuationInsensitive() {
-        XCTAssertEqual(WakeWord.strip("hey   loki ... tell me a joke"), "tell me a joke")
-        XCTAssertEqual(WakeWord.strip("HEY LOKI! status report"), "status report")
+        XCTAssertEqual(WakeWord.strip("hey   loki ... tell me a joke", phrase: "hey loki"), "tell me a joke")
+        XCTAssertEqual(WakeWord.strip("HEY LOKI! status report", phrase: "hey loki"), "status report")
     }
 
     func testRemainderPreservesOriginalCasingAndPunctuation() {
         // The query keeps its real text (apostrophes, capitals), not a normalized form.
-        XCTAssertEqual(WakeWord.strip("Hey Loki, What's the ETA?"), "What's the ETA?")
+        XCTAssertEqual(WakeWord.strip("Hey Loki, What's the ETA?", phrase: "hey loki"), "What's the ETA?")
     }
 
     func testBareWakePhraseReturnsEmptyString() {
-        XCTAssertEqual(WakeWord.strip("Hey Loki"), "")
-        XCTAssertEqual(WakeWord.strip("hey loki."), "")
+        XCTAssertEqual(WakeWord.strip("Hey Loki", phrase: "hey loki"), "")
+        XCTAssertEqual(WakeWord.strip("hey loki.", phrase: "hey loki"), "")
     }
 
     func testGreetingVariantsOpenTheAssistant() {
-        XCTAssertEqual(WakeWord.strip("Okay Loki, go ahead"), "go ahead")
-        XCTAssertEqual(WakeWord.strip("Hi Loki do the thing"), "do the thing")
+        XCTAssertEqual(WakeWord.strip("Okay Loki, go ahead", phrase: "hey loki"), "go ahead")
+        XCTAssertEqual(WakeWord.strip("Hi Loki do the thing", phrase: "hey loki"), "do the thing")
     }
 
     func testBareNameWithoutGreetingMatchesExactName() {
-        XCTAssertEqual(WakeWord.strip("Loki, what's up?"), "what's up?")
+        XCTAssertEqual(WakeWord.strip("Loki, what's up?", phrase: "hey loki"), "what's up?")
     }
 
     func testHomophoneMatchesOnlyWithGreeting() {
         // "low key" is a plausible mis-hearing of "Loki" — accepted after a greeting…
-        XCTAssertEqual(WakeWord.strip("Hey low key, set a timer"), "set a timer")
+        XCTAssertEqual(WakeWord.strip("Hey low key, set a timer", phrase: "hey loki"), "set a timer")
         // …but NOT on its own, so everyday "lowkey I agree" doesn't wake it.
-        XCTAssertNil(WakeWord.strip("lowkey I agree with that"))
-        XCTAssertNil(WakeWord.strip("low key this is great"))
+        XCTAssertNil(WakeWord.strip("lowkey I agree with that", phrase: "hey loki"))
+        XCTAssertNil(WakeWord.strip("low key this is great", phrase: "hey loki"))
     }
 
     func testNoWakeWordReturnsNil() {
-        XCTAssertNil(WakeWord.strip("what's the weather today"))
-        XCTAssertNil(WakeWord.strip(""))
-        XCTAssertNil(WakeWord.strip("   "))
+        XCTAssertNil(WakeWord.strip("what's the weather today", phrase: "hey loki"))
+        XCTAssertNil(WakeWord.strip("", phrase: "hey loki"))
+        XCTAssertNil(WakeWord.strip("   ", phrase: "hey loki"))
     }
 
     // MARK: - Custom phrases (Settings ▸ Voice ▸ Wake phrase)
@@ -63,7 +63,7 @@ final class WakeWordTests: XCTestCase {
     /// The Settings field stores whatever the user typed; consumers normalize.
     func testNormalizePhraseToleratesUserFormatting() {
         XCTAssertEqual(WakeWord.normalizePhrase("  Hey,  JARVIS! "), "hey jarvis")
-        XCTAssertEqual(WakeWord.normalizePhrase("Hey Loki"), WakeWord.defaultPhrase)
+        XCTAssertEqual(WakeWord.normalizePhrase("Hey Loki"), "hey loki")
         // Empty / punctuation-only input can't be a phrase → nil, so callers
         // fall back to the default instead of a never-matching gate.
         XCTAssertNil(WakeWord.normalizePhrase(""))
@@ -79,8 +79,8 @@ final class WakeWordTests: XCTestCase {
 
     func testWakeWordMustBeAWholeWord() {
         // A token that merely starts with the name doesn't count.
-        XCTAssertNil(WakeWord.strip("lokimon is a game"))
-        XCTAssertNil(WakeWord.strip("hey lokira what's up"))
+        XCTAssertNil(WakeWord.strip("lokimon is a game", phrase: "hey loki"))
+        XCTAssertNil(WakeWord.strip("hey lokira what's up", phrase: "hey loki"))
     }
 
     func testCustomPhrase() {

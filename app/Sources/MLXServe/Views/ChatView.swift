@@ -427,6 +427,37 @@ struct ChatView: View {
     /// Flipped by the gate sheet's Cancel, and by nothing else.
     @State private var gateCancelled = false
 
+    @ToolbarContentBuilder
+    private var conversationActions: some ToolbarContent {
+        if appState.chatWorkspace.isConversation, let session = appState.activeSession {
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Button { appState.pendingRename = session.id } label: {
+                        Label("Rename…", systemImage: "pencil")
+                    }
+                    Button {
+                        guard let current = appState.chatSessions.first(where: { $0.id == session.id }),
+                              let messageID = branchMessageID(for: current) else { return }
+                        appState.forkSession(current.id, from: messageID)
+                    } label: {
+                        Label("Branch Chat", systemImage: "arrow.trianglehead.branch")
+                    }
+                    .disabled(branchMessageID(for: session) == nil)
+                } label: {
+                    Label("Conversation actions", systemImage: "ellipsis")
+                }
+                .labelStyle(.iconOnly)
+                .menuIndicator(.hidden)
+                .help("Conversation actions")
+            }
+        }
+    }
+
+    private func branchMessageID(for session: ChatSession) -> UUID? {
+        ChatWindowPresentation.branchMessageID(messages: session.messages,
+            turnInFlight: appState.chatEngine.composerState(for: session.id) == .generatingHere)
+    }
+
     /// The starter recommendation this Mac gets — same function the welcome
     /// window and the Model Browser read.
     private var starterPick: RecommendedModelPick {
@@ -458,12 +489,7 @@ struct ChatView: View {
         .navigationTitle(Text(verbatim: windowTitle))
         .toolbarBackground(.visible, for: .windowToolbar)
         .toolbar {
-            ToolbarItem(placement: .automatic) {
-                Button { appState.showModelPalette() } label: {
-                    Label("Choose Model", systemImage: "square.stack.3d.up")
-                }
-                .help("Choose a model to open its workspace")
-            }
+            conversationActions
         }
         .sheet(isPresented: $appState.modelPalettePresented) {
             ModelPaletteSheet()
@@ -900,39 +926,11 @@ struct ChatSidebar: View {
 
     var body: some View {
         conversationsSidebar
-            .toolbar { conversationActions }
-    }
-
-    @ToolbarContentBuilder
-    private var conversationActions: some ToolbarContent {
-        if appState.chatWorkspace.isConversation, let session = appState.activeSession {
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Button { beginRename(session.id, current: session.title) } label: {
-                        Label("Rename…", systemImage: "pencil")
-                    }
-                    Button {
-                        guard let current = appState.chatSessions.first(where: { $0.id == session.id }),
-                              let messageId = branchMessageID(for: current) else { return }
-                        appState.forkSession(current.id, from: messageId)
-                    } label: {
-                        Label("Branch Chat", systemImage: "arrow.trianglehead.branch")
-                    }
-                    .disabled(branchMessageID(for: session) == nil)
-                } label: {
-                    Label("Conversation actions", systemImage: "ellipsis")
+            .onChange(of: appState.pendingRename) { _, id in
+                if let session = appState.chatSessions.first(where: { $0.id == id }) {
+                    renameDraft = ChatSessionTitle.isPlaceholder(session.title) ? "" : session.title
                 }
-                .labelStyle(.iconOnly)
-                .menuIndicator(.hidden)
-                .help("Conversation actions")
             }
-        }
-    }
-
-    private func branchMessageID(for session: ChatSession) -> UUID? {
-        ChatWindowPresentation.branchMessageID(
-            messages: session.messages,
-            turnInFlight: appState.chatEngine.composerState(for: session.id) == .generatingHere)
     }
 
     /// ⌘1…⌘9 jumps to the row wearing that number; ⌃⌘1…⌃⌘9 ranges to it from
@@ -1063,7 +1061,16 @@ struct ChatSidebar: View {
     private var conversationsSidebar: some View {
         List(selection: listSelection) {
             Section {
-                newSessionMenu()
+                Button {
+                    appState.showConversation()
+                    appState.newChatSession()
+                } label: {
+                    Label("New", systemImage: "square.and.pencil")
+                        .font(.app(.rowTitle))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                    .buttonStyle(.plain)
                     .padding(.vertical, 4)
                     .selectionDisabled()
             }
@@ -1089,12 +1096,24 @@ struct ChatSidebar: View {
             Section {
                 ForEach(rows.sessions) { panelRow($0, ordered: rows.chats, all: rows.all) }
             } header: {
-                Text("Sessions")
-                    .font(.system(.caption, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .textCase(nil)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .onDrop(of: [.text], delegate: groupDrop(nil))
+                HStack {
+                    Text("Sessions")
+                        .font(.system(.caption, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .textCase(nil)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .onDrop(of: [.text], delegate: groupDrop(nil))
+                    if BuildFeatures.current.cliLauncher {
+                        Menu { terminalCreationItems(group: nil) } label: {
+                            Image(systemName: "terminal")
+                        }
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                        .help("New Terminal")
+                        .accessibilityLabel("New Terminal")
+                    }
+                }
             }
             Section("Manage") {
                 destinationLabel("Models", icon: "square.stack.3d.up", badge: activeDownloadCount)
@@ -1106,6 +1125,7 @@ struct ChatSidebar: View {
             }
         }
         .listStyle(.sidebar)
+        .tint(.gray)
         .scrollEdgeEffectStyle(.soft, for: [.top, .bottom])
         .onDeleteCommand {
             if appState.chatWorkspace.isConversation {
@@ -1375,69 +1395,43 @@ struct ChatSidebar: View {
         Divider()
     }
 
-    /// The main New menu also opens model workspaces; group menus assign new sessions to their group.
-    private func newSessionMenu(group: UUID? = nil) -> some View {
+    private func newSessionMenu(group: UUID) -> some View {
         Menu {
             Button {
                 appState.showConversation()
                 appState.sidebarGroups.assign([appState.newChatSession()], to: group)
             } label: {
-                Label("New Chat", systemImage: "square.and.pencil").font(.app(.body))
-            }
-            if group == nil {
-                Button { appState.showModelPalette() } label: {
-                    Label("Choose Model…", systemImage: "square.stack.3d.up")
-                }
-                Menu("Create") {
-                    ForEach(GenExperiment.allCases) { experiment in
-                        Button { appState.showCreate(experiment) } label: {
-                            Label(L10n.text(experiment.menuTitle), systemImage: experiment.icon)
-                        }
-                    }
-                }
+                Label("New Chat", systemImage: "square.and.pencil")
             }
             if BuildFeatures.current.cliLauncher {
                 Divider()
-                CLILauncherMenuItems(
-                    detector: cliDetector,
-                    baseURL: appState.server.baseURL,
-                    servedModelId: appState.server.chatModelId ?? "mlx-serve",
-                    serverContextLength: appState.server.chatModelInfo?.contextLength,
-                    models: appState.server.allModels,
-                    openSandboxAgent: { appState.startTerminal(agentId: $0, group: group) },
-                    openHostCLI: { appState.startTerminal(hostCLI: $0, group: group) })
+                terminalCreationItems(group: group)
             }
         } label: {
-            if group == nil {
-                HStack(spacing: 8) {
-                    Image(systemName: "square.and.pencil")
-                        .foregroundStyle(.secondary)
-                    Text("New")
-                    Spacer(minLength: 0)
-                    Image(systemName: "chevron.down")
-                        .font(.app(.caption))
-                        .foregroundStyle(.secondary)
-                }
-                .font(.app(.rowTitle))
-                .frame(maxWidth: .infinity, alignment: .leading)
+            Image(systemName: "plus")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 22, height: 22)
                 .contentShape(Rectangle())
-                .accessibilityElement(children: .combine)
-            } else {
-                Image(systemName: "plus")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 22, height: 22)
-                    .contentShape(Rectangle())
-            }
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
-        .controlSize(group == nil ? .regular : .small)
+        .controlSize(.small)
         .menuIndicator(.hidden)
-        .fixedSize(horizontal: group != nil, vertical: true)
-        .accessibilityLabel(group == nil ? "New" : "New Chat")
-        .help(group == nil ? "Start a chat, choose a model, or open a creation workspace"
-              : "New chat, or a coding agent in a terminal")
+        .fixedSize()
+        .accessibilityLabel("New Chat")
+        .help("New chat, or a coding agent in a terminal")
+    }
+
+    private func terminalCreationItems(group: UUID?) -> some View {
+        CLILauncherMenuItems(
+            detector: cliDetector,
+            baseURL: appState.server.baseURL,
+            servedModelId: appState.server.chatModelId ?? "mlx-serve",
+            serverContextLength: appState.server.chatModelInfo?.contextLength,
+            models: appState.server.allModels,
+            openSandboxAgent: { appState.startTerminal(agentId: $0, group: group) },
+            openHostCLI: { appState.startTerminal(hostCLI: $0, group: group) })
     }
 
     /// One conversation row, shared by both sections. `ordered` is the panel's
@@ -1452,7 +1446,7 @@ struct ChatSidebar: View {
                         Image(systemName: "paperplane.fill")
                             .font(.app(.caption2))
                             .foregroundStyle(.secondary)
-                            .help("Telegram conversation (view only)")
+                            .help("Archived Telegram conversation")
                     }
                     if let agent {
                         Image(systemName: agent.symbol)
@@ -1760,9 +1754,6 @@ struct ChatDetailView: View {
     // leaving the transcript in two fonts at once. The values feed the `.id`
     // on the row stack, which is what forces the rebuild.
     @AppStorage(InterfacePrefKey.textSize) private var interfaceTextSize = ChatTextSize.medium.rawValue
-    @AppStorage(InterfacePrefKey.compactMode) private var interfaceCompact = false
-    /// Read only to rebuild the transcript when it changes.
-    @AppStorage(InterfacePrefKey.chatColumn) private var interfaceChatColumn = ChatColumnWidth.wide.rawValue
     @State private var inputText = ""
     /// Where ↑/↓ have walked back to in this chat's own history. Per-tab state
     /// like everything else here — `ChatDetailView` is REUSED across tabs, so a
@@ -1775,6 +1766,7 @@ struct ChatDetailView: View {
     @State private var enableThinking = false
     @State private var reasoningEffort = ReasoningEffort.low
     @State private var showAttachmentPicker = false
+    @State private var showChatMode = false
     @State private var executingPlanMessageId: UUID?
     // Follow-the-newest-line. The decision core is pure (`ChatScrollState`,
     // pinned by ChatScrollTests); the model holds it in a class so per-frame
@@ -1882,34 +1874,24 @@ struct ChatDetailView: View {
         chatEngine.composerState(for: sessionId)
     }
 
-    /// Pull the toolbar toggles from the visible session into local @State.
-    /// Called on appear and on every `sessionId` change — the view is reused
-    /// across tabs, so without this the toggles would show the previous tab's
-    /// values. Telegram sessions read the shared config instead (see
-    /// `toolbarToggles`), so they don't sync here.
-    private func syncTogglesFromSession() {
-        guard !isExternalBridgeSession else { return }
-        enableThinking = session?.enableThinking ?? false
-        reasoningEffort = session?.reasoningEffort ?? .low
+    private var thinkingModelID: String {
+        appState.thinkingModelID
     }
 
-    /// True when the visible session mirrors a Telegram conversation. The
-    /// think/agent/MCP toolbar toggles then read & write the shared
-    /// `serverOptions.telegram` config (kept in sync with Settings, read live by
-    /// the bridge) instead of the in-app per-session / app-level state.
+    private func syncTogglesFromSession() {
+        guard let session else { return }
+        let preference = appState.thinkingPreference(for: session)
+        enableThinking = preference.enabled
+        reasoningEffort = preference.effort
+    }
+
     private var isExternalBridgeSession: Bool { session?.isExternalBridge == true }
 
-    /// Resolved on/off state for the three mode toggles in the toolbar — sourced
-    /// from `serverOptions.telegram` for a Telegram session, else the in-app
-    /// state, and overridden by the tab's agent for whatever it decides.
     private var toolbarToggles: ChatModeToggles {
-        let tg = appState.serverOptions.telegram
+        let resolved = resolvedChatSettings
         var toggles = ChatModeToggles.resolve(
-            isExternalBridge: isExternalBridgeSession,
-            telegramThinking: tg.enableThinking, telegramAgent: tg.agentMode, telegramMCP: tg.useMCP,
-            inAppThinking: enableThinking, inAppAgent: resolvedChatSettings.toolsEnabled,
-            inAppMCP: resolvedChatSettings.mcpEnabled,
-            agentLock: agentModeLock,
+            inAppThinking: enableThinking, inAppAgent: resolved.toolsEnabled,
+            inAppMCP: resolved.mcpEnabled, agentLock: agentModeLock,
             apple: appState.useAppleModel)
         if session?.isPlainChat == true {
             toggles.agent = false
@@ -2045,12 +2027,26 @@ struct ChatDetailView: View {
 
     private var thinkingBinding: Binding<Bool> {
         Binding(get: { toolbarToggles.thinking }, set: { value in
-            if isExternalBridgeSession {
-                appState.serverOptions.telegram.enableThinking = value
-            } else {
-                enableThinking = value
-            }
+            updateThinking(enabled: value, effort: reasoningEffort)
         })
+    }
+
+    private var reasoningEffortBinding: Binding<ReasoningEffort> {
+        Binding(get: { reasoningEffort }, set: { value in
+            updateThinking(enabled: enableThinking, effort: value)
+        })
+    }
+
+    private func updateThinking(enabled: Bool, effort: ReasoningEffort) {
+        guard !isExternalBridgeSession, toolbarToggles.thinkingLockedBy == nil,
+              !thinkingModelID.isEmpty, !appState.useAppleModel,
+              let index = appState.chatSessions.firstIndex(where: { $0.id == sessionId }) else { return }
+        enableThinking = enabled
+        reasoningEffort = effort
+        appState.chatSessions[index].enableThinking = enabled
+        appState.chatSessions[index].reasoningEffort = effort
+        appState.modelThinkingPreferences.values[thinkingModelID] =
+            ModelThinkingPreference(enabled: enabled, effort: effort)
     }
 
     private var thinkingHeader: some View {
@@ -2065,8 +2061,7 @@ struct ChatDetailView: View {
             .padding(.horizontal, 28)
             .overlay(alignment: .trailing) {
                 Button {
-                    thinkingBinding.wrappedValue = false
-                    reasoningEffort = .low
+                    updateThinking(enabled: false, effort: .low)
                 } label: {
                     Image(systemName: "arrow.counterclockwise")
                 }
@@ -2082,7 +2077,7 @@ struct ChatDetailView: View {
             if let owner = toolbarToggles.thinkingLockedBy {
                 lockedModeMenu(owner)
             } else if !isExternalBridgeSession {
-                ReasoningEffortSlider(isOn: thinkingBinding, effort: $reasoningEffort)
+                ReasoningEffortSlider(isOn: thinkingBinding, effort: reasoningEffortBinding)
             }
         }
     }
@@ -2096,22 +2091,40 @@ struct ChatDetailView: View {
     }
 
     private var chatModeMenu: some View {
-        Menu {
-            Toggle("Plain Chat", isOn: Binding(
-                get: { session?.isPlainChat == true },
-                set: setPlainChat))
-            Text("Plain Chat disables tools, MCP, and attached-folder search.")
-            Text(toolbarToggles.agent ? "Built-in tools: Available" : "Built-in tools: Off")
-            Text(toolbarToggles.mcp ? "MCP: Available" : "MCP: Off")
+        Button { showChatMode.toggle() } label: {
+            HStack(spacing: 6) {
+                Label(session?.isPlainChat == true ? "Plain Chat" : "Tools & MCP",
+                      systemImage: session?.isPlainChat == true ? "text.bubble" : "slider.horizontal.3")
+                Image(systemName: "chevron.down")
+                    .font(.app(.caption2, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .font(.app(.body))
+            .padding(.horizontal, ComposerControlMetrics.horizontalPadding)
+            .frame(minHeight: ComposerControlMetrics.height)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .composerCapsule()
+        .popover(isPresented: $showChatMode, arrowEdge: .top) {
+            chatModeControls
+        }
+        .help("Tools and MCP for this conversation")
+    }
+
+    private var chatModeControls: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            chatModeSwitch("Tools", isOn: toolModeBinding(\.toolsEnabled))
+                .disabled(session?.isPlainChat == true || agentForbidsTools)
+            chatModeSwitch("MCP", isOn: toolModeBinding(\.mcpEnabled))
+                .disabled(session?.isPlainChat == true || appState.useAppleModel
+                          || activeAgent?.capabilities.mcp == false)
+            chatModeSwitch("Plain Chat", isOn: Binding(
+                get: { session?.isPlainChat == true }, set: setPlainChat))
             Divider()
-            if session?.toolPreferences?.followsDefaults != true {
-                Text("This conversation uses its saved tool choices.")
-                Button("Use Settings Defaults") {
-                    updateToolPreferences(ChatToolPreferences(
-                        followsDefaults: true, plainChat: session?.isPlainChat ?? false))
-                }
-            } else {
-                Text("Uses Settings defaults. Agents may further define access.")
+            Button("Use Settings Defaults") {
+                updateToolPreferences(ChatToolPreferences(plainChat: session?.isPlainChat ?? false))
             }
             Button("Tools & MCP Settings…") { appState.showSettings(category: .tools) }
             if let agent = activeAgent {
@@ -2123,26 +2136,42 @@ struct ChatDetailView: View {
                     workingDirectoryBinding.wrappedValue = picked
                 }
             }
-            Text(verbatim: session?.workingDirectory ?? "")
-        } label: {
-            HStack(spacing: 6) {
-                Label(session?.isPlainChat == true ? "Plain Chat" : "Chat Mode",
-                      systemImage: session?.isPlainChat == true ? "text.bubble" : "slider.horizontal.3")
-                Image(systemName: "chevron.down")
-                    .font(.app(.caption2, weight: .medium))
+            if let directory = session?.workingDirectory, !directory.isEmpty {
+                Text(verbatim: directory)
+                    .font(.app(.caption))
                     .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
             }
-            .font(.app(.body))
-            .padding(.horizontal, ComposerControlMetrics.horizontalPadding)
-            .frame(minHeight: ComposerControlMetrics.height)
-            .contentShape(Capsule())
         }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .composerCapsule()
-        .help("Configure tool access in Settings, or use Plain Chat for this conversation.")
+        .toggleStyle(.switch)
+        .buttonStyle(.borderless)
+        .padding(16)
+        .frame(width: 280)
+    }
+
+    private func chatModeSwitch(_ title: LocalizedStringKey, isOn: Binding<Bool>) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Toggle(title, isOn: isOn)
+                .labelsHidden()
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var agentForbidsTools: Bool {
+        activeAgent.map { $0.capabilities.resolvedTools().isEmpty } ?? false
+    }
+
+    private func toolModeBinding(_ keyPath: WritableKeyPath<ChatToolPreferences, Bool?>) -> Binding<Bool> {
+        Binding(get: {
+            keyPath == \ChatToolPreferences.toolsEnabled ? toolbarToggles.agent : toolbarToggles.mcp
+        }, set: { enabled in
+            var preferences = session?.toolPreferences ?? ChatToolPreferences(followsDefaults: false)
+            preferences[keyPath: keyPath] = enabled
+            updateToolPreferences(preferences)
+        })
     }
 
     private func setPlainChat(_ enabled: Bool) {
@@ -2154,11 +2183,19 @@ struct ChatDetailView: View {
     private func updateToolPreferences(_ preferences: ChatToolPreferences) {
         guard !isExternalBridgeSession,
               let index = appState.chatSessions.firstIndex(where: { $0.id == sessionId }) else { return }
+        let previous = resolvedChatSettings
         appState.chatSessions[index].toolPreferences = preferences
+        let current = resolvedChatSettings
         appState.saveChatHistory()
         toolAllowList.rearm(sessionId)
         if preferences.plainChat {
             chatEngine.revokeAllTools(sessionId: sessionId)
+        } else {
+            if previous.toolsEnabled && !current.toolsEnabled { chatEngine.revokeTools(sessionId: sessionId) }
+            if previous.mcpEnabled && !current.mcpEnabled { chatEngine.revokeMCP(sessionId: sessionId) }
+        }
+        if preferences.plainChat || (previous.toolsEnabled && !current.toolsEnabled)
+            || (previous.mcpEnabled && !current.mcpEnabled) {
             appState.voice.revokeToolApprovals(for: sessionId)
             if let request = pendingApproval, request.scope?.sessionID == sessionId {
                 request.continuation.resume(returning: .deny)
@@ -2178,30 +2215,6 @@ struct ChatDetailView: View {
     /// last assistant message, so the button only ever shows on that one.
     private var lastAssistantMessageId: UUID? {
         session?.messages.last { $0.role == .assistant }?.id
-    }
-
-    private static let wordmark: NSImage? = {
-        let image = BundledAsset.image("mlx-serve-wordmark.png")
-        image?.isTemplate = true
-        return image
-    }()
-
-    /// The wordmark, anchored just under the toolbar on an empty plain chat:
-    /// a TEMPLATE image (alpha only), tinted with the label colour so it reads
-    /// in both modes — the source art is white on black and would vanish in
-    /// light mode.
-    @ViewBuilder
-    private var wordmarkHeader: some View {
-        if activeAgent == nil, let mark = Self.wordmark {
-            Image(nsImage: mark)
-                .renderingMode(.template)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 240)
-                .foregroundStyle(.primary)
-                .padding(.top, 24)
-                .accessibilityLabel("MLX-Serve")
-        }
     }
 
     /// The greeting and optional agent description above an empty input. The vertical slack
@@ -2239,7 +2252,6 @@ struct ChatDetailView: View {
     var body: some View {
         VStack(spacing: 0) {
             if isEmptyConversation {
-                wordmarkHeader
                 // Two SIBLING spacers (this one + the trailing one below the
                 // composer) split the slack evenly, so greeting + chips +
                 // composer sit as one group in the middle of the window.
@@ -2419,7 +2431,7 @@ struct ChatDetailView: View {
                 // initial anchor instead of inheriting an offset measured in
                 // the transcript it replaces. A metrics change rebuilds every
                 // row anyway (they read `ChatMetrics` at build time).
-                .id("transcript-\(sessionId)-\(interfaceTextSize)-\(interfaceCompact)-\(interfaceChatColumn)")
+                .id("transcript-\(sessionId)-\(interfaceTextSize)")
             }   // end else (non-empty conversation)
 
             if isEmptyConversation {
@@ -2581,17 +2593,8 @@ struct ChatDetailView: View {
                 pasteMonitor = nil
             }
         }
-        // Thinking remains a per-conversation preference.
-        .onChange(of: enableThinking) { _, newValue in
-            guard !isExternalBridgeSession,
-                  let idx = appState.chatSessions.firstIndex(where: { $0.id == sessionId }) else { return }
-            appState.chatSessions[idx].enableThinking = newValue
-        }
-        .onChange(of: reasoningEffort) { _, newValue in
-            guard !isExternalBridgeSession,
-                  let idx = appState.chatSessions.firstIndex(where: { $0.id == sessionId }) else { return }
-            appState.chatSessions[idx].reasoningEffort = newValue
-        }
+        .onChange(of: thinkingModelID) { _, _ in syncTogglesFromSession() }
+        .onChange(of: appState.modelThinkingPreferences) { _, _ in syncTogglesFromSession() }
         .onChange(of: composerState) { _, state in
             if state == .idle {
                 // A turn that ended without reaching a step (Stop, an error)
@@ -2662,14 +2665,11 @@ struct ChatDetailView: View {
     private var inputArea: some View {
         VStack(spacing: 4) {
           if session?.isExternalBridge == true {
-            // Telegram bridge sessions mirror a phone conversation and are
-            // read-only on the Mac: a Telegram bot can only post as itself,
-            // so there's no coherent way to inject a Mac-typed user turn.
-            // Reply from the phone; the mirror updates live here.
+            // Archived bridge transcripts remain readable and can be branched.
             HStack(spacing: 8) {
                 Image(systemName: "paperplane.fill")
                     .foregroundStyle(.secondary)
-                Text("Telegram conversation — view only. Reply from your phone.")
+                Text("Archived conversation — view only.")
                     .font(.app(.caption))
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -2733,7 +2733,7 @@ struct ChatDetailView: View {
                         .shadow(color: .black.opacity(0.28), radius: 14, y: 4)
                 }
             }
-          }   // end else (non-Telegram composer)
+          }   // end editable conversation
         }
         .chatColumn(width: contentWidth)
         .padding(.vertical, 10)
@@ -3474,8 +3474,8 @@ struct ChatDetailView: View {
         // Sync the voice toggles to the chat session being opened — talking should
         // start in the same Think/Tools/MCP mode as the chat you launched it from.
         if let s = session {
-            appState.voice.enableThinking = s.enableThinking
             let resolved = appState.resolvedChatSettings(for: s)
+            appState.voice.enableThinking = resolved.thinkingEnabled
             appState.voice.agentMode = resolved.toolsEnabled
             appState.voice.mcpMode = resolved.mcpEnabled
             // …and to the same AGENT. Voice routes each turn into its agent's own
@@ -3496,9 +3496,7 @@ struct ChatDetailView: View {
     /// agent send path here anymore. Voice turns go straight through the
     /// controller and never touch this method.
     private func sendMessage() {
-        // Telegram bridge sessions are read-only mirrors on the Mac — never inject
-        // a Mac-typed turn (the composer is already replaced by a view-only bar;
-        // this is belt-and-suspenders for any other trigger path).
+        // Keyboard actions must respect the archived transcript's read-only state.
         if session?.isExternalBridge == true { return }
 
         // A busy chat takes the text as a steering note for the agent's next
@@ -4704,12 +4702,7 @@ enum ChatRow: Identifiable, Equatable {
     }
 }
 
-/// Folds the agent's separate "tool call" and "tool result" summary messages
-/// Which on/off state the chat toolbar's Think / Agent / MCP toggles show.
-/// Telegram bridge sessions mirror the shared `serverOptions.telegram` config —
-/// so the toolbar stays in lockstep with Settings (one source of truth, read
-/// live by the bridge); normal sessions use the per-session / app-level state.
-/// Pure → unit-tested in ChatModeTogglesTests.
+/// The resolved thinking and tool state shown by the composer.
 struct ChatModeToggles: Equatable {
     var thinking: Bool
     var agent: Bool
@@ -4722,15 +4715,11 @@ struct ChatModeToggles: Equatable {
 
     var isLocked: Bool { thinkingLockedBy != nil || toolsLockedBy != nil || mcpLockedBy != nil }
 
-    static func resolve(isExternalBridge: Bool,
-                        telegramThinking: Bool, telegramAgent: Bool, telegramMCP: Bool,
-                        inAppThinking: Bool, inAppAgent: Bool, inAppMCP: Bool,
+    static func resolve(inAppThinking: Bool, inAppAgent: Bool, inAppMCP: Bool,
                         agentLock: AgentModeLock? = nil,
                         /// Chat is answered by Apple's on-device model.
                         apple: Bool = false) -> ChatModeToggles {
-        let base = isExternalBridge
-            ? ChatModeToggles(thinking: telegramThinking, agent: telegramAgent, mcp: telegramMCP)
-            : ChatModeToggles(thinking: inAppThinking, agent: inAppAgent, mcp: inAppMCP)
+        let base = ChatModeToggles(thinking: inAppThinking, agent: inAppAgent, mcp: inAppMCP)
         guard let lock = agentLock else { return applyingApple(base, apple: apple) }
         return applyingApple(ChatModeToggles(
             // Thinking is the one an agent may leave unset, and `AgentResolution`

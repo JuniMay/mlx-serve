@@ -53,9 +53,7 @@ enum SettingsSearch {
         return SectionFilter(
             filtering: !tokens(query).isEmpty,
             headerMatches: headerMatches,
-            // A title hit shows the entire section — its rows must not filter
-            // themselves out. Searching "telegram" should surface the bot-token
-            // row even though that row's own text never says "telegram".
+            // A category title match includes every row in that category.
             childQuery: headerMatches ? "" : query
         )
     }

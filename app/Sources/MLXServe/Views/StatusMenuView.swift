@@ -130,15 +130,6 @@ struct StatusMenuView: View {
         VStack(alignment: .leading, spacing: 0) {
             header
 
-            // "Update available" card — hidden until the daily GitHub releases
-            // check finds a newer version. A self-observing subview so updater
-            // phase changes re-render only this row, which is also why it sits
-            // OUTSIDE the spaced stack below: a subview that renders nothing
-            // still claims a slot, and the section gap would double when there
-            // is no update (i.e. almost always). It carries its own bottom gap.
-            UpdateTrayRow(updates: appState.updates)
-                .padding(.horizontal, TrayMetrics.gutter)
-
             // Sections are separated by whitespace and grouped into cards —
             // the panel used to carry a full-width Divider between every one of
             // them, which flattened the hierarchy into a stack of equals.
@@ -534,21 +525,9 @@ struct StatusMenuView: View {
 
     // MARK: - Always-on features
 
-    /// Voice, the Quick Launcher and the Agent Sandbox are the same kind of
-    /// thing — a capability you switch on or step into — so they share one card
-    /// and one row shape (`TrayFeatureRow`). They used to be three sections with
-    /// three different layouts separated by dividers.
     private var featuresSection: some View {
         TrayCard {
-            // Persistent, window-independent voice assistant. Toggle it on and
-            // talk hands-free with no chat window.
             VoiceTrayPanel(voice: appState.voice, openAgents: openAgents)
-
-            TrayRowSeparator()
-
-            // Spotlight-style ⌃Space prompt panel, summonable from any app
-            // while MLX Core runs in the tray.
-            QuickLauncherTrayRow()
         }
     }
 
@@ -744,79 +723,6 @@ struct StatusMenuView: View {
         Task {
             try? await server.unloadModel(id: id)
             unloadingIds.remove(id)
-        }
-    }
-}
-
-/// One-click in-app update banner for the tray menu. Visible only when the
-/// daily `UpdateChecker` run found a newer GitHub release; the button
-/// downloads the notarized DMG, swaps the installed bundle, and relaunches.
-/// Failures render inline with the releases page as the manual escape hatch.
-struct UpdateTrayRow: View {
-    @ObservedObject var updates: UpdateChecker
-
-    var body: some View {
-        if let update = updates.available {
-            // A tinted card, not a banner with its own divider: it's the one
-            // thing in the panel that wants to be noticed, and tint is how the
-            // rest of the design says "look here".
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 8) {
-                    Image(systemName: "sparkles")
-                        .foregroundStyle(.blue)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("MLX-Serve v\(update.version) is available")
-                            .font(.app(.subheadline).weight(.medium))
-                        if case .failed(let message) = updates.phase {
-                            Text(message)
-                                .font(.app(.caption2))
-                                .foregroundStyle(.red)
-                                .lineLimit(3)
-                                .textSelection(.enabled)
-                        } else if let page = update.releasePageURL {
-                            Link("Release notes", destination: page)
-                                .font(.app(.caption2))
-                        }
-                    }
-                    Spacer()
-                    switch updates.phase {
-                    case .downloading, .installing:
-                        ProgressView()
-                            .controlSize(.small)
-                    default:
-                        Button {
-                            Task { await updates.downloadAndInstall() }
-                        } label: { Text("Update")
-                            .font(.app(.body)) }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                        .help("Download v\(update.version), install, and relaunch")
-                    }
-                }
-                if case .downloading(let fraction) = updates.phase {
-                    ProgressView(value: max(0, min(1, fraction)))
-                        .progressViewStyle(.linear)
-                }
-                if case .installing = updates.phase {
-                    Text("Installing — the app will relaunch")
-                        .font(.app(.caption2))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(TrayMetrics.cardPadding)
-            .background(
-                RoundedRectangle(cornerRadius: TrayMetrics.cardRadius, style: .continuous)
-                    .fill(Color.blue.opacity(0.12))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: TrayMetrics.cardRadius, style: .continuous)
-                    .strokeBorder(Color.blue.opacity(0.25), lineWidth: 1)
-            )
-            // The gap to the next section belongs to the card, not to the stack
-            // above — with no update this view renders nothing and costs
-            // nothing. See the call site.
-            .padding(.bottom, TrayMetrics.sectionSpacing)
         }
     }
 }

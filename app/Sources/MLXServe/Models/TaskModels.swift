@@ -84,9 +84,7 @@ struct ScheduledTask: Identifiable, Codable, Equatable {
     /// nil = each run gets its own isolated folder (default). Non-nil = a persistent
     /// shared workspace across runs (Phase 4 toggle).
     var workingDirectory: String?
-    /// Telegram chat id that created this task via the bot's `createTask` tool.
-    /// Non-nil → each finished run is also pushed back to that chat (in addition
-    /// to the desktop notification). nil for tasks created in the app UI.
+    /// Archived task origin retained for decoding saved tasks. Not a delivery route.
     var originTelegramChatId: Int64?
     /// One-shot "run now" tasks (the createTask tool with no schedule) set this so
     /// the scheduler removes them from the catalog once their run finishes, instead

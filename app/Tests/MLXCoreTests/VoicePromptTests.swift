@@ -2,7 +2,7 @@ import XCTest
 @testable import MLXCore
 
 /// Pins the voice/agent system-prompt grounding: the assistant is told who it is
-/// (Loki), what the current date/time is, that it must speak briefly without
+/// when named, what the current date/time is, that it must speak briefly without
 /// Markdown/URLs, and that it must not read tool calls aloud.
 final class VoicePromptTests: XCTestCase {
 
@@ -22,7 +22,7 @@ final class VoicePromptTests: XCTestCase {
     // MARK: VoicePrompt
 
     func testVoiceSystemPromptIsGroundedAndIdentified() {
-        let p = VoicePrompt.systemPrompt(now: Self.fixedNow)
+        let p = VoicePrompt.systemPrompt(now: Self.fixedNow, phrase: "hey loki")
         XCTAssertTrue(p.contains("Loki"))                    // knows its name
         XCTAssertTrue(p.contains("2026"))                    // knows the date
         XCTAssertTrue(p.contains("current date and time is"))
@@ -45,11 +45,11 @@ final class VoicePromptTests: XCTestCase {
         // The agent base already carries the date line; decorate must add the
         // voice identity/style but NOT a second date line.
         let base = "You are an agent. Use tools."
-        let decorated = VoicePrompt.decorate(base)
+        let decorated = VoicePrompt.decorate(base, phrase: "hey loki")
         XCTAssertTrue(decorated.hasPrefix(base), "agent prompt must come first")
         XCTAssertTrue(decorated.contains("Loki"))
         XCTAssertFalse(decorated.contains("current date and time is"))
-        XCTAssertTrue(decorated.contains(VoicePrompt.speakingStyle))
+        XCTAssertTrue(decorated.contains(VoicePrompt.speakingStyle(phrase: "hey loki")))
     }
 
     func testDecorateAloneFallsBackToSpeakingStyle() {
@@ -110,10 +110,8 @@ final class VoicePromptTests: XCTestCase {
         XCTAssertTrue(p.contains("current date and time is"), "grounding still applies")
     }
 
-    func testWithoutAPersonaTheOldPromptIsByteIdentical() {
-        // No agent ⇒ nothing about the prompt changes.
-        XCTAssertEqual(VoicePrompt.speakingStyle(phrase: "hey loki", hasPersona: false),
-                       VoicePrompt.speakingStyle)
+    func testWithoutAPersonaTheChosenPhraseSuppliesTheName() {
+        XCTAssertTrue(VoicePrompt.speakingStyle(phrase: "hey loki", hasPersona: false).contains("You are Loki"))
         XCTAssertTrue(VoicePrompt.speakingStyle(phrase: "hey jarvis").contains("You are Jarvis"))
     }
 }

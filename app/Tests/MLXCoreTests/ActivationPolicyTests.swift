@@ -4,7 +4,7 @@ import XCTest
 /// ActivationPolicyManager keeps the app's activation policy in sync with its
 /// visible windows: any real user window (Chat, Audio Generation, Settings,
 /// Welcome, …) → `.regular` (app appears in ⌘Tab + Dock); only menu-bar
-/// chrome (status item, tray popover, quick-launcher panel) → `.accessory`.
+/// chrome (status item, tray popover, helper panels) → `.accessory`.
 /// The decision is pure over lightweight window descriptors.
 final class ActivationPolicyTests: XCTestCase {
 
@@ -28,9 +28,9 @@ final class ActivationPolicyTests: XCTestCase {
             // The MenuBarExtra(.window) tray popover host.
             .init(isVisible: true, isMiniaturized: false, isPanel: true,
                   canBecomeMain: false, className: "NSMenuBarExtraPanel"),
-            // The ⌃Space quick launcher (non-activating borderless NSPanel).
+            // A non-activating helper panel.
             .init(isVisible: true, isMiniaturized: false, isPanel: true,
-                  canBecomeMain: false, className: "QuickLauncherPanel"),
+                  canBecomeMain: false, className: "NSPanel"),
         ]
         XCTAssertEqual(ActivationPolicyManager.policy(for: chrome), .accessory)
     }

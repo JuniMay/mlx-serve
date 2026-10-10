@@ -167,7 +167,7 @@ final class ProcessHandleBox: @unchecked Sendable {
 /// retained `Process`, streaming capture via `readabilityHandler` into a bounded
 /// buffer, graceful `terminate()` → grace → `SIGKILL`, exit via
 /// `terminationHandler`. Owned by `AppState`; reached by the agent loop (so
-/// Telegram-driven turns get it too) and by the chat tool-call card's kill X.
+/// scheduled turns get it too) and by the chat tool-call card's kill X.
 @MainActor
 final class ProcessRegistry: ObservableObject {
     /// Status-only snapshot for the UI. Output is intentionally NOT published —

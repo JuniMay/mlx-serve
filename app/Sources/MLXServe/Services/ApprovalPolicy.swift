@@ -62,7 +62,7 @@ enum ApprovalPolicy {
         case .fullAuto:
             // `createTask` only schedules a background run (itself governed by its
             // own autonomy when it executes) — benign like `saveMemory`, and the
-            // whole point of unattended/Telegram agents, so it auto-allows here.
+            // whole point of unattended agents, so it auto-allows here.
             if readOnlyTools.contains(tool) || tool == "shell" || tool == "saveMemory"
                 || tool == "createTask" || isMCPTool(tool) {
                 return .allow

@@ -28,8 +28,7 @@ enum VoicePrompt {
 
     /// Identity + speaking style for the given wake phrase — the assistant is
     /// named by the phrase's last word ("hey jarvis" → "You are Jarvis").
-    /// Tolerates raw user input from Settings; blank falls back to the
-    /// default. No date here — that's injected separately via
+    /// Blank input uses an unnamed voice assistant. The date is injected via
     /// `SystemGrounding` so it stays fresh and isn't duplicated when an agent
     /// system prompt already carries it.
     ///
@@ -43,7 +42,9 @@ enum VoicePrompt {
             \(deliveryRules)
             """
         }
-        let phrase = WakeWord.normalizePhrase(rawPhrase) ?? WakeWord.defaultPhrase
+        guard let phrase = WakeWord.normalizePhrase(rawPhrase) else {
+            return "You are a voice assistant. Everything you say is read aloud by text-to-speech.\n" + deliveryRules
+        }
         let name = WakeWord.assistantName(phrase)
         let display = WakeWord.display(phrase)
         return """

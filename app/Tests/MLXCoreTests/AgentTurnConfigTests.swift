@@ -1,10 +1,7 @@
 import XCTest
 @testable import MLXCore
 
-/// Five surfaces start turns (chat tab, voice tray, scheduled task, Telegram,
-/// Quick Launcher). They all build their `TurnConfig` through ONE builder from a
-/// `ResolvedAgentSettings`, so a surface can't quietly ignore the agent — the
-/// same class as the LAN rule about reading `modelInfo?.name` at a new surface.
+/// Turn sources share one builder that preserves resolved agent settings.
 final class AgentTurnConfigTests: XCTestCase {
 
     private func resolved(_ mutate: (inout Agent) -> Void) -> ResolvedAgentSettings {
@@ -155,7 +152,7 @@ final class AgentTurnConfigTests: XCTestCase {
         let r = AgentResolution.resolve(agent: nil, defaults: AppDefaultsSnapshot(
             toolsEnabled: true, mcpEnabled: false, thinkingEnabled: true,
             autoApprove: false, workingDirectory: "/tmp/default"))
-        let config = ChatTurnEngine.TurnConfig.from(r, documentIndex: nil, telegramChatId: 42)
+        let config = ChatTurnEngine.TurnConfig.from(r, documentIndex: nil)
 
         XCTAssertNil(config.agentId)
         XCTAssertEqual(config.systemPromptPrefix, "")
@@ -164,7 +161,6 @@ final class AgentTurnConfigTests: XCTestCase {
         XCTAssertTrue(config.enableThinking)
         XCTAssertEqual(config.workingDirectory, "/tmp/default")
         XCTAssertEqual(config.tools, Set(AgentToolKind.allCases), "full access, exactly as before")
-        XCTAssertEqual(config.telegramChatId, 42)
         XCTAssertNil(config.temperature)
         XCTAssertNil(config.maxTokens)
     }

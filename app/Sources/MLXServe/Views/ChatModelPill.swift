@@ -76,15 +76,16 @@ struct ChatModelPill: View {
         return server.chatModelInfo == nil ? .orange : .green
     }
 
-    private var selection: Binding<String> {
-        Binding(
-            get: { ChatModelSelection.tag(localPath: appState.selectedModelPath,
-                                          lanChatModelId: server.lanChatModelId,
-                                          apple: appState.useAppleModel) },
-            // What a pick MEANS is `AppState.applyChatModelPick` — one method,
-            // shared with the tray and the ⌘L palette.
-            set: { picked in appState.applyChatModelPick(picked) }
-        )
+    private var selection: String {
+        ChatModelSelection.tag(localPath: appState.selectedModelPath,
+                               lanChatModelId: server.lanChatModelId,
+                               apple: appState.useAppleModel)
+    }
+
+    private var modelRows: [ModelPaletteRow] {
+        ModelPalette.rows(appleAvailable: AppleFoundationChat.availability.isAvailable,
+                          local: appState.localModels, lan: lanChatModels,
+                          mediaModels: server.allModels)
     }
 
     /// A live transfer THIS CHAT is waiting on, if any. The pill is where the
@@ -136,10 +137,8 @@ struct ChatModelPill: View {
                                  hasChatModelOnDisk: !pickableModels.isEmpty)
     }
 
-    /// True when this Mac has nothing chat-pickable on disk — the state where
-    /// the pill's job is to offer the download, not a list to choose from.
     private var needsDownload: Bool {
-        server.lanChatModelId == nil && pickableModels.isEmpty && activeDownload == nil
+        modelRows.isEmpty && activeDownload == nil
     }
 
     @ViewBuilder
@@ -187,7 +186,7 @@ struct ChatModelPill: View {
     private var modelButton: some View {
         let pill = self.pill
         return Button {
-            showingModels = thinkingControls == nil
+            showingModels = thinkingControls == nil || selection.isEmpty
             typedPrefix = ""
             isPresented.toggle()
         } label: {
@@ -262,7 +261,7 @@ struct ChatModelPill: View {
         .accessibilityHint(thinkingHint ?? "")
         .help(pill.isLoading
               ? L10n.format("Loading %@…", ModelDisplayName.pretty(pill.name))
-              : L10n.text("Choose a model and configure thinking for this chat."))
+              : L10n.text("Choose a model and configure thinking."))
         .popover(isPresented: $isPresented, arrowEdge: .top) {
             VStack(alignment: .leading, spacing: 12) {
                 if showingModels {
@@ -348,7 +347,7 @@ struct ChatModelPill: View {
                 }
                 .onAppear {
                     typedPrefix = ""
-                    let tag = navigationRows.first { $0.tag == selection.wrappedValue }?.tag
+                    let tag = navigationRows.first { $0.tag == selection }?.tag
                         ?? navigationRows.first?.tag
                     DispatchQueue.main.async {
                         guard isPresented, showingModels else { return }
@@ -384,18 +383,7 @@ struct ChatModelPill: View {
     }
 
     private var navigationRows: [(tag: String, title: String)] {
-        let local = pickableModels
-        let duplicates = LocalModel.duplicateNames(in: local)
-        var rows = LocalModelSource.allCases.flatMap { source in
-            local.filter { $0.source == source }.map { (tag: $0.path, title: rowLabel($0, dupNames: duplicates)) }
-        }
-        for remote in [lanChatModels.filter { $0.provider == nil }, lanChatModels.filter { $0.provider != nil }] {
-            rows += remote.map { (tag: "lan:" + $0.name, title: $0.lanDisplayName) }
-        }
-        if AppleFoundationChat.availability.isAvailable {
-            rows.append((tag: ChatModelSelection.appleTag, title: AppleFoundationChat.displayName))
-        }
-        return rows
+        modelRows.map { (tag: $0.tag, title: $0.title) }
     }
 
     private func moveFocus(_ delta: Int) -> KeyPress.Result {
@@ -420,51 +408,23 @@ struct ChatModelPill: View {
 
     @ViewBuilder
     private var menuContent: some View {
-        let pickable = pickableModels
-        if pickable.isEmpty && lanChatModels.isEmpty {
-            if !AppleFoundationChat.availability.isAvailable {
-                Text("No chat models downloaded").font(.app(.body))
-            }
+        if modelRows.isEmpty {
+            Text("No models available").font(.app(.body))
         } else {
-            // Keep identically named models distinguishable across engines.
-            let dupNames = LocalModel.duplicateNames(in: pickable)
-            ForEach(LocalModelSource.allCases, id: \.self) { source in
-                let models = pickable.filter { $0.source == source }
-                if !models.isEmpty {
-                    VStack(alignment: .leading, spacing: 2) {
-                        modelSectionTitle(source.sectionTitle)
-                        ForEach(models) { model in
-                            row(title: rowLabel(model, dupNames: dupNames),
-                                tag: model.path)
-                        }
-                    }
-                }
-            }
-            let network = lanChatModels.filter { $0.provider == nil }
-            let providers = lanChatModels.filter { $0.provider != nil }
-            if !network.isEmpty {
+            ForEach(modelSections, id: \.self) { section in
                 VStack(alignment: .leading, spacing: 2) {
-                    modelSectionTitle(ModelPalette.networkSection)
-                    ForEach(network, id: \.name) { m in
-                        row(title: m.lanDisplayName, tag: "lan:" + m.name)
-                    }
-                }
-            }
-            if !providers.isEmpty {
-                VStack(alignment: .leading, spacing: 2) {
-                    modelSectionTitle(ModelPalette.providersSection)
-                    ForEach(providers, id: \.name) { m in
-                        row(title: m.lanDisplayName, tag: "lan:" + m.name)
+                    modelSectionTitle(section)
+                    ForEach(modelRows.filter { $0.section == section }) { model in
+                        row(model)
                     }
                 }
             }
         }
-        if AppleFoundationChat.availability.isAvailable {
-            VStack(alignment: .leading, spacing: 2) {
-                modelSectionTitle(ModelPalette.onDeviceSection)
-                row(title: AppleFoundationChat.displayName, tag: ChatModelSelection.appleTag)
-            }
-        }
+    }
+
+    private var modelSections: [String] {
+        var seen = Set<String>()
+        return modelRows.compactMap { seen.insert($0.section).inserted ? $0.section : nil }
     }
 
     private func modelSectionTitle(_ title: String) -> some View {
@@ -474,42 +434,42 @@ struct ChatModelPill: View {
             .padding(.top, 4)
     }
 
-    private func row(title: String, tag: String) -> some View {
-        Button {
-            isPresented = false
-            selection.wrappedValue = tag
-        } label: {
+    private func row(_ model: ModelPaletteRow) -> some View {
+        Button { pick(model) } label: {
             HStack(spacing: 12) {
-                Text(verbatim: title)
-                    .font(.app(.body))
-                    .foregroundStyle(.primary)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(verbatim: model.title)
+                        .font(.app(.body))
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(verbatim: model.detail)
+                        .font(.app(.caption))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
                 Spacer(minLength: 0)
                 Image(systemName: "checkmark")
-                    .opacity(selection.wrappedValue == tag ? 1 : 0)
+                    .opacity(selection == model.tag ? 1 : 0)
                     .accessibilityHidden(true)
             }
             .padding(.vertical, 6)
             .contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
-        .help(title)
-        .focused($focusedModel, equals: tag)
-        .id(tag)
+        .help(model.title)
+        .focused($focusedModel, equals: model.tag)
+        .id(model.tag)
         .onKeyPress(.return) {
-            isPresented = false
-            selection.wrappedValue = tag
+            pick(model)
             return .handled
         }
-        .accessibilityAddTraits(selection.wrappedValue == tag ? .isSelected : [])
+        .accessibilityAddTraits(selection == model.tag ? .isSelected : [])
     }
 
-    /// `displayLabel`, not `name`: a GGUF repo ships several quants and each is
-    /// its own row, so the row has to say which quant it loads.
-    private func rowLabel(_ model: LocalModel, dupNames: Set<String>) -> String {
-        let label = model.displayLabel
-        return dupNames.contains(label) ? "\(label) · \(model.engine.shortLabel)" : label
+    private func pick(_ model: ModelPaletteRow) {
+        isPresented = false
+        appState.selectInteractionModel(model, using: openWindow)
     }
 }

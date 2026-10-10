@@ -5,6 +5,32 @@ import XCTest
 
 @MainActor
 final class SettingsSectionResolutionTests: XCTestCase {
+    func testSelectedCategoryDoesNotRepeatTheWindowTitleInItsSectionHeader() async throws {
+        var selectedHeight: CGFloat = 0
+        var searchHeight: CGFloat = 0
+        let hosting = NSHostingView(rootView:
+            VStack(alignment: .leading) {
+                SettingsSectionHeader(category: .server, subtitle: "Server connection settings.")
+                    .environment(\.settingsSelection, .category(.server))
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { selectedHeight = $0 }
+                SettingsSectionHeader(category: .server, subtitle: "Server connection settings.")
+                    .environment(\.settingsSelection, .all)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { searchHeight = $0 }
+            }
+            .frame(width: 500, alignment: .leading))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 240),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = hosting
+        defer { window.contentView = nil }
+        for _ in 0..<40 {
+            hosting.layoutSubtreeIfNeeded()
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertGreaterThan(selectedHeight, 10, "The section description remains visible.")
+        XCTAssertLessThan(selectedHeight + 10, searchHeight,
+                          "Only cross-category search needs a category title above its description.")
+    }
+
     func testEmptySectionsDisappearAndQueryChangesPreserveContentState() async throws {
         let probe = SectionResolutionProbe()
         let hosting = NSHostingView(rootView: SectionResolutionFixture(probe: probe))

@@ -13,11 +13,7 @@ final class TranscriptTypographyTests: XCTestCase {
         return try String(contentsOf: url, encoding: .utf8)
     }
 
-    /// The default (Settings ▸ Interface ▸ Text Size = Default) reads at
-    /// 14pt — bumped down from the original 16pt (2026-08-31, felt too large
-    /// at normal reading distance); the size is a user setting now
-    /// (`ChatTextSize`), and `.medium` is what nobody who never opens that
-    /// picker gets.
+    // The default text size is 14 points.
     func testTheTranscriptReadsAtFourteenPointsByDefault() {
         XCTAssertEqual(ChatTextSize.medium.proseSize, 14)
         XCTAssertEqual(ChatMetrics.transcriptFontSize, ChatTextSize.medium.proseSize)
@@ -115,112 +111,57 @@ final class TranscriptTypographyTests: XCTestCase {
                        style?.headIndent ?? 0, "wrapped lines start after the marker column")
     }
 
-    // MARK: - The setting
+    // MARK: - Adaptive geometry and reading density
 
-    private func withColumn(_ width: ChatColumnWidth, _ body: () -> Void) {
-        UserDefaults.standard.set(width.rawValue, forKey: InterfacePrefKey.chatColumn)
-        defer { UserDefaults.standard.removeObject(forKey: InterfacePrefKey.chatColumn) }
+    private func withLayoutPreferences(column: ChatColumnWidth, compact: Bool = false, _ body: () -> Void) {
+        let defaults = UserDefaults.standard
+        let previous = defaults.volatileDomain(forName: UserDefaults.argumentDomain)
+        var values = previous
+        values[InterfacePrefKey.chatColumn] = column.rawValue
+        values[InterfacePrefKey.compactMode] = compact
+        defaults.setVolatileDomain(values, forName: UserDefaults.argumentDomain)
+        defer { defaults.setVolatileDomain(previous, forName: UserDefaults.argumentDomain) }
         body()
     }
 
-    /// The reading width is a FIXED number of points, so resizing the window
-    /// spends the margins and leaves the lines where they are. That is the
-    /// whole reason it is points and not a fraction of the window.
-    func testTheReadingWidthIsFixedWhileTheWindowHasRoom() {
-        withColumn(.narrow) {
-            XCTAssertEqual(ChatMetrics.proseWidth(panelWidth: 1800), 840)
-            XCTAssertEqual(ChatMetrics.proseWidth(panelWidth: 1000), 840,
-                           "a smaller window must spend its margins, not the text")
-        }
-        withColumn(.medium) {
-            XCTAssertEqual(ChatMetrics.proseWidth(panelWidth: 1800), 1260)
+    func testReadingWidthFollowsTheWindowAcrossSavedColumnPreferences() {
+        for column in ChatColumnWidth.allCases {
+            withLayoutPreferences(column: column) {
+                XCTAssertEqual(ChatMetrics.proseWidth(panelWidth: 1800), 1440)
+                XCTAssertEqual(ChatMetrics.proseWidth(panelWidth: 1000), 800)
+                XCTAssertEqual(ChatMetrics.proseWidth(panelWidth: 900), 720)
+                XCTAssertEqual(ChatMetrics.proseWidth(panelWidth: 600), 480)
+            }
         }
     }
 
-    /// Past that point there is no margin left to spend, so the window takes
-    /// over and the lines wrap to it.
-    func testAWindowNarrowerThanTheSettingWrapsTheTextInstead() {
-        withColumn(.medium) {
-            XCTAssertEqual(ChatMetrics.proseWidth(panelWidth: 900), 900 - 2 * ChatMetrics.gutter)
-        }
-        withColumn(.narrow) {
-            XCTAssertEqual(ChatMetrics.proseWidth(panelWidth: 600), 600 - 2 * ChatMetrics.gutter)
-        }
+    func testNarrowPanelsPreserveTheMinimumGutter() {
+        XCTAssertEqual(ChatMetrics.proseWidth(panelWidth: 100), 100 - 2 * ChatMetrics.gutter)
+        XCTAssertEqual(ChatMetrics.proseWidth(panelWidth: 20), 0)
     }
 
-    /// Wide follows the window, but keeps a margin: text running into the very
-    /// edge of a wide window reads as unfinished.
-    func testWideFollowsTheWindowButKeepsAMargin() {
-        withColumn(.wide) {
-            XCTAssertNil(ChatColumnWidth.wide.proseWidth, "wide has no fixed width")
-            XCTAssertEqual(ChatMetrics.proseWidth(panelWidth: 2000), 1600)
-            XCTAssertEqual(ChatMetrics.proseWidth(panelWidth: 1000), 800)
-        }
-    }
-
-    /// Narrow has to be the narrower of the two, or the setting reads backwards.
-    func testNarrowIsNarrowerThanMedium() throws {
-        let narrow = try XCTUnwrap(ChatColumnWidth.narrow.proseWidth)
-        let medium = try XCTUnwrap(ChatColumnWidth.medium.proseWidth)
-        XCTAssertLessThan(narrow, medium)
-    }
-
-    /// Before the first `onGeometryChange` the panel measures zero. A width of
-    /// zero would collapse the column to nothing on the first frame.
     func testAnUnmeasuredPanelFallsBackRatherThanCollapsing() {
-        withColumn(.narrow) {
-            XCTAssertEqual(ChatMetrics.proseWidth(panelWidth: 0), ChatMetrics.contentFallbackWidth)
+        XCTAssertEqual(ChatMetrics.proseWidth(panelWidth: 0), ChatMetrics.contentFallbackWidth)
+    }
+
+    func testSavedDensityPreferencesKeepReadableLineSpacing() {
+        var normalSpacing: CGFloat = 0
+        withLayoutPreferences(column: .wide) {
+            normalSpacing = ChatMetrics.userLineSpacing
+        }
+        withLayoutPreferences(column: .narrow, compact: true) {
+            XCTAssertEqual(ChatMetrics.userLineSpacing, normalSpacing)
+            XCTAssertGreaterThan(ChatMetrics.userLineSpacing, 0)
+            XCTAssertEqual(ChatMetrics.proseLineHeightMultiple, 1.4)
         }
     }
 
-    /// Compact tightens your own turn, and never to nothing. The exact ratio is
-    /// a judgement call and belongs to the eye, not to an assert.
-    func testCompactTightensTheUsersOwnLeading() {
-        UserDefaults.standard.set(false, forKey: InterfacePrefKey.compactMode)
-        let roomy = ChatMetrics.userLineSpacing
-        UserDefaults.standard.set(true, forKey: InterfacePrefKey.compactMode)
-        let tight = ChatMetrics.userLineSpacing
-        UserDefaults.standard.removeObject(forKey: InterfacePrefKey.compactMode)
-
-        XCTAssertLessThan(tight, roomy)
-        XCTAssertGreaterThan(tight, 0, "lines still need to breathe")
-    }
-
-    /// Your own turn is always narrower than the column it sits in, or a long
-    /// question reaches the same left edge as the reply below it and the two
-    /// sides of the conversation stop being distinguishable.
-    func testYourOwnTurnStaysNarrowerThanTheColumn() {
-        withColumn(.narrow) {
-            XCTAssertLessThan(ChatMetrics.userBubbleMaxWidth,
-                              ChatMetrics.proseWidth(panelWidth: 2000))
+    func testUserTurnsKeepASmallerMaximumWidthThanWideReplies() {
+        for column in ChatColumnWidth.allCases {
+            withLayoutPreferences(column: column) {
+                XCTAssertLessThan(ChatMetrics.userBubbleMaxWidth, ChatMetrics.proseWidth(panelWidth: 2000))
+            }
         }
-        withColumn(.medium) {
-            XCTAssertLessThan(ChatMetrics.userBubbleMaxWidth,
-                              ChatMetrics.proseWidth(panelWidth: 2000))
-        }
-    }
-
-    /// It stops growing at Medium: past that the question is already a
-    /// paragraph, and a wider one only lengthens the ragged left edge.
-    func testTheBubbleStopsGrowingPastMedium() {
-        XCTAssertEqual(ChatColumnWidth.medium.userBubbleWidth, ChatColumnWidth.wide.userBubbleWidth)
-        XCTAssertLessThan(ChatColumnWidth.narrow.userBubbleWidth,
-                          ChatColumnWidth.medium.userBubbleWidth)
-    }
-
-    // MARK: - The two doors onto one setting
-
-    /// Every width needs its own key, or one of them is unreachable and the
-    /// menu silently does the wrong thing.
-    func testEachWidthHasItsOwnShortcut() {
-        let keys = ChatColumnWidth.allCases.map { $0.menuShortcut.character }
-        XCTAssertEqual(Set(keys).count, ChatColumnWidth.allCases.count)
-    }
-
-    func testAnUnknownStoredColumnFallsBackToWide() {
-        UserDefaults.standard.set("gigantic", forKey: InterfacePrefKey.chatColumn)
-        defer { UserDefaults.standard.removeObject(forKey: InterfacePrefKey.chatColumn) }
-        XCTAssertEqual(ChatColumnWidth.current, .wide)
     }
 
     /// SF Pro is the macOS system font, so the app gets it by asking for the

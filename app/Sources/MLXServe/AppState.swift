@@ -263,9 +263,6 @@ class AppState: ObservableObject {
     @Published var serverOptions: ServerOptions {
         didSet {
             serverOptions.save()
-            // Reconcile the Telegram bridge whenever options change (cheap no-op
-            // unless the bot token / enabled flag actually moved).
-            telegramBridge.reconcile()
             // Push the agent-sandbox setting to the shared manager so the next
             // shell command routes to the guest (or the host) accordingly.
             AgentSandbox.shared.configure(enabled: serverOptions.sandbox.enabled,
@@ -294,34 +291,17 @@ class AppState: ObservableObject {
     @Published var chatToolDefaults: ChatToolDefaults {
         didSet { chatToolDefaults.save() }
     }
+    @Published var modelThinkingPreferences = ModelThinkingPreferences.load() {
+        didSet { modelThinkingPreferences.save() }
+    }
     var mcpMode: Bool {
         get { chatToolDefaults.mcpEnabled }
         set { chatToolDefaults.mcpEnabled = newValue }
     }
     let mcpManager = MCPManager()
 
-    /// In-app updater against the GitHub releases page. App-level (not a view)
-    /// so the daily background check runs with every window closed; views
-    /// observe it directly (`UpdateTrayRow(updates:)`), same pattern as
-    /// `telegramBridge`.
-    let updates = UpdateChecker()
-
-    /// ⌃Space Spotlight-style prompt panel (tray toggle under Voice).
-    /// Registration follows the toggle live; also applied once at launch
-    /// (didSet doesn't fire for the init assignment).
-    @Published var quickLauncherEnabled: Bool {
-        didSet {
-            UserDefaults.standard.set(quickLauncherEnabled, forKey: "quickLauncherEnabled")
-            quickLauncher.setEnabled(quickLauncherEnabled)
-        }
-    }
-    /// "Open the chat window" for callers that can't reach SwiftUI's
-    /// `openWindow`: the quick launcher's "Open in chat" (a non-activating
-    /// NSPanel) and the launch path. The menu-bar label observes it — the label
-    /// is always installed, so this works with no window open, same bridge as
-    /// the task-notification deep-link. An Int tick so every bump fires
-    /// onChange, no reset dance. ONE bridge for both callers rather than a
-    /// second near-identical tick: they want the same window.
+    /// Opens the chat window through the menu-bar bridge, including when all
+    /// windows are closed. Each increment triggers the observer.
     @Published var pendingChatOpenTick = 0
 
     /// The menu-bar bridge opens Settings without changing the active workspace.
@@ -505,18 +485,10 @@ class AppState: ObservableObject {
         pendingChatOpenTick += 1
     }
 
-    /// Owns the global hotkey + floating panel. App-level like the voice
-    /// controller so it works with every window closed.
-    lazy var quickLauncher = QuickLauncherController(appState: self)
-
     /// The single generation engine shared by the text chat window and the voice
     /// assistant — one code path, no behavioural drift. App-level so generation
     /// is independent of any window.
     lazy var chatEngine = ChatTurnEngine(appState: self)
-
-    /// Telegram bot bridge — message the local model from your phone. Lazily
-    /// created; runs only while `serverOptions.telegram` is enabled with a token.
-    lazy var telegramBridge = TelegramBridge(appState: self)
 
     /// Runs unattended scheduled/on-demand agent tasks (the "claw" spine). Lazily
     /// created so it only spins up the first time the Tasks window is opened.
@@ -572,7 +544,6 @@ class AppState: ObservableObject {
         self.chatToolDefaults = ChatToolDefaults.load()
         self.defaultAgentId = UserDefaults.standard.string(forKey: "defaultAgentId")
             .flatMap(UUID.init(uuidString:))
-        self.quickLauncherEnabled = UserDefaults.standard.bool(forKey: "quickLauncherEnabled")
         server.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
@@ -610,27 +581,14 @@ class AppState: ObservableObject {
         }
         AgentEngine.cleanupOverflowFiles()
 
-        // Start the Telegram bridge if the user left it enabled (didSet doesn't
-        // fire for the initial serverOptions assignment in init).
-        telegramBridge.reconcile()
-
-        // Same for the agent sandbox: apply the persisted setting once at launch.
+        // Apply the persisted sandbox setting once at launch.
         AgentSandbox.shared.configure(enabled: serverOptions.sandbox.enabled,
                                       network: serverOptions.sandbox.network)
-
-        // And the quick launcher's global ⌃Space hotkey.
-        if quickLauncherEnabled { quickLauncher.setEnabled(true) }
 
         // The app-level agent's voice, applied once at launch (didSet doesn't
         // fire for the init assignment above). Everything else it owns is
         // resolved per turn.
         ActiveAgentVoice.set(agents.agent(id: defaultAgentId)?.resolvedVoice)
-
-        // Auto-update: stop the server child before the installer relaunches
-        // the app (the old process's willTerminate doesn't stop it), then
-        // start the once-a-day releases/latest check.
-        updates.willRelaunch = { [weak self] in self?.server.stop() }
-        updates.startAutoCheck()
 
         // Keep the activation policy in sync with open windows: any real
         // window (Chat, media panes, the intro window) makes the app
@@ -855,8 +813,7 @@ class AppState: ObservableObject {
     // MARK: - Chat Session Management
 
     /// Sessions to show in the chat sidebar. Excludes only the transient
-    /// task-run vehicles; Telegram bridge sessions ARE shown — as read-only
-    /// mirrors, flagged with a badge in the sidebar. Pure helper so the filter
+    /// task-run vehicles; archived external sessions appear as read-only rows. Pure helper so the filter
     /// is unit-testable without standing up an AppState.
     nonisolated static func sidebarSessions(from all: [ChatSession]) -> [ChatSession] {
         all.filter { $0.taskRunId == nil }

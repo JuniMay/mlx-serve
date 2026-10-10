@@ -13,58 +13,21 @@ import XCTest
 /// narrowing it and sees an empty pane with no visible explanation.
 final class SettingsCategoryTests: XCTestCase {
 
-    // MARK: - Which categories exist for which engine
-
-    /// Engines is ONE section and always listed: its rows are launch flags for
-    /// engines that are not loaded yet, so hiding them by the active engine
-    /// left the user unable to opt into the next one.
-    func testEnginesIsListedForEveryEngine() {
-        for engine: ServerEngine? in [nil, .mlx, .llama, .dsv4] {
-            XCTAssertTrue(SettingsCategory.visible(engine: engine, selfUpdate: true).contains(.engines),
-                          "Engines must stay reachable on \(String(describing: engine))")
+    func testCategoriesGroupCachesAndHardwareWithoutRetiredDestinations() {
+        let expected = ["general", "modelFolders", "server", "lanSharing", "providers", "memory", "cache",
+                        "performance", "specDecode", "engines", "requestDefaults", "appearance", "voice",
+                        "tools", "sandbox", "about"]
+        for engine: ServerEngine? in [nil, .mlx, .mlxGguf, .llama, .dsv4] {
+            for selfUpdate in [false, true] {
+                XCTAssertEqual(SettingsCategory.visible(engine: engine, selfUpdate: selfUpdate).map(\.rawValue), expected)
+            }
         }
     }
 
-    func testGgufEngineHidesMlxOnlyCategories() {
-        let visible = SettingsCategory.visible(engine: .llama, selfUpdate: true)
-        XCTAssertFalse(visible.contains(.specDecode), "PLD/drafter/MTP are MLX-only kernels")
-        XCTAssertTrue(SettingsCategory.visible(engine: .mlxGguf, selfUpdate: true).contains(.specDecode),
-                      "a GGUF on the MLX path gets the MLX knobs")
-    }
-
-    /// Performance is ONE section now (the universal knobs merged with the
-    /// MLX-only ones), so it's listed for every engine — its universal rows
-    /// always apply, and only the MLX-only rows inside it come and go.
-    func testPerformanceIsListedForEveryEngine() {
-        for engine: ServerEngine? in [nil, .mlx, .llama, .dsv4] {
-            XCTAssertTrue(SettingsCategory.visible(engine: engine, selfUpdate: true).contains(.performance),
-                          "Performance must stay reachable on \(String(describing: engine))")
-        }
-    }
-
-    /// No model loaded → every engine section renders so the user can pre-tune.
-    /// The sidebar must offer them all, or those sections become unreachable.
-    func testNoModelLoadedOffersEveryEngineCategory() {
-        let visible = SettingsCategory.visible(engine: nil, selfUpdate: true)
-        for c in [SettingsCategory.specDecode, .performance, .engines] {
-            XCTAssertTrue(visible.contains(c), "\(c) must be reachable before a model loads")
-        }
-    }
-
-    /// The Mac App Store updates the app itself — that section isn't built, so
-    /// it must not be listed.
-    func testUpdatesCategoryFollowsTheBuildFeature() {
-        XCTAssertTrue(SettingsCategory.visible(engine: .mlx, selfUpdate: true).contains(.updates))
-        XCTAssertFalse(SettingsCategory.visible(engine: .mlx, selfUpdate: false).contains(.updates))
-    }
-
-    /// Sidebar order must match the order the sections render in, or clicking
-    /// down the list scrolls the form around at random.
-    func testSidebarOrderMatchesRenderOrder() {
-        XCTAssertEqual(SettingsCategory.visible(engine: .mlx, selfUpdate: true).map(\.rawValue), [
-            "general", "modelFolders", "server", "lanSharing", "providers", "specDecode", "memory", "performance",
-            "neuralEngine", "engines", "requestDefaults", "interface", "voice", "tools", "sandbox", "messaging", "updates", "about",
-        ])
+    func testAppearanceAndSpeculationUseUserFacingCategoryNames() throws {
+        let appearance = try XCTUnwrap(SettingsCategory(rawValue: "appearance"))
+        XCTAssertEqual(appearance.title, "Appearance")
+        XCTAssertEqual(SettingsCategory.specDecode.title, "Speculative Decoding")
     }
 
     // MARK: - Selection ↔ search interaction (the invariant)
@@ -105,10 +68,10 @@ final class SettingsCategoryTests: XCTestCase {
     }
 
     func testUnavailableDeepLinkFallsBackToGeneral() {
-        let visible = SettingsCategory.visible(engine: .llama, selfUpdate: false)
+        let visible: [SettingsCategory] = [.general, .server]
         XCTAssertEqual(SettingsSelection.afterOpen(requested: .specDecode, current: .category(.server), visible: visible),
                        .category(.general))
-        XCTAssertEqual(SettingsSelection.afterOpen(requested: .updates, current: .category(.server), visible: visible),
+        XCTAssertEqual(SettingsSelection.afterOpen(requested: .about, current: .category(.server), visible: visible),
                        .category(.general))
     }
 
@@ -129,11 +92,9 @@ final class SettingsCategoryTests: XCTestCase {
 
     // MARK: - Reconciliation
 
-    /// Load a GGUF model while "Speculative Decoding" is selected and that
-    /// category vanishes from the sidebar — the pane must not be left showing a
-    /// section that no longer exists (or, worse, nothing at all).
+    // An unavailable destination must fall back to a visible category.
     func testSelectionFallsBackToGeneralWhenItsCategoryDisappears() {
-        let visible = SettingsCategory.visible(engine: .llama, selfUpdate: true)
+        let visible: [SettingsCategory] = [.general, .server]
         let fallback = SettingsSelection.reconciled(.category(.specDecode), visible: visible)
         if case .category(let category) = fallback {
             XCTAssertEqual(category.rawValue, "general")
@@ -156,7 +117,7 @@ final class SettingsCategoryTests: XCTestCase {
             XCTAssertFalse(c.sidebarLabel.isEmpty)
             XCTAssertFalse(c.icon.isEmpty)
         }
-        XCTAssertEqual(SettingsCategory.specDecode.title, "Speculative Decoding (MLX only)")
+        XCTAssertEqual(SettingsCategory.specDecode.title, "Speculative Decoding")
         XCTAssertEqual(SettingsCategory.specDecode.sidebarLabel, "Speculative Decoding")
     }
 

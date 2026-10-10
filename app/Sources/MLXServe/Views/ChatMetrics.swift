@@ -23,11 +23,7 @@ enum ChatMetrics {
     /// measured its own column (`onGeometryChange` hasn't fired yet).
     static let contentFallbackWidth: CGFloat = 740
 
-    /// Interface ▸ Compact mode — tighter vertical rhythm for more on screen.
-    /// Read directly off UserDefaults (like the font-size constants below):
-    /// this is a display density knob, not a launch flag, so it has no place
-    /// on `ServerOptions`.
-    static var compactMode: Bool { UserDefaults.standard.bool(forKey: InterfacePrefKey.compactMode) }
+    static let compactMode = false
 
     /// Between turns. Small: every turn already carries its own trailing band
     /// (a reply's footer, a user turn's action row).
@@ -102,8 +98,8 @@ enum ChatMetrics {
         return compactMode ? max(0, base - 3.5) : base
     }
 
-    /// Settings ▸ Interface ▸ Chat Column. Absent = `.wide`.
-    static var chatColumn: ChatColumnWidth { ChatColumnWidth.current }
+    /// The transcript and input dock share an adaptive column.
+    static let chatColumn: ChatColumnWidth = .wide
 
     /// One height for every attachment; width follows each picture's ratio so
     /// a row shares a baseline.

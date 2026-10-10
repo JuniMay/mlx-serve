@@ -33,12 +33,6 @@ struct WelcomeView: View {
     @State private var cliInstalling = false
     @State private var cliError: String?
 
-    private static let logoImage: NSImage? = BundledAsset.image("appicon.png")
-
-    /// Derived from `UpdateChecker.repo` (the app's single source of truth
-    /// for the GitHub repo) so the star link can never drift from it.
-    static let gitHubStarURL = URL(string: "https://github.com/\(UpdateChecker.repo)")!
-
     // MARK: - Layout constants
 
     // Both dimensions are pinned so the sheet has a deterministic size; the
@@ -111,11 +105,10 @@ struct WelcomeView: View {
         if exit.closesWelcome { onDismiss() }
     }
 
-    // MARK: - Header (logo + title, star link)
+    // MARK: - Header
 
     private var header: some View {
         HStack(alignment: .center, spacing: 14) {
-            logoTile
             VStack(alignment: .leading, spacing: 2) {
                 Text("MLX-Serve")
                     .font(.app(.title, weight: .semibold))
@@ -126,38 +119,7 @@ struct WelcomeView: View {
 
             Spacer(minLength: 12)
 
-            // A real (if quiet) control rather than underlined link text: this
-            // is an ordinary button that opens a web page, and macOS spells
-            // that as a bordered control.
-            Button {
-                NSWorkspace.shared.open(Self.gitHubStarURL)
-            } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: "star.fill")
-                        .font(.app(.subheadline))
-                        .foregroundStyle(.yellow)
-                    Text("Star on GitHub")
-                }
-                .font(.app(.subheadline))
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
-            .help("Open the mlx-serve repository on GitHub")
         }
-    }
-
-    private var logoTile: some View {
-        ZStack {
-            if let logo = Self.logoImage {
-                Image(nsImage: logo)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-            }
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
-        }
-        .frame(width: 46, height: 46)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     // MARK: - Feature list (the selector)

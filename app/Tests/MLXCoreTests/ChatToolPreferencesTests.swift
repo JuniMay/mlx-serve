@@ -2,6 +2,48 @@ import XCTest
 @testable import MLXCore
 
 final class ChatToolPreferencesTests: XCTestCase {
+    func testConversationOverridesEachGlobalSwitchIndependently() {
+        var session = ChatSession()
+        session.toolPreferences = .init(toolsEnabled: false)
+        XCTAssertEqual(session.effectiveToolPreferences(defaults: .init(toolsEnabled: true, mcpEnabled: true)),
+                       .init(toolsEnabled: false, mcpEnabled: true))
+        session.toolPreferences = .init(mcpEnabled: true)
+        XCTAssertEqual(session.effectiveToolPreferences(defaults: .init(toolsEnabled: false, mcpEnabled: false)),
+                       .init(toolsEnabled: false, mcpEnabled: true))
+    }
+
+    func testConversationOverridesLegacyChoicesWithoutChangingDisabledToolNames() throws {
+        var session = ChatSession()
+        session.mode = .agent
+        session.disabledTools = ["shell", "future_tool"]
+        session.toolPreferences = .init(followsDefaults: false, toolsEnabled: false, mcpEnabled: true)
+        let restored = try JSONDecoder().decode(ChatSession.self, from: JSONEncoder().encode(session))
+        XCTAssertEqual(restored.effectiveToolPreferences(defaults: .init()),
+                       .init(toolsEnabled: false, mcpEnabled: true, disabledTools: ["shell", "future_tool"]))
+    }
+
+    func testConversationSwitchesCanSubtractAgentAccessButCannotGrantIt() {
+        var agent = Agent(name: "Coder", brief: "", systemPrompt: "Keep persona.")
+        agent.capabilities.tools = true
+        agent.capabilities.mcp = true
+        agent.enableThinking = true
+        let resolved = AgentResolution.resolve(agent: agent, defaults: .init())
+        let toolsOff = ChatToolPreferences(toolsEnabled: false).applying(to: resolved)
+        XCTAssertFalse(toolsOff.toolsEnabled)
+        XCTAssertEqual(toolsOff.tools, [.searchDocuments])
+        XCTAssertTrue(toolsOff.mcpEnabled)
+        XCTAssertTrue(toolsOff.thinkingEnabled)
+        XCTAssertEqual(toolsOff.systemPromptPrefix, resolved.systemPromptPrefix)
+        let mcpOff = ChatToolPreferences(mcpEnabled: false).applying(to: resolved)
+        XCTAssertTrue(mcpOff.toolsEnabled)
+        XCTAssertFalse(mcpOff.mcpEnabled)
+
+        agent.capabilities.tools = false
+        agent.capabilities.mcp = false
+        let denied = AgentResolution.resolve(agent: agent, defaults: .init())
+        XCTAssertEqual(ChatToolPreferences(toolsEnabled: true, mcpEnabled: true).applying(to: denied), denied)
+    }
+
     func testNewPreferencesInheritGlobalDefaultsLive() {
         var session = ChatSession()
         session.toolPreferences = ChatToolPreferences()

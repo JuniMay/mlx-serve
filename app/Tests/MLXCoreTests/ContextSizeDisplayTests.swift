@@ -12,6 +12,14 @@ import XCTest
 /// context looked inconsistent with the app.
 final class ContextSizeDisplayTests: XCTestCase {
 
+    func testContextChoicesKeepAutoAndSavedCustomValues() {
+        XCTAssertEqual(ContextSizeDisplay.options(modelMaxTokens: 512, currentValue: 256), [0, 256])
+        XCTAssertEqual(ContextSizeDisplay.options(modelMaxTokens: 8_192, currentValue: 5_000),
+                       [0, 4_096, 5_000, 6_144, 8_192])
+        XCTAssertTrue(ContextSizeDisplay.options(modelMaxTokens: 8_192, currentValue: 16_384).contains(16_384))
+        XCTAssertTrue(ContextSizeDisplay.options(modelMaxTokens: 0, currentValue: 5_000).contains(5_000))
+    }
+
     func testFormatTokens() {
         XCTAssertEqual(ContextSizeDisplay.formatTokens(0), "Auto")
         XCTAssertEqual(ContextSizeDisplay.formatTokens(512), "512")

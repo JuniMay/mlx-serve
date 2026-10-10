@@ -21,7 +21,7 @@ import Foundation
 /// Set by `swift build -Xswiftc -DMAS_BUILD` (see `app/build.sh`).
 struct BuildFeatures: Equatable {
 
-    /// Self-update by downloading and replacing the .app.
+    /// Self-update is suspended in every distribution until release delivery is configured.
     let selfUpdate: Bool
     /// Symlink `mlx-serve` onto the user's PATH.
     let cliInstaller: Bool
@@ -75,7 +75,7 @@ struct BuildFeatures: Equatable {
     }
 
     static let developerID = BuildFeatures(
-        selfUpdate: true, cliInstaller: true, cliLauncher: true,
+        selfUpdate: false, cliInstaller: true, cliLauncher: true,
         hostShell: true, ociPull: true, appleEvents: true, customModelFolders: true,
         guest: .init(packageManagers: .live, mcpServers: .fetched))
 

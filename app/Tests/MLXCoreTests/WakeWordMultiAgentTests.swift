@@ -101,8 +101,8 @@ final class WakeWordMultiAgentTests: XCTestCase {
     // MARK: - strip is untouched
 
     func testSinglePhraseStripIsUnchanged() {
-        XCTAssertEqual(WakeWord.strip("Hey Loki, what's the weather?"), "what's the weather?")
-        XCTAssertEqual(WakeWord.strip("Hey Loki"), "")
+        XCTAssertEqual(WakeWord.strip("Hey Loki, what's the weather?", phrase: "hey loki"), "what's the weather?")
+        XCTAssertEqual(WakeWord.strip("Hey Loki", phrase: "hey loki"), "")
         XCTAssertNil(WakeWord.strip("lowkey I agree with that"))
     }
 }

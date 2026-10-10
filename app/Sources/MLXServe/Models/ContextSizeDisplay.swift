@@ -1,20 +1,6 @@
 import Foundation
 
-/// Copy and number formatting for Settings → Context size.
-///
-/// Extracted from the SwiftUI row because that row surfaces THREE different
-/// token counts and it is easy to describe the wrong one:
-///
-///   * **Model max** — `max_position_embeddings` from `config.json` (262,144 on
-///     Qwen3.6-27B). Architectural, never memory-aware.
-///   * **GPU-safe max** — the largest context this Mac's free memory could hold
-///     for this model right now (`/props` `maxSafeContext`, ~93K).
-///   * **In use** — what the running server actually pinned and enforces
-///     (`/v1/models` `meta.context_length`, 78,848 = 85% of the GPU-safe max).
-///     This is the number agent CLIs are told about, so it must be visible.
-///
-/// "Auto" resolves to the third of those, NOT the first — the shipped help text
-/// claimed otherwise.
+/// Context choices and labels distinguish model limits, memory limits, and the active limit.
 enum ContextSizeDisplay {
 
     /// The context ladder Settings and the per-model sheet both pick from. 0 = Auto.
@@ -24,6 +10,12 @@ enum ContextSizeDisplay {
         393_216, 524_288, 786_432, 1_048_576,
     ]
 
+    static func options(modelMaxTokens: Int, currentValue: Int) -> [Int] {
+        var values = presets.filter { modelMaxTokens <= 0 || $0 <= modelMaxTokens }
+        if currentValue > 0 && !values.contains(currentValue) { values.append(currentValue) }
+        return values.sorted()
+    }
+
     /// "Auto" for 0; otherwise a 1024-based K/M abbreviation.
     static func formatTokens(_ n: Int) -> String {
         if n == 0 { return "Auto" }
@@ -32,12 +24,13 @@ enum ContextSizeDisplay {
         return "\(n)"
     }
 
-    /// Body copy under the slider. Shared with `ServerOptions.serverFlagFields`
-    /// so the two descriptions of "Auto" cannot drift.
+    /// Shared with the server flag description.
     static let helpText =
-        "Maximum prompt + completion tokens. \"Auto\" fits the model to available "
-        + "memory when it loads — well under the model max — and holds that value "
-        + "until the server restarts. Higher values use more memory."
+        "Maximum prompt and completion tokens. Auto chooses 85% of the memory-safe "
+        + "ceiling when the model loads, rounds down to 1,024 tokens, and caps the "
+        + "result at the model maximum. That limit stays fixed until the model reloads "
+        + "or the server restarts. A positive per-model context setting overrides this "
+        + "global choice. Larger contexts use more memory."
 
     /// The context the RUNNING server settled on, formatted for the pill.
     /// nil until the server has reported a loaded model.

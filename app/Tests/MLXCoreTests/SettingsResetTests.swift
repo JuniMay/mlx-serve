@@ -21,8 +21,7 @@ final class SettingsResetTests: XCTestCase {
     }
 
     func testResetPreservesTheTokenVerbatimIncludingWhitespace() {
-        // The bridge trims on use (`trimmedToken`); reset must not silently
-        // rewrite what the user pasted into the field.
+        // Reset preserves the stored credential exactly, including whitespace.
         var current = ServerOptions()
         current.telegram.botToken = "  123456:ABC\n"
 
