@@ -123,13 +123,21 @@ struct SettingsView: View {
         }
         SettingsSection(
             category: .lanSharing,
-            subtitle: "Share and discover models on your local network. Restart to apply."
+            subtitle: "Share this Mac’s models on your local network. Restart to apply."
         ) {
             LanSharingSectionContent()
         }
         SettingsSection(
             category: .providers,
-            subtitle: "OpenAI-compatible chat services. Changes apply when saved."
+            subtitle: "Discover models shared on your local network. Restart to apply.",
+            groupTitle: "Nearby Macs"
+        ) {
+            NearbyMacsSectionContent()
+        }
+        SettingsSection(
+            category: .providers,
+            subtitle: "OpenAI-compatible chat endpoints. Changes apply when saved.",
+            groupTitle: "Chat Services"
         ) {
             ProvidersSectionContent()
         }
@@ -244,7 +252,7 @@ extension EnvironmentValues {
         set { self[SettingsSearchSectionKey.self] = newValue }
     }
 
-    fileprivate var settingsVisibleRows: SettingsVisibleRows {
+    var settingsVisibleRows: SettingsVisibleRows {
         get { self[SettingsVisibleRowsKey.self] }
         set { self[SettingsVisibleRowsKey.self] = newValue }
     }
@@ -266,7 +274,7 @@ extension EnvironmentValues {
 /// Number of rows that survived the filter, summed up the view tree. Sections
 /// read it to decide whether to collapse; the root reads it to decide whether
 /// to show the "no matches" placeholder.
-private struct SettingsVisibleRowCountKey: PreferenceKey {
+struct SettingsVisibleRowCountKey: PreferenceKey {
     static let defaultValue = SettingsVisibleRows()
     static func reduce(value: inout SettingsVisibleRows, nextValue: () -> SettingsVisibleRows) {
         value.merge(nextValue())
@@ -337,7 +345,7 @@ private struct ResetDefaultsFooter: View {
             SearchableRow(searchText: [label, helpText]) {
                 VStack(alignment: .trailing, spacing: 6) {
                     if selection == .all {
-                        Text("Keeps startup, appearance, folders, providers, and your workspace.")
+                        Text("Keeps startup, appearance, folders, chat services, and your workspace.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -460,9 +468,7 @@ private struct EngineAwareSections: View {
         SettingsSection(category: .memory, subtitle: "Model residency and available memory. Restart to apply.") {
             MemorySectionContent(showMLX: showMLX)
         }
-        SettingsSection(category: .cache, subtitle: "Reuse processed prompts and manage cache memory and disk space. Restart to apply.") {
-            CacheSectionContent(showMLX: showMLX, showLlama: showLlama)
-        }
+        CacheSectionContent(showMLX: showMLX, showLlama: showLlama)
         SettingsSection(category: .performance, subtitle: "Generation throughput and hardware acceleration. Restart to apply.") {
             if showMLX { PerformanceSectionContent() }
             SettingsSubheader("Neural Engine acceleration")
@@ -471,9 +477,7 @@ private struct EngineAwareSections: View {
         SettingsSection(category: .specDecode, subtitle: "Draft several tokens and verify them together on compatible models. Restart to apply.") {
             SpecDecodeSectionContent(showMLX: showMLX, showLlama: showLlama, showDSpark: showDSpark)
         }
-        SettingsSection(category: .engines, subtitle: "GGUF engine settings. Restart to apply.") {
-            EnginesSectionContent()
-        }
+        EnginesSectionContent()
     }
 }
 
@@ -497,18 +501,19 @@ struct SettingsFormSections<Content: View>: View {
     }
 }
 
-private struct SettingsSection<Content: View>: View {
+struct SettingsSection<Content: View>: View {
     /// Identity. The sidebar row and this header both read their text from it,
     /// so a section can never exist without a way to reach it (and its two
     /// labels can't drift). Pinned by `testEverySettingsSectionDeclaresACategory`.
     let category: SettingsCategory
     let subtitle: String
+    var groupTitle: String? = nil
     @ViewBuilder var content: Content
 
     @Environment(\.settingsSearchQuery) private var query
     @Environment(\.settingsSelection) private var selection
 
-    private var title: String { category.title }
+    private var title: String { [category.title, groupTitle].compactMap { $0 }.joined(separator: " · ") }
 
     /// Both filter decisions (what query the rows see, whether to hide the
     /// chrome) live in the pure, tested `SettingsSearch.SectionFilter`.
@@ -537,7 +542,7 @@ private struct SettingsSection<Content: View>: View {
                 .environment(\.settingsSearchQuery, filter.childQuery)
                 .environment(\.settingsSearchSection, category)
         } header: {
-            SettingsSectionHeader(category: category, subtitle: subtitle)
+            SettingsSectionHeader(category: category, subtitle: subtitle, groupTitle: groupTitle)
         }
     }
 }
@@ -545,16 +550,20 @@ private struct SettingsSection<Content: View>: View {
 struct SettingsSectionHeader: View {
     let category: SettingsCategory
     let subtitle: String
+    var groupTitle: String? = nil
     @Environment(\.settingsSelection) private var selection
     @Environment(\.settingsSearchQuery) private var query
     @Environment(\.settingsVisibleRows) private var visibleRows
 
     var body: some View {
-        let filter = SettingsSearch.section(query: query, title: category.title)
+        let heading = [category.title, groupTitle].compactMap { $0 }.joined(separator: " · ")
+        let filter = SettingsSearch.section(query: query, title: heading)
         if !filter.collapsed(visibleRows: visibleRows.count(in: category)) {
             VStack(alignment: .leading, spacing: 4) {
                 if selection == .all {
-                    Text(L10n.text(category.title)).font(.headline)
+                    Text(L10n.text(heading)).font(.headline)
+                } else if let groupTitle {
+                    Text(L10n.text(groupTitle)).font(.headline)
                 }
                 Text(L10n.text(subtitle))
                     .font(.subheadline)
@@ -881,15 +890,7 @@ private struct LanSharingSectionContent: View {
                 }
             }
         }
-        if let m = meta["lanDiscoverEnabled"] {
-            SettingsRow(title: m.title, explainer: m.explainer, summary: m.summary, isDirty: dirty.dirty(\.lanDiscoverEnabled)) {
-                Toggle("", isOn: $appState.serverOptions.lanDiscoverEnabled)
-                    .labelsHidden()
-                    .toggleStyle(.switch).font(.app(.body))
-            }
-        }
-        // The privacy disclosure — sharing means running other people's
-        // prompts, and using a network model means the host reads yours.
+        // Publishing models lets nearby Macs send prompts to this Mac.
         SearchableRow(searchText: ["Privacy", Self.privacyNote]) {
             Text(L10n.text(Self.privacyNote))
                 .font(.app(.caption))
@@ -899,7 +900,7 @@ private struct LanSharingSectionContent: View {
         }
     }
 
-    private static let privacyNote = "Privacy: prompts sent to a model you share are processed on — and visible to — this Mac. Prompts you send to a network model are visible to the Mac hosting it. Traffic stays on your local network, and everything here is off unless you turn it on."
+    private static let privacyNote = "Prompts sent to models you share are processed on and visible to this Mac. Sharing stays on your local network and is off until you enable it."
 
     /// One checkbox per local model name. Names are deduped — a GGUF and an
     /// MLX build of the same repo share a name and are shared together (the
@@ -932,6 +933,27 @@ private struct LanSharingSectionContent: View {
 }
 
 // MARK: - Providers section
+
+private struct NearbyMacsSectionContent: View {
+    @EnvironmentObject var appState: AppState
+    @EnvironmentObject var server: ServerManager
+
+    var body: some View {
+        if let field = ServerOptions.serverFlagFields["lanDiscoverEnabled"] {
+            SettingsRow(
+                title: field.title,
+                explainer: field.explainer,
+                summary: field.summary,
+                isDirty: ServerLaunchDirty(current: appState.serverOptions,
+                                          last: server.liveLaunchedOptions).dirty(\.lanDiscoverEnabled)
+            ) {
+                Toggle("", isOn: $appState.serverOptions.lanDiscoverEnabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+        }
+    }
+}
 
 /// Rows of `~/.mlx-serve/providers.json`. Every edit saves the file and asks
 /// the running server to reload; the health dot is the server's own probe
@@ -1907,115 +1929,124 @@ private struct CacheSectionContent: View {
 
     var body: some View {
         let opts = $appState.serverOptions
-        SettingsSubheader("Request reuse")
-        if let m = meta["tokenizeCacheEntries"] {
-            SettingsRow(
-                title: m.title,
-                explainer: m.explainer, summary: m.summary,
-                isDirty: dirty.dirty(\.tokenizeCacheEntries)
-            ) {
-                NumberStepper(title: m.title, value: opts.tokenizeCacheEntries, range: 0...32)
+        SettingsSection(category: .cache, subtitle: "Reuse tokenized prompts across all engines.",
+                        groupTitle: "Prompt preparation") {
+            if let m = meta["tokenizeCacheEntries"] {
+                SettingsRow(
+                    title: m.title,
+                    explainer: m.explainer, summary: m.summary,
+                    isDirty: dirty.dirty(\.tokenizeCacheEntries)
+                ) {
+                    NumberStepper(title: m.title, value: opts.tokenizeCacheEntries, range: 0...32)
+                }
             }
         }
         if showMLX {
-            SettingsSubheader("Conversation cache in memory")
-            if let m = meta["kvQuant"] {
-                SettingsRow(
-                    title: m.title,
-                    explainer: m.explainer, summary: m.summary,
-                    isDirty: dirty.dirty(\.kvQuant)
-                ) {
-                    Picker("", selection: opts.kvQuant) {
-                        ForEach(ServerOptions.KVQuant.allCases) { q in
-                            Text(L10n.text(q.label)).font(.app(.body)).tag(q)
+            SettingsSection(category: .cache, subtitle: "Keep processed conversations ready for reuse by MLX.",
+                            groupTitle: "Conversation cache in memory") {
+                if let m = meta["kvQuant"] {
+                    SettingsRow(
+                        title: m.title,
+                        explainer: m.explainer, summary: m.summary,
+                        isDirty: dirty.dirty(\.kvQuant)
+                    ) {
+                        Picker("", selection: opts.kvQuant) {
+                            ForEach(ServerOptions.KVQuant.allCases) { q in
+                                Text(L10n.text(q.label)).font(.app(.body)).tag(q)
+                            }
                         }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .frame(minWidth: 220, alignment: .trailing).font(.app(.body))
                     }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .frame(minWidth: 220, alignment: .trailing).font(.app(.body))
+                }
+                if let m = meta["hotPrefixCacheEnabled"] {
+                    SettingsRow(
+                        title: m.title,
+                        explainer: m.explainer, summary: m.summary,
+                        isDirty: dirty.dirty(\.hotPrefixCacheEnabled)
+                    ) {
+                        Toggle("", isOn: opts.hotPrefixCacheEnabled)
+                            .labelsHidden()
+                            .toggleStyle(.switch).font(.app(.body))
+                    }
+                }
+                if let m = meta["prefixCacheEntries"], appState.serverOptions.hotPrefixCacheEnabled {
+                    // Surface the RAM clamp so a 16 GB Mac user who sets, say, 8 sees
+                    // that the launcher will actually pass 1 (and why).
+                    let ram = ProcessInfo.processInfo.physicalMemory
+                    let set = appState.serverOptions.prefixCacheEntries
+                    let effective = ServerOptions.ramCappedPrefixCacheEntries(set, physicalMemoryBytes: ram)
+                    let capNote = effective < set
+                        ? "This Mac (\(MemoryInfo.format(Int64(ram)))) launches with \(effective) to keep cache memory bounded."
+                        : ""
+                    SettingsRow(
+                        title: m.title,
+                        explainer: m.explainer,
+                        summary: m.summary,
+                        note: effective < set ? capNote : nil,
+                        isDirty: dirty.dirty(\.prefixCacheEntries)
+                    ) {
+                        NumberStepper(title: m.title, value: opts.prefixCacheEntries, range: 1...16)
+                    }
+                }
+                if let m = meta["prefixCacheMem"], appState.serverOptions.hotPrefixCacheEnabled {
+                    SettingsRow(
+                        title: m.title,
+                        explainer: m.explainer, summary: m.summary,
+                        isDirty: dirty.dirty(\.prefixCacheMem)
+                    ) {
+                        TextField("", text: opts.prefixCacheMem, prompt: Text("Auto"))
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 110)
+                    }
                 }
             }
-            if let m = meta["hotPrefixCacheEnabled"] {
-                SettingsRow(
-                    title: m.title,
-                    explainer: m.explainer, summary: m.summary,
-                    isDirty: dirty.dirty(\.hotPrefixCacheEnabled)
-                ) {
-                    Toggle("", isOn: opts.hotPrefixCacheEnabled)
-                        .labelsHidden()
-                        .toggleStyle(.switch).font(.app(.body))
+            SettingsSection(category: .cache, subtitle: "Keep MLX conversation prefixes across restarts and memory eviction.",
+                            groupTitle: "Conversation cache on disk") {
+                if let m = meta["enablePrefixCacheDisk"] {
+                    SettingsRow(
+                        title: m.title,
+                        explainer: m.explainer, summary: m.summary,
+                        isDirty: dirty.dirty(\.enablePrefixCacheDisk)
+                    ) {
+                        Toggle("", isOn: opts.enablePrefixCacheDisk)
+                            .labelsHidden()
+                            .toggleStyle(.switch).font(.app(.body))
+                    }
                 }
-            }
-            if let m = meta["prefixCacheEntries"], appState.serverOptions.hotPrefixCacheEnabled {
-                // Surface the RAM clamp so a 16 GB Mac user who sets, say, 8 sees
-                // that the launcher will actually pass 1 (and why).
-                let ram = ProcessInfo.processInfo.physicalMemory
-                let set = appState.serverOptions.prefixCacheEntries
-                let effective = ServerOptions.ramCappedPrefixCacheEntries(set, physicalMemoryBytes: ram)
-                let capNote = effective < set
-                    ? "  ·  This Mac (\(MemoryInfo.format(Int64(ram)))) launches with \(effective) to keep cache memory bounded."
-                    : ""
-                SettingsRow(
-                    title: m.title,
-                    explainer: m.explainer + capNote,
-                    summary: effective < set ? nil : m.summary,
-                    isDirty: dirty.dirty(\.prefixCacheEntries)
-                ) {
-                    NumberStepper(title: m.title, value: opts.prefixCacheEntries, range: 1...16)
-                }
-            }
-            if let m = meta["prefixCacheMem"], appState.serverOptions.hotPrefixCacheEnabled {
-                SettingsRow(
-                    title: m.title,
-                    explainer: m.explainer, summary: m.summary,
-                    isDirty: dirty.dirty(\.prefixCacheMem)
-                ) {
-                    TextField("", text: opts.prefixCacheMem, prompt: Text("Auto"))
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 110)
-                }
-            }
-            SettingsSubheader("Conversation cache on disk")
-            if let m = meta["enablePrefixCacheDisk"] {
-                SettingsRow(
-                    title: m.title,
-                    explainer: m.explainer, summary: m.summary,
-                    isDirty: dirty.dirty(\.enablePrefixCacheDisk)
-                ) {
-                    Toggle("", isOn: opts.enablePrefixCacheDisk)
-                        .labelsHidden()
-                        .toggleStyle(.switch).font(.app(.body))
-                }
-            }
-            if let m = meta["prefixCacheDisk"], appState.serverOptions.enablePrefixCacheDisk {
-                SettingsRow(
-                    title: m.title,
-                    explainer: m.explainer, summary: m.summary,
-                    isDirty: dirty.dirty(\.prefixCacheDisk)
-                ) {
-                    TextField("", text: opts.prefixCacheDisk, prompt: Text("10GB"))
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 110)
+                if let m = meta["prefixCacheDisk"], appState.serverOptions.enablePrefixCacheDisk {
+                    SettingsRow(
+                        title: m.title,
+                        explainer: m.explainer, summary: m.summary,
+                        isDirty: dirty.dirty(\.prefixCacheDisk)
+                    ) {
+                        TextField("", text: opts.prefixCacheDisk, prompt: Text("10GB"))
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 110)
+                    }
                 }
             }
         }
         if showLlama {
-            SettingsSubheader("GGUF conversation cache")
-            if let m = meta["llamaKvQuant"] {
-                SettingsRow(title: m.title, explainer: m.explainer, summary: m.summary, isDirty: dirty.dirty(\.llamaKvQuant)) {
-                    Picker("", selection: opts.llamaKvQuant) {
-                        ForEach(ServerOptions.LlamaKVQuant.allCases) { q in
-                            Text(L10n.text(q.label)).font(.app(.body)).tag(q)
+            SettingsSection(category: .cache, subtitle: "Reserve conversation memory for the llama.cpp engine.",
+                            groupTitle: "GGUF conversation cache") {
+                if let m = meta["llamaKvQuant"] {
+                    SettingsRow(title: m.title, explainer: m.explainer, summary: m.summary, isDirty: dirty.dirty(\.llamaKvQuant)) {
+                        Picker("", selection: opts.llamaKvQuant) {
+                            ForEach(ServerOptions.LlamaKVQuant.allCases) { q in
+                                Text(L10n.text(q.label)).font(.app(.body)).tag(q)
+                            }
                         }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .frame(minWidth: 260, alignment: .trailing).font(.app(.body))
                     }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .frame(minWidth: 260, alignment: .trailing).font(.app(.body))
                 }
-            }
-            if let m = meta["llamaCacheEntries"] {
-                SettingsRow(title: m.title, explainer: m.explainer, summary: m.summary, isDirty: dirty.dirty(\.llamaCacheEntries)) {
-                    NumberStepper(title: m.title, value: opts.llamaCacheEntries, range: 1...8)
+                if let m = meta["llamaCacheEntries"] {
+                    SettingsRow(title: m.title, explainer: m.explainer, summary: m.summary, isDirty: dirty.dirty(\.llamaCacheEntries)) {
+                        NumberStepper(title: m.title, value: opts.llamaCacheEntries, range: 1...8)
+                    }
                 }
             }
         }
@@ -2028,18 +2059,15 @@ private struct CacheSectionContent: View {
 private struct EnginesSectionContent: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var server: ServerManager
-    @Environment(\.settingsSearchQuery) private var query
 
     private var meta: [String: ServerOptionField] { ServerOptions.serverFlagFields }
     private var dirty: ServerLaunchDirty {
         ServerLaunchDirty(current: appState.serverOptions, last: server.liveLaunchedOptions)
     }
-    /// A search narrows to rows, so the engine boxes step aside while one runs.
-    private var grouped: Bool { SettingsSearch.tokens(query).isEmpty }
 
     var body: some View {
         let opts = $appState.serverOptions
-        EngineGroup(name: "mlx-serve-gguf", blurb: "GGUF files on MLX itself. Experimental.", boxed: grouped) {
+        SettingsSection(category: .engines, subtitle: "Run supported GGUF models on MLX. Experimental.", groupTitle: "MLX GGUF") {
             if let m = meta["mlxGguf"] {
                 SettingsRow(title: m.title, explainer: m.explainer, summary: m.summary, isDirty: dirty.dirty(\.mlxGguf)) {
                     Toggle("", isOn: opts.mlxGguf)
@@ -2048,7 +2076,7 @@ private struct EnginesSectionContent: View {
                 }
             }
         }
-        EngineGroup(name: "llama.cpp", blurb: "Serves every other .gguf file. Its own kernels and KV layout, so the MLX rows do not apply.", boxed: grouped) {
+        SettingsSection(category: .engines, subtitle: "Configure the general GGUF engine.", groupTitle: "llama.cpp") {
             if let m = meta["llamaUbatch"] {
                 SettingsRow(title: m.title, explainer: m.explainer, summary: m.summary, isDirty: dirty.dirty(\.llamaUbatch)) {
                     Picker("", selection: opts.llamaUbatch) {
@@ -2063,7 +2091,7 @@ private struct EnginesSectionContent: View {
                 }
             }
         }
-        EngineGroup(name: "ds4", blurb: "Serves DeepSeek-V4-Flash GGUF files.", boxed: grouped) {
+        SettingsSection(category: .engines, subtitle: "Configure the DeepSeek GGUF engine.", groupTitle: "ds4") {
             if let m = meta["ssdStreaming"] {
                 SettingsRow(title: m.title, explainer: m.explainer, summary: m.summary, isDirty: dirty.dirty(\.ssdStreaming)) {
                     Toggle("", isOn: opts.ssdStreaming)
@@ -2074,33 +2102,6 @@ private struct EnginesSectionContent: View {
         }
     }
 }
-
-/// One engine's rows in a box under its name. Unboxed, the rows sit bare in the
-/// section, so a search that filters every row out leaves no empty box behind.
-private struct EngineGroup<Content: View>: View {
-    let name: String
-    let blurb: String
-    let boxed: Bool
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        if boxed {
-            VStack(alignment: .leading, spacing: 14) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(name).font(.app(.headline))
-                    Text(L10n.text(blurb)).font(.app(.caption2)).foregroundStyle(.secondary)
-                }
-                VStack(alignment: .leading, spacing: 18) { content }
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: AppLayout.surfaceRadius).fill(Color.secondary.opacity(0.08)))
-        } else {
-            content
-        }
-    }
-}
-
 
 // MARK: - Saved model thinking
 
@@ -2566,13 +2567,16 @@ private struct ChatToolsSectionContent: View {
 private struct ChatToolGroupSettings: View {
     let group: AgentToolGroup
     @Environment(\.settingsSearchQuery) private var query
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var expanded = false
 
     var body: some View {
         SearchableRow(searchText: [group.title] + group.tools.map(\.displayName)) {
             DisclosureGroup(isExpanded: Binding(
                 get: { expanded || !SettingsSearch.tokens(query).isEmpty },
-                set: { expanded = $0 })) {
+                set: { value in
+                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { expanded = value }
+                })) {
                 ForEach(group.tools, id: \.self) { tool in
                     ChatToolSettingsSwitch(tool: tool)
                 }

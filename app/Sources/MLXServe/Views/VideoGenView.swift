@@ -18,9 +18,7 @@ struct VideoGenView: View {
     /// The editor's caret or selection, for dropping a reference marker where
     /// the user is typing. nil until the editor has had focus.
     @State private var promptSelection: TextSelection? = nil
-    @FocusState private var promptFocused: Bool
-    /// Saved prompt editor height.
-    @State private var promptHeight: Double = PromptEditorHeight.defaultHeight
+    @State private var promptFocused = false
     @State private var showAdvanced: Bool = false
     @State private var showMediaInputs: Bool = true
     @State private var model: VideoModelPreset = .ltx23Q4
@@ -225,17 +223,18 @@ struct VideoGenView: View {
         return nil
     }
 
+    private var canGenerate: Bool { !prompt.isBlank && generationNotice == nil }
+
     private var promptSection: some View {
         VStack(alignment: .leading, spacing: AppLayout.labelSpacing) {
             if let hint = promptHint { promptWarning(hint) }
-            VideoPromptInput(isEmpty: prompt.isEmpty, format: model.promptFormat, editor: {
-                // Reference tiles insert their marker at the editor's selection.
-                TextEditor(text: $prompt, selection: $promptSelection)
+            VideoPromptInput(format: model.promptFormat, editor: {
+                ComposerPromptEditor(text: $prompt, placeholder: "Describe a video…",
+                                     selection: $promptSelection, focused: $promptFocused,
+                                     isRunning: service.isRunning,
+                                     canSubmit: canGenerate,
+                                     onSubmit: tryGenerate, onCancel: service.cancel)
                     .accessibilityLabel("Prompt")
-                    .focused($promptFocused)
-                    .font(.app(.body))
-                    .frame(height: min(promptHeight, AppLayout.generationPromptHeight))
-                    .scrollContentBackground(.hidden)
             }, actions: {
                 Menu {
                     Button("Enhance…") { showEnhance = true }.disabled(prompt.isBlank)
@@ -1829,27 +1828,16 @@ struct VideoGenView: View {
     private var actionRow: some View {
         Group {
             if service.isRunning {
-                Button(role: .destructive) {
-                    service.cancel()
-                } label: {
-                    Label("Cancel", systemImage: "stop.circle")
-                }
-                .buttonStyle(.bordered)
+                ComposerActionButton(isRunning: true, label: "Cancel") { service.cancel() }
             } else {
-                Button {
-                    tryGenerate()
-                } label: {
-                    Label("Generate", systemImage: "wand.and.stars")
-                }
-                .buttonStyle(.borderedProminent)
+                ComposerActionButton(isRunning: false, label: "Generate") { tryGenerate() }
                 .keyboardShortcut(.return, modifiers: [.command])
-                .disabled(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (lanModel == nil && !downloads.bundleReady(model.bundle)) || !customSizeValid || !payloadFits)
+                .disabled(!canGenerate)
                 .help(timeEstimate.map { estimate in
                     L10n.text(estimate) + "\n" + L10n.text("Estimated from measured runs and this Mac's GPU. Actual time varies with what else is using the GPU.")
                 } ?? L10n.text("Generate"))
             }
         }
-        .controlSize(.large)
     }
 
     private var previewArea: some View {
@@ -1980,7 +1968,6 @@ struct VideoGenView: View {
         // box, so the launch after that one must not show it ticked and grey.
         if turboEngaged { bestQuality = false }
         diffusionDecoder = s.diffusionDecoder
-        promptHeight = PromptEditorHeight.clamp(s.promptHeight)
         loras = s.loras
         // A LoRA file may have moved since last session — drop stale entries.
         loras.removeAll { !FileManager.default.fileExists(atPath: $0.path) }
@@ -2054,7 +2041,6 @@ struct VideoGenView: View {
         s.bestQuality = bestQuality
         s.diffusionDecoder = diffusionDecoder
         s.turbo = turbo
-        s.promptHeight = PromptEditorHeight.clamp(promptHeight)
         s.loras = loras
         s.prompt = prompt
         s.firstFramePath = firstFrameImageURL?.path
@@ -2232,7 +2218,6 @@ struct VideoGenView: View {
 
 /// Keeps the editor and its prompt actions together inside the input dock.
 struct VideoPromptInput<Editor: View, Actions: View>: View {
-    let isEmpty: Bool
     let format: VideoPromptFormat
     @ViewBuilder var editor: Editor
     @ViewBuilder var actions: Actions
@@ -2240,18 +2225,6 @@ struct VideoPromptInput<Editor: View, Actions: View>: View {
     var body: some View {
         HStack(alignment: .top, spacing: AppLayout.compactSpacing) {
             editor
-                .overlay(alignment: .topLeading) {
-                    if isEmpty {
-                        Text("Describe a video…")
-                            .font(.app(.body))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 8)
-                            .allowsHitTesting(false)
-                    }
-                }
                 .help(L10n.text(H3PromptExamples.placeholder(for: format)))
             actions
         }

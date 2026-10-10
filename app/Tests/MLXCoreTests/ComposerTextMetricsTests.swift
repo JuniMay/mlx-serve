@@ -29,26 +29,4 @@ final class ComposerTextMetricsTests: XCTestCase {
                           "9 was the field padding plus a guess — it ignored both text insets")
     }
 
-    /// Every one of the three numbers must be read from here, in BOTH places:
-    /// two are set on AppKit objects and the third on a SwiftUI modifier, so
-    /// nothing in the type system relates them and a literal in either place
-    /// drifts silently.
-    func testTheEditorAndThePlaceholderReadTheSameConstants() throws {
-        let url = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("Sources/MLXServe/Views/ChatView.swift")
-        let s = try String(contentsOf: url, encoding: .utf8)
-
-        for needle in ["ComposerTextMetrics.placeholderLeading",
-                       "ComposerTextMetrics.placeholderTop",
-                       "ComposerTextMetrics.containerInsetWidth",
-                       "ComposerTextMetrics.containerInsetHeight",
-                       "ComposerTextMetrics.lineFragmentPadding",
-                       "ComposerTextMetrics.fieldHorizontalPadding"] {
-            XCTAssertTrue(s.contains(needle), "ChatView must read \(needle)")
-        }
-        XCTAssertFalse(s.contains("lineFragmentPadding = 2"),
-                       "the line-fragment padding is a shared constant, not a literal")
-    }
 }

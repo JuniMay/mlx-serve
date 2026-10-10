@@ -89,7 +89,8 @@ phrase while the voice session is active.
 ## Tools and sandboxing
 
 Settings defines default Tools and MCP access. Each conversation can override
-those two choices. Plain Chat disables both and attached-folder search. An
+those two independent choices and use them together. Plain Chat appears above
+them as an override that disables both and attached-folder search. An
 agent's capability restrictions still apply. Enabling access does not approve
 a tool action. MCP servers added by the user default to enabled in their server
 configuration.
@@ -102,3 +103,24 @@ copies. Network access is a separate setting; disabling it removes the guest's
 network device. Host-side file tools retain workspace checks, and not every
 tool runs inside the VM. See `AgentSandbox`, `VzGuest`, and `ToolExecutor` in
 `app/Sources/MLXServe/Services`.
+
+## Settings and model sources
+
+Settings groups Cache controls by prompt preparation, memory reuse, disk reuse,
+and the applicable GGUF engine. Engines uses the same native grouped layout.
+Options show a short caption, with the complete explanation beside the option
+name. Search includes both texts. Tools groups expand with brief motion and
+respect the system Reduce Motion preference.
+
+Providers contains Nearby Macs as a built-in source and separately configured
+OpenAI-compatible chat services. Nearby Macs uses LAN discovery and requires a
+server restart after a change. Models run on the Mac that hosts them; that Mac
+can read the prompts sent to it. Discovery does not create a chat-service entry
+or change provider credentials. LAN Sharing controls which models this Mac
+publishes. Reset Nearby Macs turns discovery off and preserves publishing and
+configured chat services.
+
+Disable vision skips language-model vision weights on the MLX path. Supported
+models use different image towers, projectors, or patch embedders, so memory
+savings depend on the model. Unified Gemma models also omit audio embedding
+weights. This setting does not disable separate image or video generation.

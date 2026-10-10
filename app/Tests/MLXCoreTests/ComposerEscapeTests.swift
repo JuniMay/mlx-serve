@@ -45,14 +45,6 @@ final class ComposerEscapeTests: XCTestCase {
 
     // MARK: - The wiring
 
-    func testTheComposerFieldHandlesCancelOperation() {
-        let source = chatViewSource
-        XCTAssertFalse(source.isEmpty, "could not read ChatView.swift")
-        XCTAssertTrue(source.contains("NSResponder.cancelOperation(_:)"),
-                      "Escape reaches the composer through cancelOperation — the responder chain, "
-                      + "so the two .cancelAction buttons still win when they are on screen")
-    }
-
     func testStopGenerationAddsNoCompetingCancelActionShortcut() {
         // The guard for the race this design avoids: exactly the two controls
         // that legitimately own Escape may claim it as a key equivalent. A

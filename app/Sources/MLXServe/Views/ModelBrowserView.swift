@@ -740,7 +740,7 @@ private struct MyModelsPane: View {
                 Text("Size on Disk")
                     .frame(width: 90, alignment: .trailing)
                 Text("")
-                    .frame(width: 120)
+                    .frame(width: ModelBrowserMetrics.localActionWidth)
             }
             .font(.app(.callout).weight(.semibold))
             .foregroundStyle(.secondary)
@@ -2066,131 +2066,126 @@ private struct LocalModelRow: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 90, alignment: .trailing)
 
-            // Use + Delete. "Use" is the missing terminal action the browser
-            // never had — before this, the only thing you could do with a model
-            // you'd downloaded was throw it away. Once picked, the button is
-            // replaced by an In-use badge rather than merely greyed out, so the
-            // click produces visible feedback.
-            HStack(spacing: 6) {
-                if model.isChatPickable {
-                    if useState == .idle {
-                        UseModelButton(path: model.path, name: model.name)
-                    } else {
-                        ModelUseBadge(state: useState)
+            HStack(spacing: ModelBrowserMetrics.localActionSpacing) {
+                VStack(spacing: 4) {
+                    if model.isChatPickable {
+                        if useState == .idle {
+                            UseModelButton(path: model.path, name: model.name)
+                        } else {
+                            ModelUseBadge(state: useState)
+                        }
+                    } else if isDecisionModelType(model.modelType) {
+                        UseDecisionModelButton(path: model.path, name: model.name)
+                    } else if let modality = MediaModality(modelType: model.modelType) {
+                        UseMediaModelButton(modality: modality, name: model.name, path: model.path)
                     }
-                } else if isDecisionModelType(model.modelType) {
-                    UseDecisionModelButton(path: model.path, name: model.name)
-                } else if let modality = MediaModality(modelType: model.modelType) {
-                    // A media checkpoint is a real, loadable, servable model —
-                    // it just is not a CHAT model, and until now that meant the
-                    // only verb the browser offered for it was Delete. This
-                    // does NOT go through `useModelAndAwaitReady`: that starts
-                    // the server on the path as its primary chat model, which
-                    // for a diffusion checkpoint means the text loader. It
-                    // opens the pane that owns the model instead, and lets the
-                    // pane load it the way it always has.
-                    UseMediaModelButton(modality: modality, name: model.name, path: model.path)
-                }
-                if let check = updateCheck, case .update(let update) = check.result {
-                    Button {
-                        if update.replaces > 0 { confirmReplace = check } else { applyUpdate(check) }
-                    } label: {
-                        Image(systemName: "arrow.down.circle")
-                            .foregroundStyle(.tint)
-                            .frame(minWidth: 22, minHeight: 22)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.borderless)
-                    .controlSize(.small)
-                    .font(.app(.callout))
-                    .disabled(downloads.downloads[check.repo]?.status == .downloading)
-                    .accessibilityLabel("Update model")
-                    .help("Update from \(check.repo): \(update.files) file\(update.files == 1 ? "" : "s"), \(ByteCountFormatter.string(fromByteCount: update.bytes, countStyle: .file))")
-                }
-                if model.isChatPickable {
-                    Button { settings = settingsRequest } label: {
-                        Image(systemName: "slider.horizontal.3")
-                            .foregroundStyle(hasOverrides ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
-                            .frame(minWidth: 22, minHeight: 22)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.borderless)
-                    .controlSize(.small)
-                    .font(.app(.callout))
-                    .accessibilityLabel("Model settings")
-                    .help(hasOverrides ? "Model settings (this model has its own context / KV settings)" : "Model settings")
-                }
-                if model.isDownloading {
-                    // The trash's slot: deleting files under a live transfer
-                    // breaks it, so the row offers the transfer's own Cancel.
-                    if let live = ModelRowActions.transfer(for: model, in: downloads.downloads) {
-                        ProgressView(value: max(0, min(1, live.state.progress)))
-                            .progressViewStyle(.linear)
-                            .frame(width: 60)
+                    if model.isDownloading {
+                        if let live = ModelRowActions.transfer(for: model, in: downloads.downloads) {
+                            VStack(spacing: 4) {
+                                ProgressView(value: max(0, min(1, live.state.progress)))
+                                    .progressViewStyle(.linear)
+                                Text(verbatim: live.state.percentFormatted)
+                                    .font(.app(.caption).monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
                             .help(live.state.statusText)
-                        Text(verbatim: live.state.percentFormatted)
-                            .font(.app(.caption).monospacedDigit())
-                            .foregroundStyle(.secondary)
-                        Button { downloads.cancel(live.repoId) } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(.secondary)
-                                .frame(minWidth: 22, minHeight: 22)
+                        } else {
+                            ProgressView().controlSize(.small)
+                        }
+                    }
+                }
+                .frame(width: ModelBrowserMetrics.localPrimaryActionWidth)
+
+                ZStack {
+                    if let check = updateCheck, case .update(let update) = check.result {
+                        Button {
+                            if update.replaces > 0 { confirmReplace = check } else { applyUpdate(check) }
+                        } label: {
+                            Image(systemName: "arrow.down.circle")
+                                .foregroundStyle(.tint)
+                                .frame(width: ModelBrowserMetrics.localActionIconSize, height: ModelBrowserMetrics.localActionIconSize)
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.borderless)
                         .controlSize(.small)
                         .font(.app(.callout))
-                        .accessibilityLabel("Cancel download")
-                        .help("Cancel download")
-                    } else {
-                        ProgressView().controlSize(.small)
+                        .disabled(downloads.downloads[check.repo]?.status == .downloading)
+                        .accessibilityLabel("Update model")
+                        .help("Update from \(check.repo): \(update.files) file\(update.files == 1 ? "" : "s"), \(ByteCountFormatter.string(fromByteCount: update.bytes, countStyle: .file))")
                     }
-                } else if ModelRowActions.showsLock(model, unlocked: unlocked) {
-                    // Locked, not read-only. This slot used to hold an `Image`
-                    // of an external-drive/cloud glyph nobody could read, which
-                    // did nothing when clicked. It is a Button now, and clicking
-                    // it is how you get the trash. (The old symbol name is
-                    // deliberately not spelled here — a source scan in
-                    // `ModelRowActionsTests` asserts it is gone from this file.)
-                    Button { unlocked = true } label: {
-                        Image(systemName: "lock")
-                            .foregroundStyle(.secondary)
-                            .frame(minWidth: 22, minHeight: 22)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.borderless)
-                    .controlSize(.small)
-                    .font(.app(.callout))
-                    .accessibilityLabel("Unlock deletion")
-                    .help(ModelRowActions.lockHelp(model))
-                } else {
-                    Button {
-                        confirmDelete = true
-                    } label: {
-                        Image(systemName: "trash")
-                            .foregroundStyle(.red.opacity(0.7))
-                            .frame(minWidth: 22, minHeight: 22)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.borderless)
-                    .controlSize(.small)
-                    .font(.app(.callout))
-                    .accessibilityLabel(L10n.text(model.defect != nil
-                                        ? "Delete this broken folder"
-                                        : (model.quantFile != nil ? "Delete this quant" : "Delete model")))
-                    .help(model.defect != nil
-                          ? "Delete this broken folder"
-                          : (model.quantFile != nil ? "Delete this quant" : "Delete model"))
                 }
+                .frame(width: ModelBrowserMetrics.localActionIconSize)
 
-                // Reveal in Finder — rightmost, on EVERY row. Six other panes
-                // already had this control; the one pane that is entirely about
-                // files on disk did not, so a model you did not recognise could
-                // not be located from the app that listed it.
+                ZStack {
+                    if model.isChatPickable {
+                        Button { settings = settingsRequest } label: {
+                            Image(systemName: "slider.horizontal.3")
+                                .foregroundStyle(hasOverrides ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                                .frame(width: ModelBrowserMetrics.localActionIconSize, height: ModelBrowserMetrics.localActionIconSize)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                        .font(.app(.callout))
+                        .accessibilityLabel("Model settings")
+                        .help(hasOverrides ? "Model settings (this model has its own context / KV settings)" : "Model settings")
+                    }
+                }
+                .frame(width: ModelBrowserMetrics.localActionIconSize)
+
+                ZStack {
+                    if model.isDownloading {
+                        if let live = ModelRowActions.transfer(for: model, in: downloads.downloads) {
+                            Button { downloads.cancel(live.repoId) } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: ModelBrowserMetrics.localActionIconSize, height: ModelBrowserMetrics.localActionIconSize)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.borderless)
+                            .controlSize(.small)
+                            .font(.app(.callout))
+                            .accessibilityLabel("Cancel download")
+                            .help("Cancel download")
+                        }
+                    } else if ModelRowActions.showsLock(model, unlocked: unlocked) {
+                        Button { unlocked = true } label: {
+                            Image(systemName: "lock")
+                                .foregroundStyle(.secondary)
+                                .frame(width: ModelBrowserMetrics.localActionIconSize, height: ModelBrowserMetrics.localActionIconSize)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                        .font(.app(.callout))
+                        .accessibilityLabel("Unlock deletion")
+                        .help(ModelRowActions.lockHelp(model))
+                    } else {
+                        Button {
+                            confirmDelete = true
+                        } label: {
+                            Image(systemName: "trash")
+                                .foregroundStyle(.red.opacity(0.7))
+                                .frame(width: ModelBrowserMetrics.localActionIconSize, height: ModelBrowserMetrics.localActionIconSize)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                        .font(.app(.callout))
+                        .accessibilityLabel(L10n.text(model.defect != nil
+                                            ? "Delete this broken folder"
+                                            : (model.quantFile != nil ? "Delete this quant" : "Delete model")))
+                        .help(model.defect != nil
+                              ? "Delete this broken folder"
+                              : (model.quantFile != nil ? "Delete this quant" : "Delete model"))
+                    }
+                }
+                .frame(width: ModelBrowserMetrics.localActionIconSize)
+
                 Button(action: revealInFinder) {
                     Image(systemName: "folder")
                         .foregroundStyle(.secondary)
-                        .frame(minWidth: 22, minHeight: 22)
+                        .frame(width: ModelBrowserMetrics.localActionIconSize, height: ModelBrowserMetrics.localActionIconSize)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.borderless)
@@ -2199,7 +2194,7 @@ private struct LocalModelRow: View {
                 .accessibilityLabel("Reveal in Finder")
                 .help(ModelRowActions.revealHelp(model))
             }
-            .frame(width: 172, alignment: .trailing)
+            .frame(width: ModelBrowserMetrics.localActionWidth)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)

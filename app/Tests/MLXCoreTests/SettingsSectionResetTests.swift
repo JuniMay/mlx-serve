@@ -17,6 +17,22 @@ import XCTest
 /// resets another's setting.
 final class SettingsSectionResetTests: XCTestCase {
 
+    func testProvidersResetOwnsDiscoveryAndPreservesPublishingChoices() {
+        var before = ServerOptions()
+        before.lanDiscoverEnabled = true
+        before.lanShareEnabled = true
+        before.lanName = "Studio Mac"
+        before.lanSharedModels = ["local-model"]
+        let providers = SettingsReset.apply(.providers, to: before)
+        XCTAssertFalse(providers.lanDiscoverEnabled)
+        XCTAssertTrue(providers.lanShareEnabled)
+        XCTAssertEqual(providers.lanName, "Studio Mac")
+        XCTAssertEqual(providers.lanSharedModels, ["local-model"])
+        let sharing = SettingsReset.apply(.lanSharing, to: before)
+        XCTAssertTrue(sharing.lanDiscoverEnabled)
+        XCTAssertFalse(sharing.lanShareEnabled)
+    }
+
     func testCacheResetOwnsAllCacheFieldsAndPreservesResidencyAndAcceleration() throws {
         let cache = try XCTUnwrap(SettingsCategory(rawValue: "cache"))
         XCTAssertEqual(Set(SettingsReset.fields(for: cache).map(\.name)),

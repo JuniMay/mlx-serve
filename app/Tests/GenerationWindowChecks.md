@@ -4,14 +4,16 @@ Use the packaged app with the server stopped. Do not download or load a model,
 start generation, record audio, or change saved input values. Inspect existing
 conditional sections only when the selected model exposes them.
 
-1. Open Image, Video, Audio → Voice, Music and Sound, then 3D from Tools.
+1. Open Image, Video, Audio → Voice, Music and Sound, then 3D through Choose Model.
    The result occupies the main canvas, with an input dock below it. Model
    configuration and technical parameters start closed. The prompt, selected
    model and Generate action remain visible without scrolling the page.
    Idle canvases show a muted symbol and instruction. They have no full-canvas
    card background. Empty Voice and Music style editors show their placeholders.
-   Image, Video, Voice and Sound prompt editors use the shared 72-point cap.
-   With no attachments, the plus control is circular.
+   Prompt editors start at the chat editor's height and grow to a bounded viewport.
+   Chat and media use the same text font, text insets, circular attachment/action
+   buttons and model-pill height. The model and action sit at the trailing edge;
+   controls wrap at narrow widths. The attachment count must not resize its button.
    The Audio type toolbar menu must visibly name the current family, including
    before the menu opens. Switch between Voice, Music and Sound Effects, verify
    the title and selected checkmark match the displayed workspace, then restore
@@ -30,6 +32,8 @@ conditional sections only when the selected model exposes them.
    input area so the result remains visible. Use a fixture profile to verify
    long-input growth, shrinkage and draft retention across model selection.
    Music lyrics scroll within their editor; Instrumental preserves their text.
+   Open and close the inspector with a long draft, then resize the window.
+   Text must reflow and update the editor height and scroller without typing.
 5. Verify unavailable-model and required-input explanations remain visible
    beside the disabled action. On Music, retain the required-lyrics rule. On
    3D, retain the source-image requirement. Do not generate to test these states.
@@ -41,9 +45,14 @@ conditional sections only when the selected model exposes them.
    verify its matching workspace opens without starting media generation.
    Select another model of the same capability and confirm its draft survives.
 8. Verify keyboard focus reaches enabled fields, popovers and the inspector.
+   Media Return inserts a newline; Command-Return invokes the enabled Generate
+   action. A reference marker replaces the selected text and leaves the caret
+   after the marker. Test these editing behaviors only in an isolated fixture.
    Escape dismisses popovers. Repeat in an isolated light/dark fixture and
    restore the original window size and open panels after inspection.
 
 `GenerationWorkspaceTests` checks the hosted layout and bounded input.
+`GrowingTextEditorTests` checks native geometry, selection, keyboard handling
+and width-dependent reflow.
 Model-route tests check capability selection; media service and request tests
 cover the generation behavior independently of this layout check.

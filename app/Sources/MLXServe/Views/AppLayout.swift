@@ -11,5 +11,4 @@ enum AppLayout {
     static let surfaceRadius: CGFloat = 16
     static let textEditorRadius: CGFloat = 6
     static let generationColumnWidth: CGFloat = 1000
-    static let generationPromptHeight: CGFloat = 72
 }

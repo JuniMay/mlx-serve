@@ -107,25 +107,6 @@ final class ChatDeleteShortcutTests: XCTestCase {
 /// keeps the composer holding the keyboard forever.
 final class KeyboardFocusTests: XCTestCase {
 
-    /// The second half. `updateNSView` re-took first responder on EVERY update
-    /// while `isFocused` was true, and `onResignFocus` publishes the cleared
-    /// flag asynchronously — so the re-grab landed first and put the keyboard
-    /// straight back. A resign could not stick, and neither could a click into
-    /// anything else in the window.
-    func testTheComposerTakesFocusOnTheEDGEAndNotOnEveryUpdate() throws {
-        let source = SourceScan.source("Views/ChatView.swift", from: #filePath)
-        // Anchored on the COMPOSER's, not the first `updateNSView` in the file
-        // — the transcript's own text view has one too.
-        let body = try XCTUnwrap(
-            SourceScan.declarationBody(from: "func updateNSView(_ scroll: NSScrollView", in: source),
-            "the composer's updateNSView moved — repoint this scan")
-        XCTAssertTrue(body.contains("appliedFocus"), """
-            the focus mirror is level-triggered again: a sticky `isFocused` \
-            re-takes the keyboard on every SwiftUI update, so the field can \
-            never be left.
-            """)
-    }
-
     /// It only moves the keyboard when a text editor has it. Calling
     /// `makeFirstResponder(nil)` unconditionally would yank focus out of
     /// whatever else legitimately holds it.

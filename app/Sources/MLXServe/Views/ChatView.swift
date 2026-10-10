@@ -2115,13 +2115,20 @@ struct ChatDetailView: View {
 
     private var chatModeControls: some View {
         VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 6) {
+                chatModeSwitch("Plain Chat", isOn: Binding(
+                    get: { session?.isPlainChat == true }, set: setPlainChat))
+                Text("Turn off Tools, MCP, and attached-folder search for this conversation.")
+                    .font(.app(.caption))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Divider()
             chatModeSwitch("Tools", isOn: toolModeBinding(\.toolsEnabled))
                 .disabled(session?.isPlainChat == true || agentForbidsTools)
             chatModeSwitch("MCP", isOn: toolModeBinding(\.mcpEnabled))
                 .disabled(session?.isPlainChat == true || appState.useAppleModel
                           || activeAgent?.capabilities.mcp == false)
-            chatModeSwitch("Plain Chat", isOn: Binding(
-                get: { session?.isPlainChat == true }, set: setPlainChat))
             Divider()
             Button("Use Settings Defaults") {
                 updateToolPreferences(ChatToolPreferences(plainChat: session?.isPlainChat ?? false))
@@ -2770,59 +2777,25 @@ struct ChatDetailView: View {
                               recallHistory(direction, caretAtStart: caretAtStart, caretAtEnd: caretAtEnd)
                           },
                           onKeyCommand: { handleSlashKey($0) })
-            .frame(height: max(ChatMetrics.composerMinHeight, composerHeight))
-            .padding(.horizontal, ComposerTextMetrics.fieldHorizontalPadding)
+            .composerTextField(height: composerHeight,
+                               placeholder: inputText.isEmpty ? composerPlaceholder : nil)
             .disabled(!canAnswer)
-            // The placeholder stands in for the first character you type, so it
-            // has to sit exactly where that character lands — which is three
-            // insets in, not one (`ComposerTextMetrics`). It was a literal 9
-            // against a real 14, so the caret overlapped its own placeholder.
             // Escape closes the menu for the text as it stands; the next
             // keystroke is a new query, so it opens again.
             .onChange(of: inputText) { _, _ in
                 if slashDismissed { slashDismissed = false }
                 slashSelection = 0
             }
-            .overlay(alignment: .topLeading) {
-                if inputText.isEmpty {
-                    Text(L10n.text(composerPlaceholder))
-                        .font(.app(.body))
-                        .foregroundStyle(.secondary)
-                        .padding(.leading, ComposerTextMetrics.placeholderLeading)
-                        .padding(.top, ComposerTextMetrics.placeholderTop)
-                        .allowsHitTesting(false)
-                }
-            }
     }
 
     /// Keep mode labels readable when the detail column narrows.
     private var composerControls: some View {
-        GlassEffectContainer(spacing: 8) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 6) {
-                    composerModes
-                    Spacer(minLength: 8)
-                    composerModel
-                    composerActions
-                }
-                VStack(alignment: .leading, spacing: 8) {
-                    composerModel
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 6) {
-                            composerModes
-                            Spacer(minLength: 8)
-                            composerActions
-                        }
-                        VStack(alignment: .leading, spacing: 8) {
-                            composerModes
-                            HStack {
-                                Spacer(minLength: 0)
-                                composerActions
-                            }
-                        }
-                    }
-                }
-            }
+        ComposerControlsRow {
+            composerModes
+        } model: {
+            composerModel
+        } actions: {
+            composerActions
         }
     }
 
@@ -2862,29 +2835,19 @@ struct ChatDetailView: View {
 
     private var composerActions: some View {
         HStack(spacing: 6) {
-        voiceToggle
-
-        Button {
-            if composerState == .generatingHere {
-                stopGeneration()
-            } else {
-                sendMessage()
+            voiceToggle
+            ComposerActionButton(isRunning: composerState == .generatingHere,
+                                 label: composerState == .generatingHere ? "Stop generating" : "Send message") {
+                if composerState == .generatingHere {
+                    stopGeneration()
+                } else {
+                    sendMessage()
+                }
             }
-        } label: {
-            ComposerControlSymbol(name: composerState == .generatingHere ? "stop.fill" : "arrow.up")
-        }
-        .buttonStyle(.glassProminent)
-        .buttonBorderShape(.circle)
-        .tint(.primary)
-        .controlSize(.regular)
-        .accessibilityLabel(composerState == .generatingHere ? "Stop generating" : "Send message")
-        // Stop is always tappable for the owning chat. Otherwise: Send,
-        // disabled when the server is down or when this chat has nothing to
-        // send. Another chat's turn blocks nothing — the engine is multi-turn.
-        .disabled(!canAnswer
-                  || (composerState == .idle
-                      && inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                      && pendingImages.isEmpty && pendingPDFs.isEmpty && pendingVideos.isEmpty && pendingAudio.isEmpty))
+            .disabled(!canAnswer
+                      || (composerState == .idle
+                          && inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                          && pendingImages.isEmpty && pendingPDFs.isEmpty && pendingVideos.isEmpty && pendingAudio.isEmpty))
         }
         .fixedSize(horizontal: true, vertical: false)
     }
@@ -6362,230 +6325,5 @@ enum ComposerKey {
     /// Return on nothing into `.ignore` rather than a send.
     static func editCanSubmit(_ draft: String) -> Bool {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-}
-
-/// Editable, auto-growing, scrollable text input backed by NSTextView in an
-/// NSScrollView. SwiftUI's `TextField(axis: .vertical)` re-lays out the whole
-/// string on every edit (janky on a big paste) and exposes no scroller (the
-/// mouse wheel does nothing past the line limit). TextKit handles large text
-/// natively and the scroll view gives real mouse-wheel scrolling.
-fileprivate struct GrowingTextEditor: NSViewRepresentable {
-    @Binding var text: String
-    @Binding var isFocused: Bool
-    @Binding var measuredHeight: CGFloat
-    var font: NSFont = .preferredFont(forTextStyle: .body)
-    var minLines: Int = 1
-    var maxLines: Int = 15
-    var isIdle: Bool
-    var canSteer: Bool = false
-    var onSend: () -> Void
-    /// Escape, from the responder chain. Defaults to nothing so a field that
-    /// has no use for the key leaves it to AppKit.
-    var onCancel: () -> Bool = { false }
-    /// ↑ / ↓, with WHERE THE CARET IS — the composer recalls earlier messages,
-    /// but only from the edge of the text, so the keys keep moving the caret
-    /// inside a multi-line draft (`ComposerHistory`). Returning false hands the
-    /// key back to AppKit. Defaults to nothing: the in-place message editor has
-    /// no history to walk.
-    var onArrow: (ComposerHistory.Direction, _ caretAtStart: Bool, _ caretAtEnd: Bool) -> Bool = { _, _, _ in false }
-    /// Keys the "/" menu wants first. Returns true when it consumed one — the
-    /// editor's own Return handling, Escape and arrow recall only run when
-    /// nothing above claimed the key.
-    var onKeyCommand: (ComposerKeyCommand) -> Bool = { _ in false }
-
-    /// Read from the SAME constants the placeholder overlay reads — the two
-    /// are related only by arithmetic nobody's type system checks.
-    let inset = NSSize(width: ComposerTextMetrics.containerInsetWidth,
-                       height: ComposerTextMetrics.containerInsetHeight)
-
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
-
-    func makeNSView(context: Context) -> NSScrollView {
-        let scroll = NSScrollView()
-        scroll.drawsBackground = false
-        scroll.hasVerticalScroller = true
-        scroll.hasHorizontalScroller = false
-        scroll.autohidesScrollers = true
-        scroll.borderType = .noBorder
-        scroll.verticalScrollElasticity = .allowed
-
-        let tv = ComposerTextView()
-        tv.delegate = context.coordinator
-        tv.isEditable = context.environment.isEnabled
-        tv.isSelectable = true
-        tv.isRichText = false
-        tv.allowsUndo = true
-        tv.drawsBackground = false
-        tv.font = font
-        tv.textColor = .labelColor
-        tv.insertionPointColor = .labelColor
-        tv.textContainerInset = inset
-        tv.isVerticallyResizable = true
-        tv.isHorizontallyResizable = false
-        tv.textContainer?.widthTracksTextView = true
-        tv.textContainer?.lineFragmentPadding = ComposerTextMetrics.lineFragmentPadding
-        tv.autoresizingMask = [.width]
-        tv.string = text
-        tv.onBecomeFocus = { [weak c = context.coordinator] in c?.setFocus(true) }
-        tv.onResignFocus = { [weak c = context.coordinator] in c?.setFocus(false) }
-
-        scroll.documentView = tv
-        context.coordinator.textView = tv
-        DispatchQueue.main.async { context.coordinator.recomputeHeight() }
-        return scroll
-    }
-
-    func updateNSView(_ scroll: NSScrollView, context: Context) {
-        guard let tv = scroll.documentView as? ComposerTextView else { return }
-        context.coordinator.parent = self
-        // External text changes (e.g. cleared on send) without clobbering an
-        // in-progress edit at the same value.
-        if tv.string != text {
-            tv.string = text
-            // Caret to the END of whatever was just put in the field. Setting
-            // `string` collapses the selection to the front, which after a
-            // history recall means typing lands BEFORE the recalled message and
-            // ↓ (which arms at the end) can never walk back out of it.
-            tv.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
-            context.coordinator.recomputeHeight()
-        }
-        let enabled = context.environment.isEnabled
-        if tv.isEditable != enabled { tv.isEditable = enabled }
-        // Drive AppKit first-responder from the SwiftUI focus mirror — on the
-        // EDGE of a request, never on its level.
-        //
-        // This ran on every update while `isFocused` was true, which made the
-        // field impossible to leave: `onResignFocus` publishes the cleared flag
-        // ASYNCHRONOUSLY, so any update in between saw a still-true flag and a
-        // text view that no longer had the keyboard, and handed it straight
-        // back. `isFocused` is set true on appear and again whenever a turn goes
-        // idle, and nothing ever cleared it, so the composer held the keyboard
-        // for the life of the window — and ⌘⌫ read "the user is typing" forever
-        // (live 2026-08-12).
-        if isFocused != context.coordinator.appliedFocus {
-            context.coordinator.appliedFocus = isFocused
-            if isFocused, tv.window != nil, tv.window?.firstResponder !== tv {
-                DispatchQueue.main.async { tv.window?.makeFirstResponder(tv) }
-            }
-        }
-    }
-
-    final class Coordinator: NSObject, NSTextViewDelegate {
-        var parent: GrowingTextEditor
-        weak var textView: ComposerTextView?
-        /// The last focus REQUEST this view acted on, so `updateNSView` can
-        /// tell "focus me" from "you are still notionally focused" — see the
-        /// note there.
-        var appliedFocus = false
-        init(_ parent: GrowingTextEditor) { self.parent = parent }
-
-        func textDidChange(_ notification: Notification) {
-            guard let tv = textView else { return }
-            if parent.text != tv.string { parent.text = tv.string }
-            recomputeHeight()
-        }
-
-        func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-            // The "/" skill menu gets FIRST REFUSAL on every key it navigates
-            // with, and only a menu that is actually open claims one. When it
-            // declines, the composer's own bindings below run unchanged — so
-            // Escape still stops a reply and ↑/↓ still walk history whenever
-            // the menu is closed. Order matters both ways: an open menu that
-            // let Escape through would stop the generation instead of closing
-            // itself, and arrows reaching history would scroll the transcript
-            // out from under the highlighted row.
-            switch commandSelector {
-            case #selector(NSResponder.moveUp(_:)):
-                if parent.onKeyCommand(.up) { return true }
-            case #selector(NSResponder.moveDown(_:)):
-                if parent.onKeyCommand(.down) { return true }
-            case #selector(NSResponder.insertTab(_:)):
-                if parent.onKeyCommand(.accept) { return true }
-            case #selector(NSResponder.cancelOperation(_:)):
-                if parent.onKeyCommand(.cancel) { return true }
-            default:
-                break
-            }
-            // Escape. Reached only when no `.cancelAction` key equivalent is on
-            // screen to claim it first — see ComposerKey.onEscape.
-            if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
-                return parent.onCancel()
-            }
-            // ↑ / ↓ recall earlier messages, but the caret position is what
-            // decides — a draft is regularly several lines tall, and swallowing
-            // the arrows inside one would make it uneditable. The rule needs
-            // both edges, so both are measured here rather than inferred: the
-            // caret is at the start and the end simultaneously in an empty
-            // field, which is the state the walk arms from.
-            if commandSelector == #selector(NSResponder.moveUp(_:))
-                || commandSelector == #selector(NSResponder.moveDown(_:)) {
-                let selection = textView.selectedRange()
-                let length = (textView.string as NSString).length
-                let collapsed = selection.length == 0
-                return parent.onArrow(
-                    commandSelector == #selector(NSResponder.moveUp(_:)) ? .up : .down,
-                    collapsed && selection.location == 0,
-                    collapsed && selection.location == length)
-            }
-            guard commandSelector == #selector(NSResponder.insertNewline(_:)) else { return false }
-            // Return picks the highlighted command when the menu is open —
-            // it must not send a half-typed "/mus".
-            if parent.onKeyCommand(.accept) { return true }
-            let shift = NSApp.currentEvent?.modifierFlags.contains(.shift) ?? false
-            switch ComposerKey.onReturn(shift: shift, isIdle: parent.isIdle, canSteer: parent.canSteer) {
-            case .newline:
-                textView.insertNewlineIgnoringFieldEditor(self)
-                return true
-            case .send, .steer:
-                // `onSend` reads the composer state itself and queues a
-                // steering note while the chat generates.
-                parent.onSend()
-                return true
-            case .ignore:
-                return true
-            }
-        }
-
-        func setFocus(_ value: Bool) {
-            guard parent.isFocused != value else { return }
-            DispatchQueue.main.async { self.parent.isFocused = value }
-        }
-
-        func recomputeHeight() {
-            guard let tv = textView, let lm = tv.layoutManager, let tc = tv.textContainer else { return }
-            lm.ensureLayout(for: tc)
-            let content = lm.usedRect(for: tc).height
-            let line = tv.font.map { $0.ascender - $0.descender + $0.leading } ?? 16
-            let r = ComposerLayout.resolve(contentHeight: content,
-                                           lineHeight: max(line, 12),
-                                           minLines: parent.minLines,
-                                           maxLines: parent.maxLines,
-                                           verticalInset: parent.inset.height * 2)
-            // Past the cap the scroll view owns overflow; below it the frame grows.
-            if let scroll = tv.enclosingScrollView {
-                scroll.hasVerticalScroller = r.scrolls
-            }
-            if abs(parent.measuredHeight - r.height) > 0.5 {
-                DispatchQueue.main.async { self.parent.measuredHeight = r.height }
-            }
-        }
-    }
-}
-
-/// NSTextView that reports focus transitions so SwiftUI's `inputFocused` mirror
-/// stays accurate — the Cmd+V "attach from clipboard" monitor reads it.
-fileprivate final class ComposerTextView: NSTextView {
-    var onBecomeFocus: (() -> Void)?
-    var onResignFocus: (() -> Void)?
-    override func becomeFirstResponder() -> Bool {
-        let ok = super.becomeFirstResponder()
-        if ok { onBecomeFocus?() }
-        return ok
-    }
-    override func resignFirstResponder() -> Bool {
-        let ok = super.resignFirstResponder()
-        if ok { onResignFocus?() }
-        return ok
     }
 }

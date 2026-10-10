@@ -22,6 +22,11 @@ enum ModelBrowserMetrics {
     static let updatedWidth: CGFloat = 64
     static let actionWidth: CGFloat = 120
 
+    static let localPrimaryActionWidth: CGFloat = 80
+    static let localActionIconSize: CGFloat = 28
+    static let localActionSpacing: CGFloat = 6
+    static let localActionWidth = localPrimaryActionWidth + 4 * localActionIconSize + 4 * localActionSpacing
+
     static let columnSpacing: CGFloat = 8
     static let rowPaddingH: CGFloat = 12
 

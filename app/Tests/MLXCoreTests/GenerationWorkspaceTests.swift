@@ -158,11 +158,9 @@ private struct VideoPromptInputFixture: View {
 
     var body: some View {
         GenerationWorkspace(title: "Video", modelName: "Video model", prompt: {
-            VideoPromptInput(isEmpty: probe.text.isEmpty, format: format, editor: {
-                TextEditor(text: $probe.text, selection: .constant(nil))
-                    .font(.app(.body))
-                    .frame(height: 110)
-                    .scrollContentBackground(.hidden)
+            VideoPromptInput(format: format, editor: {
+                ComposerPromptEditor(text: $probe.text, placeholder: "Describe a video…",
+                                     onSubmit: {}, onCancel: {})
             }, actions: {
                 Menu {
                     Button("Enhance…") {}

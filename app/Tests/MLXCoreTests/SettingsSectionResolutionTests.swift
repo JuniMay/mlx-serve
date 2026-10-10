@@ -32,8 +32,17 @@ final class SettingsSectionResolutionTests: XCTestCase {
     }
 
     func testEmptySectionsDisappearAndQueryChangesPreserveContentState() async throws {
+        try await verifySearch(usesSettingsSections: false)
+    }
+
+    func testSameCategorySettingsGroupsFilterIndependentlyAndRetainState() async throws {
+        try await verifySearch(usesSettingsSections: true)
+    }
+
+    private func verifySearch(usesSettingsSections: Bool) async throws {
         let probe = SectionResolutionProbe()
-        let hosting = NSHostingView(rootView: SectionResolutionFixture(probe: probe))
+        let hosting = NSHostingView(rootView: SectionResolutionFixture(probe: probe,
+            usesSettingsSections: usesSettingsSections))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 500),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.contentView = hosting
@@ -70,6 +79,8 @@ private final class SectionResolutionProbe: ObservableObject {
 
 private struct SectionResolutionFixture: View {
     @ObservedObject var probe: SectionResolutionProbe
+    var usesSettingsSections = false
+    @State private var visibleRows = SettingsVisibleRows()
 
     var body: some View {
         Form {
@@ -86,13 +97,24 @@ private struct SectionResolutionFixture: View {
         }
         .formStyle(.grouped)
         .environment(\.settingsSearchQuery, probe.query)
+        .environment(\.settingsVisibleRows, visibleRows)
+        .onPreferenceChange(SettingsVisibleRowCountKey.self) { visibleRows = $0 }
         .onPreferenceChange(ResolvedTokensKey.self) { probe.tokens = $0 }
         .onPreferenceChange(ResolvedSectionIDsKey.self) { probe.sections = $0.count }
     }
 
     @ViewBuilder private var content: some View {
-        Section("Alpha section") { StatefulSearchContent(title: "Alpha") }
-        Section("Beta section") { StatefulSearchContent(title: "Beta") }
+        if usesSettingsSections {
+            SettingsSection(category: .cache, subtitle: "First cache group.", groupTitle: "First group") {
+                StatefulSearchContent(title: "Alpha")
+            }
+            SettingsSection(category: .cache, subtitle: "Second cache group.", groupTitle: "Second group") {
+                StatefulSearchContent(title: "Beta")
+            }
+        } else {
+            Section("Alpha section") { StatefulSearchContent(title: "Alpha") }
+            Section("Beta section") { StatefulSearchContent(title: "Beta") }
+        }
     }
 }
 

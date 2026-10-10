@@ -16,7 +16,76 @@ enum ComposerControlMetrics {
     static let horizontalPadding: CGFloat = 12
 }
 
+struct ComposerControlsRow<Leading: View, Model: View, Actions: View>: View {
+    @ViewBuilder var leading: Leading
+    @ViewBuilder var model: Model
+    @ViewBuilder var actions: Actions
+
+    var body: some View {
+        GlassEffectContainer(spacing: 8) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 6) {
+                    leading
+                    Spacer(minLength: 8)
+                    model
+                    actions
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    model
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 6) {
+                            leading
+                            Spacer(minLength: 8)
+                            actions
+                        }
+                        VStack(alignment: .leading, spacing: 8) {
+                            leading
+                            HStack {
+                                Spacer(minLength: 0)
+                                actions
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct ComposerActionButton: View {
+    let isRunning: Bool
+    let label: String
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ComposerControlSymbol(name: isRunning ? "stop.fill" : "arrow.up")
+        }
+        .buttonStyle(.glassProminent)
+        .buttonBorderShape(.circle)
+        .tint(.primary)
+        .controlSize(.regular)
+        .accessibilityLabel(L10n.text(label))
+        .help(L10n.text(label))
+    }
+}
+
 extension View {
+    func composerTextField(height: CGFloat, placeholder: String?) -> some View {
+        frame(height: max(ChatMetrics.composerMinHeight, height))
+            .padding(.horizontal, ComposerTextMetrics.fieldHorizontalPadding)
+            .overlay(alignment: .topLeading) {
+                if let placeholder {
+                    Text(L10n.text(placeholder))
+                        .font(.app(.body))
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, ComposerTextMetrics.placeholderLeading)
+                        .padding(.top, ComposerTextMetrics.placeholderTop)
+                        .allowsHitTesting(false)
+                }
+            }
+    }
+
     func floatingInputSurface() -> some View {
         padding(AppLayout.contentInset)
             .background(Color(nsColor: .textBackgroundColor))

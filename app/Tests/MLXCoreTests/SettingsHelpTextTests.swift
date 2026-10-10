@@ -2,6 +2,24 @@ import XCTest
 @testable import MLXCore
 
 final class SettingsHelpTextTests: XCTestCase {
+    func testServerOptionsProvideShortCaptionsAndCompleteHelp() {
+        for (key, field) in ServerOptions.serverFlagFields {
+            let caption = field.summary?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            XCTAssertFalse(caption.isEmpty, key)
+            XCTAssertLessThanOrEqual(caption.count, 140, key)
+            XCTAssertFalse(caption.contains("\n"), key)
+            let help = SettingsHelpText(explainer: field.explainer, summary: field.summary)
+            XCTAssertEqual(help.details, field.explainer, key)
+        }
+    }
+
+    func testVisionHelpExplainsModelDependentMemorySavings() throws {
+        let field = try XCTUnwrap(ServerOptions.serverFlagFields["noVision"])
+        XCTAssertTrue(field.explainer.contains("depends on the model"))
+        XCTAssertTrue(field.explainer.contains("image"))
+        XCTAssertFalse(field.explainer.contains("~3 GB"))
+    }
+
     func testMissingSummaryKeepsCompleteExplainerAsCaption() {
         let explainer = "  Keep this full explanation.\nIncluding its second line.  "
         let help = SettingsHelpText(explainer: explainer)

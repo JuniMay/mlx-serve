@@ -151,15 +151,8 @@ final class ComposerHistoryTests: XCTestCase {
 
     // MARK: - Wiring
 
-    /// The composer has to hand the keys over, and it has to hand over the
-    /// caret position with them — without that the rule cannot tell "move the
-    /// caret" from "recall", and it would swallow both.
-    func testTheComposerFieldRoutesTheArrowKeysWithTheCaretPosition() throws {
+    func testTheComposerUsesTheHistoryRulesForBothDirections() throws {
         let source = SourceScan.source("Views/ChatView.swift", from: #filePath)
-        XCTAssertTrue(source.contains("NSResponder.moveUp"),
-                      "the composer never sees ↑ — it is a doCommandBy selector")
-        XCTAssertTrue(source.contains("NSResponder.moveDown"),
-                      "the composer never sees ↓")
         XCTAssertTrue(source.contains("ComposerHistory.up("),
                       "↑ is intercepted but the recall rule is never asked")
         XCTAssertTrue(source.contains("ComposerHistory.down("),

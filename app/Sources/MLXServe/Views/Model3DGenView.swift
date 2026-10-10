@@ -239,20 +239,13 @@ struct Model3DGenView: View {
     private var actionRow: some View {
         HStack {
             if service.isRunning {
-                Button(role: .destructive) { service.cancel() } label: {
-                    Label("Cancel", systemImage: "stop.circle").font(.app(.body))
-                }
-                .buttonStyle(.bordered)
+                ComposerActionButton(isRunning: true, label: "Cancel") { service.cancel() }
             } else {
-                Button { tryGenerate() } label: {
-                    Label("Generate", systemImage: "cube.transparent").font(.app(.body))
-                }
-                .buttonStyle(.borderedProminent)
+                ComposerActionButton(isRunning: false, label: "Generate") { tryGenerate() }
                 .keyboardShortcut(.return, modifiers: [.command])
                 .disabled(generationBlockReason != nil)
             }
         }
-        .controlSize(.large)
     }
 
     private var convertHint: some View {

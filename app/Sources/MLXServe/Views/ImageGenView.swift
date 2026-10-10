@@ -16,7 +16,7 @@ struct ImageGenView: View {
     /// its name where the caret is, or on the end when the editor is not
     /// the one being typed into.
     @State private var promptSelection: TextSelection? = nil
-    @FocusState private var promptFocused: Bool
+    @State private var promptFocused = false
     @State private var showAdvanced: Bool = false
     @State private var model: ImageModelPreset = .flux2Klein4B_Q4
     /// Selected network model's routing id (`<model>@<peer>`); nil = local.
@@ -28,7 +28,6 @@ struct ImageGenView: View {
     // Presets menu only writes into them.
     @State private var customWidthText: String = "1024"
     @State private var customHeightText: String = "1024"
-    @State private var promptHeight: Double = PromptEditorHeight.defaultHeight
     @State private var steps: Int = 8
     @State private var seed: Int = -1
     @State private var showRAMWarning: Bool = false
@@ -162,23 +161,16 @@ struct ImageGenView: View {
         return nil
     }
 
+    private var canGenerate: Bool { !prompt.isBlank && generationNotice == nil }
+
     private var promptSection: some View {
         HStack(alignment: .top, spacing: AppLayout.compactSpacing) {
-            TextEditor(text: $prompt, selection: $promptSelection)
+            ComposerPromptEditor(text: $prompt, placeholder: "Describe an image…",
+                                 selection: $promptSelection, focused: $promptFocused,
+                                 isRunning: service.isRunning,
+                                 canSubmit: canGenerate,
+                                 onSubmit: tryGenerate, onCancel: service.cancel)
                 .accessibilityLabel("Prompt")
-                .focused($promptFocused)
-                .font(.app(.body))
-                .frame(height: min(promptHeight, AppLayout.generationPromptHeight))
-                .scrollContentBackground(.hidden)
-                .overlay(alignment: .topLeading) {
-                    if prompt.isEmpty {
-                        Text("Describe an image…")
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 8)
-                            .allowsHitTesting(false)
-                    }
-                }
             Menu {
                 Button("Enhance…") { showEnhance = true }.disabled(prompt.isBlank)
                 templatesMenu
@@ -895,24 +887,13 @@ struct ImageGenView: View {
     private var actionRow: some View {
         Group {
             if service.isRunning {
-                Button(role: .destructive) {
-                    service.cancel()
-                } label: {
-                    Label("Cancel", systemImage: "stop.circle")
-                }
-                .buttonStyle(.bordered)
+                ComposerActionButton(isRunning: true, label: "Cancel") { service.cancel() }
             } else {
-                Button {
-                    tryGenerate()
-                } label: {
-                    Label("Generate", systemImage: "wand.and.stars")
-                }
-                .buttonStyle(.borderedProminent)
+                ComposerActionButton(isRunning: false, label: "Generate") { tryGenerate() }
                 .keyboardShortcut(.return, modifiers: [.command])
-                .disabled(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (lanModel == nil && !downloads.bundleReady(model.bundle)) || !condWeightsValid || !customSizeValid)
+                .disabled(!canGenerate)
             }
         }
-        .controlSize(.large)
     }
 
     private var previewArea: some View {
@@ -1020,7 +1001,6 @@ struct ImageGenView: View {
         loras = s.loras
         prompt = s.prompt
         negativePrompt = s.negativePrompt
-        promptHeight = s.promptHeight
         showAdvanced = s.showAdvanced
         // A file may have moved since last session — drop stale entries.
         loras.removeAll { !FileManager.default.fileExists(atPath: $0.path) }
@@ -1064,7 +1044,6 @@ struct ImageGenView: View {
         s.loras = loras
         s.prompt = prompt
         s.negativePrompt = negativePrompt
-        s.promptHeight = promptHeight
         s.showAdvanced = showAdvanced
         s.sourcePath = initImageURL?.path
         s.refPaths = refImageURLs.map(\.path)

@@ -19,7 +19,7 @@ enum SettingsReset {
     /// sections with nothing of their own to reset.
     static func fields(for category: SettingsCategory) -> [SettingsFieldReset] {
         switch category {
-        case .general, .modelFolders, .about, .appearance, .providers, .tools:
+        case .general, .modelFolders, .about, .appearance, .tools:
             return []
 
         case .server:
@@ -43,9 +43,11 @@ enum SettingsReset {
                 f("lanShareEnabled") { $0.lanShareEnabled = $1.lanShareEnabled },
                 f("lanShareAll") { $0.lanShareAll = $1.lanShareAll },
                 f("lanSharedModels") { $0.lanSharedModels = $1.lanSharedModels },
-                f("lanDiscoverEnabled") { $0.lanDiscoverEnabled = $1.lanDiscoverEnabled },
                 f("lanName") { $0.lanName = $1.lanName },
             ]
+
+        case .providers:
+            return [f("lanDiscoverEnabled") { $0.lanDiscoverEnabled = $1.lanDiscoverEnabled }]
 
         case .specDecode:
             return [
@@ -177,6 +179,7 @@ enum SettingsReset {
     static func buttonLabel(_ selection: SettingsSelection) -> String {
         switch selection {
         case .all:               return "Reset Server and Agent Settings…"
+        case .category(.providers): return "Reset Nearby Macs"
         case .category(let c):   return "Reset \(c.sidebarLabel)"
         }
     }
@@ -184,6 +187,7 @@ enum SettingsReset {
     static func confirmTitle(_ selection: SettingsSelection) -> String {
         switch selection {
         case .all:               return "Reset Server and Agent Settings?"
+        case .category(.providers): return "Reset Nearby Macs discovery?"
         case .category(let c):   return "Reset \(c.sidebarLabel) to defaults?"
         }
     }
@@ -191,7 +195,9 @@ enum SettingsReset {
     static func confirmMessage(_ selection: SettingsSelection) -> String {
         switch selection {
         case .all:
-            return "This resets server options, Generation Defaults, Voice, and Agent Sandbox settings across every section. Tools & MCP defaults, startup, appearance, model folders, providers, your workspace folder, and per-model rules are kept. Generation defaults apply to the next request; server options apply after a restart."
+            return "This resets server options, Generation Defaults, Voice, and Agent Sandbox settings across every section. Tools & MCP defaults, startup, appearance, model folders, configured chat services, your workspace folder, and per-model rules are kept. Generation defaults apply to the next request; server options apply after a restart."
+        case .category(.providers):
+            return "This turns off discovery of models shared by nearby Macs. Configured chat services and this Mac’s sharing settings are kept. Restart the server to apply."
         case .category(let c):
             let scope = "This resets only the \(c.sidebarLabel) section. Every other section is left untouched."
             if c == .requestDefaults { return scope + " Generation defaults apply to the next request without a restart. Per-model rules are kept." }

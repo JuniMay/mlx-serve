@@ -94,36 +94,23 @@ struct GenerationWorkspace<Prompt: View, Model: View, Attachments: View,
     }
 
     private func controls(size: CGSize) -> some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .bottom, spacing: AppLayout.compactSpacing) {
-                inputControls(size: size)
-                Spacer(minLength: AppLayout.compactSpacing)
-                actions
-            }
-            VStack(alignment: .leading, spacing: AppLayout.compactSpacing) {
-                inputControls(size: size)
-                HStack {
-                    Spacer(minLength: 0)
-                    actions
-                }
-            }
-        }
-    }
-
-    private func inputControls(size: CGSize) -> some View {
-        HStack(spacing: AppLayout.compactSpacing) {
+        ComposerControlsRow {
             if hasAttachments {
                 Button { showingAttachments.toggle() } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "plus")
-                        if attachmentCount > 0 {
-                            Text(attachmentCount, format: .number).monospacedDigit()
-                        }
-                    }
-                    .frame(minWidth: 20, minHeight: 20)
+                    ComposerControlSymbol(name: "plus")
                 }
                 .buttonStyle(.glass)
-                .buttonBorderShape(attachmentCount > 0 ? .capsule : .circle)
+                .buttonBorderShape(.circle)
+                .controlSize(.regular)
+                .overlay(alignment: .topTrailing) {
+                    if attachmentCount > 0 {
+                        Text(attachmentCount, format: .number)
+                            .font(.app(.caption2)).monospacedDigit()
+                            .padding(.horizontal, 3)
+                            .background(.background, in: Capsule())
+                            .allowsHitTesting(false)
+                    }
+                }
                 .accessibilityLabel("Attachments")
                 .accessibilityValue("\(attachmentCount) attached")
                 .help("Attachments and reference inputs")
@@ -131,24 +118,32 @@ struct GenerationWorkspace<Prompt: View, Model: View, Attachments: View,
                     popoverContent(size: size) { attachments }
                 }
             }
-
+        } model: {
             Button { showingModel.toggle() } label: {
                 HStack(spacing: 6) {
                     Text(verbatim: modelName).lineLimit(1).truncationMode(.middle)
                         .frame(maxWidth: 190)
-                    Image(systemName: "chevron.down").font(.app(.caption))
+                    Image(systemName: "chevron.down")
+                        .font(.app(.caption2, weight: .medium))
+                        .foregroundStyle(.secondary)
                 }
+                .font(.app(.body))
+                .padding(.horizontal, ComposerControlMetrics.horizontalPadding)
+                .frame(minHeight: ComposerControlMetrics.height)
+                .contentShape(Capsule())
             }
-            .buttonStyle(.glass)
-            .buttonBorderShape(.capsule)
+            .buttonStyle(.plain)
+            .composerCapsule()
+            .fixedSize(horizontal: true, vertical: false)
             .help(modelName)
             .accessibilityLabel("Generation model")
             .accessibilityValue(modelName)
             .popover(isPresented: $showingModel, arrowEdge: .top) {
                 popoverContent(size: size) { model }
             }
+        } actions: {
+            actions.fixedSize(horizontal: true, vertical: false)
         }
-        .controlSize(.large)
     }
 
     private func popoverContent<Content: View>(size: CGSize,

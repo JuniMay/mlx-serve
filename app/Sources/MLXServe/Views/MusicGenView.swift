@@ -13,8 +13,6 @@ struct MusicGenView: View {
 
     @State private var prompt: String = ""
     @State private var lyrics: String = ""
-    /// Preserve the saved editor preference while bounding the input dock.
-    @State private var lyricsHeight: Double = PromptEditorHeight.defaultHeight
     @State private var model: MusicModelPreset = .acestepXLTurbo8bit
     /// Selected network model's routing id (`<model>@<peer>`); nil = local.
     @State private var lanModel: String? = nil
@@ -198,21 +196,11 @@ struct MusicGenView: View {
                 .accessibilityLabel("Style actions")
                 .help("Style actions")
             }
-            TextEditor(text: $prompt)
+            ComposerPromptEditor(text: $prompt, placeholder: "Describe the genre, mood and instruments…",
+                                 maxLines: 4, isRunning: service.isRunning,
+                                 canSubmit: generationBlockReason == nil,
+                                 onSubmit: tryGenerate, onCancel: service.cancel)
                 .accessibilityLabel("Style prompt")
-                .font(.app(.body))
-                .frame(height: 54)
-                .scrollContentBackground(.hidden)
-                .overlay(alignment: .topLeading) {
-                    if prompt.isEmpty {
-                        Text("Describe the genre, mood and instruments…")
-                            .font(.app(.body))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 8)
-                            .allowsHitTesting(false)
-                    }
-                }
                 .help("Describe genre, mood and instruments, such as upbeat synthwave with driving bass and dreamy pads.")
         }
     }
@@ -246,24 +234,15 @@ struct MusicGenView: View {
                         .font(.app(.caption)).foregroundStyle(.secondary)
                 }
             } else {
-                TextEditor(text: $lyrics)
+                ComposerPromptEditor(text: $lyrics, placeholder: "Add lyrics…",
+                                     maxLines: 6, isRunning: service.isRunning,
+                                     canSubmit: generationBlockReason == nil,
+                                     onSubmit: tryGenerate, onCancel: service.cancel)
                     .accessibilityLabel("Lyrics")
-                    .font(.app(.body))
-                    .frame(height: min(lyricsHeight, 96))
-                    .scrollContentBackground(.hidden)
                     .help(model.requiresLyrics
                           ? L10n.format("This model sings your lyrics. Put section tags on their own lines: %@", MusicOptions.sectionTagHint)
                           : L10n.format("Leave empty or choose Instrumental for no vocals. Put section tags on their own lines: %@", MusicOptions.sectionTagHint))
-                    .overlay(alignment: .topLeading) {
-                        if lyrics.isEmpty {
-                            Text("Add lyrics…")
-                                .font(.app(.body))
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 8)
-                                .allowsHitTesting(false)
-                        }
-                    }
+
             }
         }
     }
@@ -783,20 +762,13 @@ struct MusicGenView: View {
     private var actionRow: some View {
         HStack {
             if service.isRunning {
-                Button(role: .destructive) { service.cancel() } label: {
-                    Label("Cancel", systemImage: "stop.circle")
-                }
-                .buttonStyle(.bordered)
+                ComposerActionButton(isRunning: true, label: "Cancel") { service.cancel() }
             } else {
-                Button { tryGenerate() } label: {
-                    Label("Generate", systemImage: "music.note")
-                }
-                .buttonStyle(.borderedProminent)
+                ComposerActionButton(isRunning: false, label: "Generate") { tryGenerate() }
                 .keyboardShortcut(.return, modifiers: [.command])
                 .disabled(generationBlockReason != nil)
             }
         }
-        .controlSize(.large)
     }
 
     private var convertHint: some View {
@@ -926,7 +898,6 @@ struct MusicGenView: View {
         instrumental = s.instrumental
         prompt = s.prompt
         lyrics = s.lyrics
-        lyricsHeight = PromptEditorHeight.clamp(s.lyricsHeight)
         refAudioURL = s.refAudioPath.flatMap { FileManager.default.fileExists(atPath: $0) ? URL(fileURLWithPath: $0) : nil }
         task = s.task
         srcAudioURL = s.srcAudioPath.flatMap { FileManager.default.fileExists(atPath: $0) ? URL(fileURLWithPath: $0) : nil }
@@ -952,7 +923,6 @@ struct MusicGenView: View {
         s.instrumental = instrumental
         s.prompt = prompt
         s.lyrics = lyrics
-        s.lyricsHeight = PromptEditorHeight.clamp(lyricsHeight)
         s.refAudioPath = refAudioURL?.path
         s.task = task
         s.srcAudioPath = srcAudioURL?.path

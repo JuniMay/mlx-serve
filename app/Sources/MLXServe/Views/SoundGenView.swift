@@ -111,22 +111,12 @@ struct SoundGenView: View {
 
     private var promptSection: some View {
         HStack(alignment: .top, spacing: AppLayout.compactSpacing) {
-            TextEditor(text: $prompt)
+            ComposerPromptEditor(text: $prompt, placeholder: "Describe a sound…",
+                                 isRunning: service.isRunning,
+                                 canSubmit: generationBlockReason == nil,
+                                 onSubmit: generate, onCancel: service.cancel)
                 .accessibilityLabel("Describe the sound")
-                .font(.app(.body))
-                .frame(height: AppLayout.generationPromptHeight)
-                .scrollContentBackground(.hidden)
                 .help("Describe what makes the sound, its material and its surroundings, such as a heavy wooden door creaking open in a stone hall.")
-                .overlay(alignment: .topLeading) {
-                    if prompt.isEmpty {
-                        Text("Describe a sound…")
-                            .font(.app(.body))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 8)
-                            .allowsHitTesting(false)
-                    }
-                }
             Menu {
                 Section("Templates") {
                     ForEach(SoundPrompt.examples, id: \.self) { example in
@@ -185,20 +175,13 @@ struct SoundGenView: View {
     private var actionRow: some View {
         HStack {
             if service.isRunning {
-                Button(role: .destructive) { service.cancel() } label: {
-                    Label("Cancel", systemImage: "stop.circle")
-                }
-                .buttonStyle(.bordered)
+                ComposerActionButton(isRunning: true, label: "Cancel") { service.cancel() }
             } else {
-                Button { generate() } label: {
-                    Label("Generate", systemImage: "speaker.wave.3")
-                }
-                .buttonStyle(.borderedProminent)
+                ComposerActionButton(isRunning: false, label: "Generate") { generate() }
                 .keyboardShortcut(.return, modifiers: [.command])
                 .disabled(generationBlockReason != nil)
             }
         }
-        .controlSize(.large)
     }
 
     private var previewArea: some View {

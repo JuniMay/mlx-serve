@@ -70,16 +70,42 @@ appearance when those configurations are available.
 2. Open Tools & MCP. Check that the switches lead their labels, including the
    global Tools and MCP switches. Workspace tool choices and memory/task features
    must have distinct groups; no row should float in the middle of a section.
-3. Open Providers. Add an unsaved provider. Verify that each editor row has two
+3. Open Providers. Verify that Nearby Macs is a built-in source with a discovery
+   switch and restart guidance. Verify that LAN Sharing contains publishing
+   controls and no discovery switch. Open the Nearby Macs reset confirmation;
+   it must name discovery and preserve configured chat services. Cancel it.
+   Add an unsaved chat-service provider. Verify that each editor row has two
    columns: the option name and its editor. Placeholder text must appear inside
    the editor, not as a third column. Repeat at minimum window width. Do not save
    the blank entry or change existing credentials or provider configuration.
 4. Open Server. Context size must show Auto as an explicit menu choice, retain
    a custom saved value, and display the active server limit separately.
-5. Verify that Cache owns KV and prefix-cache controls, and Performance groups
-   Neural Engine settings under hardware acceleration.
+5. Verify that Cache uses separate native cards for prompt preparation, RAM
+   conversation cache, SSD conversation cache, and applicable GGUF cache settings.
+   Engines must use the same card style without a second frame inside each card.
+   Search for a setting in one card; empty cards and headings must disappear.
+   Performance groups Neural Engine settings under hardware acceleration.
 6. Open Generation Defaults. Verify that saved per-model thinking preferences can be
    read and that reset controls are clearly associated with their model. Use
    unit tests or an isolated fixture profile to change them.
 7. Open About. Bundled engines and dependencies must remain readable and links
    must identify their destination. There must be no active update controls.
+
+## Captions, help, and disclosure motion
+
+1. Compare Server, Cache, Performance, and Engines. Each option has one short
+   caption in its label column. Its full explanation opens from the information
+   button beside the name. Dynamic cautions and resource costs stay readable.
+2. Open Disable vision help. It must describe model-dependent memory savings and
+   image-input support without promising a fixed memory reduction.
+3. Expand and collapse a Tools group. Its controls must appear directly below
+   its label with a brief transition, keeping the state and focus intact.
+4. Repeat with Reduce Motion enabled in an isolated fixture or test profile.
+   The controls must remain fully usable without expansion animation. Keep the
+   user's system accessibility preferences unchanged.
+
+Design references: [Offering help](https://developer.apple.com/design/human-interface-guidelines/offering-help),
+[Layout](https://developer.apple.com/design/human-interface-guidelines/layout),
+[Boxes](https://developer.apple.com/design/human-interface-guidelines/boxes),
+[Disclosure controls](https://developer.apple.com/design/human-interface-guidelines/disclosure-controls),
+and [Motion](https://developer.apple.com/design/human-interface-guidelines/motion).

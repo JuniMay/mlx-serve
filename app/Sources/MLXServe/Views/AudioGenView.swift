@@ -281,21 +281,11 @@ struct VoiceGenView: View {
             GenerationSectionHeader(title: "Text to speak") {
                 dictationButton
             }
-            TextEditor(text: $text)
+            ComposerPromptEditor(text: $text, placeholder: "Enter the words you want to hear…",
+                                 isRunning: service.isRunning,
+                                 canSubmit: generationBlockReason == nil,
+                                 onSubmit: tryGenerate, onCancel: service.cancel)
                 .accessibilityLabel("Text to speak")
-                .font(.app(.body))
-                .frame(height: AppLayout.generationPromptHeight)
-                .scrollContentBackground(.hidden)
-                .overlay(alignment: .topLeading) {
-                    if text.isEmpty {
-                        Text("Enter the words you want to hear…")
-                            .font(.app(.body))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 8)
-                            .allowsHitTesting(false)
-                    }
-                }
             if let err = dictationError {
                 Text(err).font(.app(.caption2)).foregroundStyle(.orange)
             }
@@ -511,20 +501,13 @@ struct VoiceGenView: View {
     private var actionRow: some View {
         HStack {
             if service.isRunning {
-                Button(role: .destructive) { service.cancel() } label: {
-                    Label("Cancel", systemImage: "stop.fill")
-                }
-                .buttonStyle(.bordered)
+                ComposerActionButton(isRunning: true, label: "Cancel") { service.cancel() }
             } else {
-                Button { tryGenerate() } label: {
-                    Label("Generate", systemImage: "waveform")
-                }
-                .buttonStyle(.borderedProminent)
+                ComposerActionButton(isRunning: false, label: "Generate") { tryGenerate() }
                 .keyboardShortcut(.return, modifiers: [.command])
                 .disabled(generationBlockReason != nil)
             }
         }
-        .controlSize(.large)
     }
 
     private var previewArea: some View {

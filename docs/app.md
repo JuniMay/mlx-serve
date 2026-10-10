@@ -12,7 +12,7 @@ Menu-bar app that wraps the server with a full UI. [Download the latest release]
 - **MCP client** — curated marketplace of stdio + HTTP MCP servers (GitHub, Azure DevOps, DBHub, Docker, Kubernetes, Playwright, Slack, Notion, Filesystem, Shell) plus your own from `~/.mlx-serve/mcp.json`.
 - **Agent Sandbox** — run agent shell commands in a Linux VM through Apple's Virtualization framework. Workspace folders are shared with the guest, so changes there affect the real files on your Mac. With guest networking enabled, listening guest ports are available through localhost. The direct-distribution build can also run host commands; the App Store build requires guest execution.
 - **Hands-free Voice Mode** — on-device speech recognition, spoken replies, interruption and agent tools from the menu bar. Replies use the macOS system voice by default. Settings ▸ Voice also offers Kokoro voices and Qwen3-TTS voice cloning. A new installation has no wake phrase: choose one or turn off **Require Wake Phrase** before starting. Agents can supply their own phrase.
-- **LAN Sharing** — share chosen models with the other Macs in your house and use theirs: peers appear automatically, shared models show up in the tray and every generation pane as "model · peer", and requests stream to the Mac that hosts the weights — chat, image, speech, music, video, and 3D alike, with models loading on demand on the host. Per-model share checkboxes in Settings; prompts sent to a shared model run on (and are visible to) the hosting Mac.
+- **LAN Sharing** — share chosen models with the other Macs in your house and use theirs: peers appear automatically, shared models show up in the tray and every generation pane as "model · peer", and requests stream to the Mac that hosts the weights — chat, image, speech, music, video, and 3D alike, with models loading on demand on the host. Configure publishing in Settings ▸ LAN Sharing and discovery in Settings ▸ Providers ▸ Nearby Macs. Prompts sent to a shared model run on and are visible to the hosting Mac.
 - **Scheduled tasks** — hand the agent a goal and a schedule in plain English ("weekdays at 8am, check my watched sites and write a briefing") and it runs unattended, with saved transcripts.
 - **Document folder RAG** — attach a folder of mixed files and ask questions about them; GPU-batched embeddings index ~500 files in ~7 s, everything in memory, nothing leaves the Mac.
 - **Editable system prompt + persistent memory** — `~/.mlx-serve/system-prompt.md` and `~/.mlx-serve/memory.md`.
@@ -38,6 +38,12 @@ visible when opened. The attachment and model popovers preserve model-specific i
 and download controls. Voice, Music and Sound keep their own input requirements.
 The Audio toolbar switches between these three workspaces. Prompt action menus
 provide templates and enhancement where supported.
+
+Chat and media share the editor's font and insets, model-pill styling and circular
+attachment and action controls. Media prompts grow as you type, then scroll
+within a bounded area. Return inserts a newline; **⌘Return** starts generation
+when the required inputs are ready.
+
 Changing the model within a workspace preserves its draft inputs. Model defaults
 and capability limits still apply to generation parameters.
 
