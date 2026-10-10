@@ -41,11 +41,8 @@ struct ModelBrowserPane: View {
         detail
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .toolbar {
-            ToolbarItem(placement: .principal) {
-                ModelBrowserSectionBar(section: $section, badges: badges,
+            ModelBrowserSectionToolbar(section: $section, badges: badges,
                                        isDownloading: downloadSummary.running > 0)
-            }
-            .sharedBackgroundVisibility(.hidden)
         }
         // The floor the browser's table needs, asserted from INSIDE the chat
         // window's detail column: below it the action cell clips off the right
@@ -95,6 +92,18 @@ struct ModelBrowserPane: View {
 
 // MARK: - Section bar
 
+struct ModelBrowserSectionToolbar: ToolbarContent {
+    @Binding var section: ModelBrowserSection
+    let badges: ModelBrowserBadgeCounts
+    let isDownloading: Bool
+
+    var body: some ToolbarContent {
+        ToolbarItem(placement: .principal) {
+            ModelBrowserSectionBar(section: $section, badges: badges, isDownloading: isDownloading)
+        }
+    }
+}
+
 /// Native section navigation in the window toolbar.
 struct ModelBrowserSectionBar: View {
     @Binding var section: ModelBrowserSection
@@ -104,19 +113,32 @@ struct ModelBrowserSectionBar: View {
     var body: some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: AppLayout.compactSpacing) {
-                Picker("Models section", selection: $section) {
-                    ForEach(ModelBrowserSection.allCases) { item in
-                        Text(verbatim: title(for: item)).tag(item)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .controlSize(.large)
-                .labelsHidden()
+                sectionPicker
+                    .controlSize(.large)
+                    .labelsHidden()
                 if isDownloading { downloadActivity }
             }
             .fixedSize(horizontal: true, vertical: false)
             sectionMenu.fixedSize(horizontal: true, vertical: false)
         }
+    }
+
+    @ViewBuilder
+    private var sectionPicker: some View {
+        let picker = Picker("Models section", selection: $section) {
+            ForEach(ModelBrowserSection.allCases) { item in
+                Text(verbatim: title(for: item)).tag(item)
+            }
+        }
+        #if compiler(>=6.4)
+        if #available(macOS 27.0, *) {
+            picker.pickerStyle(.tabs)
+        } else {
+            picker.pickerStyle(.segmented)
+        }
+        #else
+        picker.pickerStyle(.segmented)
+        #endif
     }
 
     private var sectionMenu: some View {

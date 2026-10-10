@@ -56,7 +56,7 @@ the same generation service shows that it is busy and cannot stop its work.
 New, Models, Agents and Tasks form one sidebar group above the session sections.
 They provide management views in the main pane while the sidebar stays in place.
 App-wide server, engine, tool and appearance preferences
-stay in **Settings**. Models keeps one title, with a native Liquid Glass segmented picker in the window toolbar and consistent native lists across its sections. Agents and Tasks use opaque secondary lists. Custom session groups use plain headings with collapse controls; their context menus provide New Chat in Group, Rename and Delete.
+stay in **Settings**. Models keeps one title, with native section tabs in the window toolbar and consistent native lists across its sections. Builds using Xcode 27 use the system tabs style on macOS 27; earlier systems and toolchains use the native segmented picker. Agents and Tasks use opaque secondary lists. Custom session groups use plain headings with collapse controls; their context menus provide New Chat in Group, Rename and Delete.
 
 Open terminal sessions from the app's menu-bar **Code** control. Terminal sessions
 appear alongside conversations and remain running when you switch workspaces.

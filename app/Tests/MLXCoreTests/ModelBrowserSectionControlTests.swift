@@ -5,6 +5,25 @@ import XCTest
 
 @MainActor
 final class ModelBrowserSectionControlTests: XCTestCase {
+    // The native item must keep its background configuration; live checks cover appearance.
+    func testSectionToolbarKeepsItsNativeBackground() async throws {
+        let selection = SectionSelection()
+        let hosting = NSHostingController(rootView: SectionToolbarFixture(selection: selection))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 400),
+                              styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+        window.toolbarStyle = .unified
+        window.contentViewController = hosting
+        defer { window.contentViewController = nil }
+        for _ in 0..<5 {
+            window.contentView?.layoutSubtreeIfNeeded()
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let toolbar = try XCTUnwrap(window.toolbar)
+        XCTAssertEqual(toolbar.items.count, 1)
+        let sectionItem = try XCTUnwrap(toolbar.items.first)
+        XCTAssertTrue(sectionItem.isBordered, "The native toolbar must retain its shared background around the section tabs.")
+    }
+
     func testNativeSegmentTrackingUpdatesSectionAndReflectsExternalSelection() async throws {
         let selection = SectionSelection()
         let hosting = NSHostingView(rootView: SectionControlFixture(selection: selection))
@@ -19,6 +38,11 @@ final class ModelBrowserSectionControlTests: XCTestCase {
         let control = try XCTUnwrap(controls.first)
         XCTAssertEqual(control.segmentCount, ModelBrowserSection.allCases.count)
         XCTAssertEqual(control.trackingMode, .selectOne)
+        #if compiler(>=6.4)
+        if #available(macOS 27.0, *) {
+            XCTAssertEqual(control.role, .tabs, "Section navigation must use the native tab treatment and accessibility role.")
+        }
+        #endif
         XCTAssertEqual(control.selectedSegment, 0)
 
         for (index, section) in ModelBrowserSection.allCases.enumerated() {
@@ -68,5 +92,20 @@ private struct SectionControlFixture: View {
                                badges: .live(localModelCount: 4, activeDownloadCount: 0, mediaReadyCount: 1),
                                isDownloading: false)
             .frame(width: 800, height: 80)
+    }
+}
+
+private struct SectionToolbarFixture: View {
+    let selection: SectionSelection
+
+    var body: some View {
+        Color.clear
+            .navigationTitle("Models")
+            .toolbarBackground(.visible, for: .windowToolbar)
+            .toolbar {
+                ModelBrowserSectionToolbar(section: Binding(get: { selection.section }, set: { selection.section = $0 }),
+                                           badges: .live(localModelCount: 4, activeDownloadCount: 0, mediaReadyCount: 1),
+                                           isDownloading: false)
+            }
     }
 }

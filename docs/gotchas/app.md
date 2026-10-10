@@ -2,6 +2,17 @@
 
 Full histories: live failures, measurements, diagnosis ladders, dead ends. The distilled RULES live in the root CLAUDE.md "Rules" section — when a rule changes, update the story here too. New gotchas in this domain: add the 1-3 line rule to root, the full story here.
 
+### Native navigation tabs
+
+Models section navigation used a native segmented picker, but its automatic role
+did not select macOS 27's tab appearance. Checking the native control class and
+selection binding could not catch that distinction. `ModelBrowserSectionBar`
+uses `TabsPickerStyle` when the SDK and system support it. Its toolbar item keeps
+the system background; hiding that background also removes the surrounding glass.
+`ModelBrowserSectionControlTests` asserts the tabs role, selection and native
+toolbar border configuration.
+Press-and-drag appearance still requires a live-window check.
+
 ### Native list column measurements
 
 An external column header can shift by the sidebar width when a native List

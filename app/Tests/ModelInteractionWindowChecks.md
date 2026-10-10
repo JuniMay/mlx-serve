@@ -43,9 +43,11 @@ tests cover model changes without inference or disk output.
 1. Open Models and visit Recommended, Discover, My Models, Downloads and Media.
    The window title must remain Models. The section control must identify the
    selected section once, without repeating it as a second page title.
-2. Check that the native segmented picker appears in the window toolbar. Hold
-   its selected segment: the Liquid Glass lens must lift and enlarge. Drag across
-   the other segments, then release. The lens must follow the pointer and settle
+2. On macOS 27 with an Xcode 27 build, check that the native tabs picker appears
+   in the window toolbar within its system glass background. Hold its selected
+   tab: the Liquid Glass lens must lift
+   and enlarge. Drag across the other segments, then release.
+   The lens must follow the pointer and settle
    on the released segment, with exactly one section selected. Repeat in both
    directions. The Models title stays visible and the sidebar stays in place.
    Content begins directly below the toolbar.
@@ -53,9 +55,11 @@ tests cover model changes without inference or disk output.
    five sections remain reachable through the compact menu without clipping.
    Download counts and activity must remain visible without changing selection.
 
-`ModelBrowserSectionControlTests` checks native single-selection tracking,
-section binding updates, and badge labels. The held lens and drag appearance
-require the live-window check above.
+`ModelBrowserSectionControlTests` checks the native tabs role on macOS 27,
+toolbar border configuration, single-selection tracking, section binding updates,
+and badge labels. Earlier
+systems and toolchains use the native segmented picker. The held lens and drag
+appearance require the live-window check above.
 
 ## Model lists
 
