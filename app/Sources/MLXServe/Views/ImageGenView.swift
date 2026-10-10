@@ -168,7 +168,7 @@ struct ImageGenView: View {
                 .accessibilityLabel("Prompt")
                 .focused($promptFocused)
                 .font(.app(.body))
-                .frame(height: min(promptHeight, 180))
+                .frame(height: min(promptHeight, AppLayout.generationPromptHeight))
                 .scrollContentBackground(.hidden)
                 .overlay(alignment: .topLeading) {
                     if prompt.isEmpty {
@@ -893,25 +893,23 @@ struct ImageGenView: View {
     }
 
     private var actionRow: some View {
-        VStack(alignment: .leading, spacing: AppLayout.compactSpacing) {
-            HStack {
-                if service.isRunning {
-                    Button(role: .destructive) {
-                        service.cancel()
-                    } label: {
-                        Label("Cancel", systemImage: "stop.circle")
-                    }
-                    .buttonStyle(.bordered)
-                } else {
-                    Button {
-                        tryGenerate()
-                    } label: {
-                        Label("Generate", systemImage: "wand.and.stars")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut(.return, modifiers: [.command])
-                    .disabled(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (lanModel == nil && !downloads.bundleReady(model.bundle)) || !condWeightsValid || !customSizeValid)
+        Group {
+            if service.isRunning {
+                Button(role: .destructive) {
+                    service.cancel()
+                } label: {
+                    Label("Cancel", systemImage: "stop.circle")
                 }
+                .buttonStyle(.bordered)
+            } else {
+                Button {
+                    tryGenerate()
+                } label: {
+                    Label("Generate", systemImage: "wand.and.stars")
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.return, modifiers: [.command])
+                .disabled(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (lanModel == nil && !downloads.bundleReady(model.bundle)) || !condWeightsValid || !customSizeValid)
             }
         }
         .controlSize(.large)
@@ -919,31 +917,32 @@ struct ImageGenView: View {
 
     private var previewArea: some View {
         Group {
-            Group {
-                switch service.phase {
-                case .idle:
-                    ContentUnavailableView("No generation yet", systemImage: "photo", description: Text("Enter a prompt and press Generate.").font(.app(.body)))
-                case .running(let step, let total, let message):
-                    VStack(spacing: AppLayout.rowSpacing) {
-                        ProgressView(value: Double(step), total: max(1, Double(total)))
-                            .progressViewStyle(.linear)
-                            .frame(maxWidth: 240)
-                        Text(message).font(.app(.footnote)).foregroundStyle(.secondary)
-                    }
-                case .completed(let path):
-                    completedPreview(path: path)
-                case .failed(let msg):
-                    ContentUnavailableView {
-                        Label("Failed", systemImage: "exclamationmark.triangle").font(.app(.body))
-                    } description: {
-                        Text(msg)
-                    } actions: {
-                        Button { showLogWindow() } label: { Text("Show log")
-                            .font(.app(.body)) }
-                    }
+            switch service.phase {
+            case .idle:
+                VStack(spacing: AppLayout.rowSpacing) {
+                    Image(systemName: "photo").font(.app(.title2))
+                    Text("Enter a prompt and press Generate.").font(.app(.body))
+                }
+                .foregroundStyle(.secondary)
+            case .running(let step, let total, let message):
+                VStack(spacing: AppLayout.rowSpacing) {
+                    ProgressView(value: Double(step), total: max(1, Double(total)))
+                        .progressViewStyle(.linear)
+                        .frame(maxWidth: 240)
+                    Text(message).font(.app(.footnote)).foregroundStyle(.secondary)
+                }
+            case .completed(let path):
+                completedPreview(path: path)
+            case .failed(let msg):
+                ContentUnavailableView {
+                    Label("Failed", systemImage: "exclamationmark.triangle").font(.app(.body))
+                } description: {
+                    Text(msg)
+                } actions: {
+                    Button { showLogWindow() } label: { Text("Show log")
+                        .font(.app(.body)) }
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -952,6 +951,7 @@ struct ImageGenView: View {
         VStack(spacing: AppLayout.compactSpacing) {
             MediaImageView(url: URL(fileURLWithPath: path), maxPixel: 3072,
                            contentMode: .fit)
+                .clipShape(RoundedRectangle(cornerRadius: AppLayout.surfaceRadius, style: .continuous))
             // The name and the ways to reach the file belong together, centred
             // under the picture they describe.
             HStack(spacing: AppLayout.compactSpacing) {
@@ -968,7 +968,6 @@ struct ImageGenView: View {
                 .accessibilityLabel("Reveal in Finder")
             }
         }
-        .padding(AppLayout.compactSpacing)
     }
 
     private var outputFolderLink: some View {
@@ -980,9 +979,12 @@ struct ImageGenView: View {
             Label("Open output folder in Finder", systemImage: "folder")
                 .font(.app(.caption))
         }
+        .labelStyle(.iconOnly)
         .buttonStyle(.borderless)
         .foregroundStyle(.secondary)
-        .help(MediaStorage.imagesRoot)
+        .accessibilityLabel("Open output folder in Finder")
+        .help("Open output folder in Finder")
+        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
     // MARK: - Sticky settings

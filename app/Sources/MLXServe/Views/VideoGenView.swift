@@ -219,6 +219,9 @@ struct VideoGenView: View {
             return "Download the selected model using the model control."
         }
         if !customSizeValid { return "Choose a supported canvas size in generation settings." }
+        if !payloadFits {
+            return "\(VideoModelPreset.deliveredFrames(perWindow: numFrames, chainWindows: chainWindows)) frames at \(effectiveSize.width) × \(effectiveSize.height) is more than one response can carry. Shorten the clip, drop a window, or use a smaller canvas."
+        }
         return nil
     }
 
@@ -231,7 +234,7 @@ struct VideoGenView: View {
                     .accessibilityLabel("Prompt")
                     .focused($promptFocused)
                     .font(.app(.body))
-                    .frame(height: min(promptHeight, 180))
+                    .frame(height: min(promptHeight, AppLayout.generationPromptHeight))
                     .scrollContentBackground(.hidden)
             }, actions: {
                 Menu {
@@ -820,7 +823,7 @@ struct VideoGenView: View {
         return out + "."
     }
 
-    /// "about 50 min — estimated for M4 Max", under the Generate button.
+    /// Duration and estimate source shown in the Generate button's help.
     private var timeEstimate: String? {
         guard model.backend == .minimaxH3, lanModel == nil else { return nil }
         return H3TimeEstimate.describeBest(
@@ -1824,38 +1827,26 @@ struct VideoGenView: View {
     private static let steppedSliderTrackDrop: CGFloat = 3
 
     private var actionRow: some View {
-        VStack(alignment: .leading, spacing: AppLayout.compactSpacing) {
-            HStack {
-                if service.isRunning {
-                    Button(role: .destructive) {
-                        service.cancel()
-                    } label: {
-                        Label("Cancel", systemImage: "stop.circle")
-                    }
-                    .buttonStyle(.bordered)
-                } else {
-                    Button {
-                        tryGenerate()
-                    } label: {
-                        Label("Generate", systemImage: "wand.and.stars")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut(.return, modifiers: [.command])
-                    .disabled(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (lanModel == nil && !downloads.bundleReady(model.bundle)) || !customSizeValid || !payloadFits)
+        Group {
+            if service.isRunning {
+                Button(role: .destructive) {
+                    service.cancel()
+                } label: {
+                    Label("Cancel", systemImage: "stop.circle")
                 }
-            }
-            // A disabled button with no reason is worse than no button, and
-            // this one guards a combination the controls no longer produce:
-            // it is the backstop, not the message people normally see.
-            if !payloadFits {
-                Text("\(VideoModelPreset.deliveredFrames(perWindow: numFrames, chainWindows: chainWindows)) frames at \(effectiveSize.width) × \(effectiveSize.height) is more than one response can carry. Shorten the clip, drop a window, or use a smaller canvas.")
-                    .font(.app(.caption2)).foregroundStyle(.orange)
-            }
-            if !service.isRunning, let est = timeEstimate {
-                Text(L10n.text(est))
-                    .font(.app(.caption))
-                    .foregroundStyle(.secondary)
-                    .help("Estimated from measured runs and this Mac's GPU. Actual time varies with what else is using the GPU.")
+                .buttonStyle(.bordered)
+            } else {
+                Button {
+                    tryGenerate()
+                } label: {
+                    Label("Generate", systemImage: "wand.and.stars")
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.return, modifiers: [.command])
+                .disabled(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (lanModel == nil && !downloads.bundleReady(model.bundle)) || !customSizeValid || !payloadFits)
+                .help(timeEstimate.map { estimate in
+                    L10n.text(estimate) + "\n" + L10n.text("Estimated from measured runs and this Mac's GPU. Actual time varies with what else is using the GPU.")
+                } ?? L10n.text("Generate"))
             }
         }
         .controlSize(.large)
@@ -1863,42 +1854,43 @@ struct VideoGenView: View {
 
     private var previewArea: some View {
         Group {
-            Group {
-                switch service.phase {
-                case .idle:
-                    ContentUnavailableView("No generation yet", systemImage: "film", description: Text("Enter a prompt and press Generate.").font(.app(.body)))
-                case .running(let step, let total, let message):
-                    VStack(spacing: AppLayout.rowSpacing) {
-                        if let img = service.livePreview {
-                            Image(nsImage: img)
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(maxHeight: 220)
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
-                        }
-                        ProgressView(value: Double(step), total: max(1, Double(total)))
-                            .progressViewStyle(.linear)
-                            .frame(maxWidth: 240)
-                        Text(message).font(.app(.footnote)).foregroundStyle(.secondary)
-                        Text(service.startedAt, style: .timer)
-                            .font(.app(.footnote)).monospacedDigit().foregroundStyle(.secondary)
+            switch service.phase {
+            case .idle:
+                VStack(spacing: AppLayout.rowSpacing) {
+                    Image(systemName: "film").font(.app(.title2))
+                    Text("Enter a prompt and press Generate.").font(.app(.body))
+                }
+                .foregroundStyle(.secondary)
+            case .running(let step, let total, let message):
+                VStack(spacing: AppLayout.rowSpacing) {
+                    if let img = service.livePreview {
+                        Image(nsImage: img)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(maxHeight: 220)
+                            .clipShape(RoundedRectangle(cornerRadius: AppLayout.surfaceRadius, style: .continuous))
                     }
-                case .completed(let path):
-                    completedPreview(path: path)
-                case .cancelled:
-                    ContentUnavailableView("Cancelled", systemImage: "stop.circle", description: Text("Generation was cancelled.").font(.app(.body)))
-                case .failed(let msg):
-                    ContentUnavailableView {
-                        Label("Failed", systemImage: "exclamationmark.triangle").font(.app(.body))
-                    } description: {
-                        Text(msg)
-                    } actions: {
-                        Button { showLogWindow() } label: { Text("Show log")
-                            .font(.app(.body)) }
-                    }
+                    ProgressView(value: Double(step), total: max(1, Double(total)))
+                        .progressViewStyle(.linear)
+                        .frame(maxWidth: 240)
+                    Text(message).font(.app(.footnote)).foregroundStyle(.secondary)
+                    Text(service.startedAt, style: .timer)
+                        .font(.app(.footnote)).monospacedDigit().foregroundStyle(.secondary)
+                }
+            case .completed(let path):
+                completedPreview(path: path)
+            case .cancelled:
+                ContentUnavailableView("Cancelled", systemImage: "stop.circle", description: Text("Generation was cancelled.").font(.app(.body)))
+            case .failed(let msg):
+                ContentUnavailableView {
+                    Label("Failed", systemImage: "exclamationmark.triangle").font(.app(.body))
+                } description: {
+                    Text(msg)
+                } actions: {
+                    Button { showLogWindow() } label: { Text("Show log")
+                        .font(.app(.body)) }
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -1908,6 +1900,7 @@ struct VideoGenView: View {
             if let player {
                 AVPlayerViewRepresentable(player: player)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: AppLayout.surfaceRadius, style: .continuous))
             }
             HStack(spacing: AppLayout.compactSpacing) {
                 Text(URL(fileURLWithPath: path).lastPathComponent)
@@ -1924,7 +1917,6 @@ struct VideoGenView: View {
                 .accessibilityLabel("Reveal in Finder")
             }
         }
-        .padding(AppLayout.compactSpacing)
     }
 
     private var outputFolderLink: some View {
@@ -1936,9 +1928,12 @@ struct VideoGenView: View {
             Label("Open output folder in Finder", systemImage: "folder")
                 .font(.app(.caption))
         }
+        .labelStyle(.iconOnly)
         .buttonStyle(.borderless)
         .foregroundStyle(.secondary)
-        .help(MediaStorage.videosRoot)
+        .accessibilityLabel("Open output folder in Finder")
+        .help("Open output folder in Finder")
+        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
     // MARK: - Sticky settings

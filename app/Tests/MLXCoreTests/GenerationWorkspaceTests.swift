@@ -28,6 +28,23 @@ final class GenerationWorkspaceTests: XCTestCase {
         }
     }
 
+    func testCanvasAndDockShareEdgesAtNarrowAndWideSizes() async throws {
+        for width: CGFloat in [420, 900, 1400] {
+            let probe = GenerationWorkspaceProbe()
+            let hosting = NSHostingView(rootView: GenerationWorkspaceFixture(probe: probe))
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 700),
+                                  styleMask: [.borderless], backing: .buffered, defer: false)
+            window.contentView = hosting
+            defer { window.contentView = nil }
+            try await settle(hosting) { !probe.prompt.isEmpty && !probe.result.isEmpty }
+
+            XCTAssertEqual(probe.result.minX, probe.prompt.minX - AppLayout.contentInset, accuracy: 1,
+                           "The result and floating dock share their leading edge.")
+            XCTAssertEqual(probe.result.maxX, probe.prompt.maxX + AppLayout.contentInset, accuracy: 1,
+                           "The result and floating dock share their trailing edge.")
+        }
+    }
+
     func testLongInputKeepsRoomForTheResultAndShrinksAgain() async throws {
         let probe = GenerationWorkspaceProbe()
         let hosting = NSHostingView(rootView: GenerationWorkspaceFixture(probe: probe))

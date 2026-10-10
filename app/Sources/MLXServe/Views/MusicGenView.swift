@@ -13,7 +13,7 @@ struct MusicGenView: View {
 
     @State private var prompt: String = ""
     @State private var lyrics: String = ""
-    /// Height of the lyrics editor — dragged by `lyricsResizeHandle`, sticky.
+    /// Preserve the saved editor preference while bounding the input dock.
     @State private var lyricsHeight: Double = PromptEditorHeight.defaultHeight
     @State private var model: MusicModelPreset = .acestepXLTurbo8bit
     /// Selected network model's routing id (`<model>@<peer>`); nil = local.
@@ -203,6 +203,16 @@ struct MusicGenView: View {
                 .font(.app(.body))
                 .frame(height: 54)
                 .scrollContentBackground(.hidden)
+                .overlay(alignment: .topLeading) {
+                    if prompt.isEmpty {
+                        Text("Describe the genre, mood and instruments…")
+                            .font(.app(.body))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 8)
+                            .allowsHitTesting(false)
+                    }
+                }
                 .help("Describe genre, mood and instruments, such as upbeat synthwave with driving bass and dreamy pads.")
         }
     }
@@ -239,7 +249,7 @@ struct MusicGenView: View {
                 TextEditor(text: $lyrics)
                     .accessibilityLabel("Lyrics")
                     .font(.app(.body))
-                    .frame(height: lyricsHeight)
+                    .frame(height: min(lyricsHeight, 96))
                     .scrollContentBackground(.hidden)
                     .help(model.requiresLyrics
                           ? L10n.format("This model sings your lyrics. Put section tags on their own lines: %@", MusicOptions.sectionTagHint)
@@ -254,15 +264,8 @@ struct MusicGenView: View {
                                 .allowsHitTesting(false)
                         }
                     }
-                lyricsResizeHandle
             }
         }
-    }
-
-    /// Persist the editor height within its supported bounds.
-    private var lyricsResizeHandle: some View {
-        EditorResizeHandle(height: $lyricsHeight, onCommit: persist,
-                           help: "Drag to resize the lyrics box.")
     }
 
     /// The task actually in force: the mode control only exists on models
@@ -809,36 +812,36 @@ struct MusicGenView: View {
     }
 
     private var previewArea: some View {
-        GroupBox {
-            Group {
-                switch service.phase {
-                case .idle:
-                    ContentUnavailableView("No music yet", systemImage: "music.note",
-                                           description: Text("Describe a style, optionally add lyrics, and press Generate.").font(.app(.body)))
-                case .running(let step, let total, let message):
-                    VStack(spacing: AppLayout.rowSpacing) {
-                        if total == 0 {
-                            ProgressView().frame(maxWidth: 240)
-                        } else {
-                            ProgressView(value: Double(step), total: max(1, Double(total)))
-                                .progressViewStyle(.linear).frame(maxWidth: 240)
-                        }
-                        Text(message).font(.app(.footnote)).foregroundStyle(.secondary)
+        Group {
+            switch service.phase {
+            case .idle:
+                VStack(spacing: AppLayout.rowSpacing) {
+                    Image(systemName: "music.note").font(.app(.title2))
+                    Text("Describe the music you want to create.").font(.app(.body))
+                }
+                .foregroundStyle(.secondary)
+            case .running(let step, let total, let message):
+                VStack(spacing: AppLayout.rowSpacing) {
+                    if total == 0 {
+                        ProgressView().frame(maxWidth: 240)
+                    } else {
+                        ProgressView(value: Double(step), total: max(1, Double(total)))
+                            .progressViewStyle(.linear).frame(maxWidth: 240)
                     }
-                case .completed(let path):
-                    completedPreview(path: path)
-                case .failed(let msg):
-                    ContentUnavailableView {
-                        Label("Failed", systemImage: "exclamationmark.triangle").font(.app(.body))
-                    } description: {
-                        Text(msg)
-                    } actions: {
-                        Button { showLogWindow() } label: { Text("Show log")
-                            .font(.app(.body)) }
-                    }
+                    Text(message).font(.app(.footnote)).foregroundStyle(.secondary)
+                }
+            case .completed(let path):
+                completedPreview(path: path)
+            case .failed(let msg):
+                ContentUnavailableView {
+                    Label("Failed", systemImage: "exclamationmark.triangle").font(.app(.body))
+                } description: {
+                    Text(msg)
+                } actions: {
+                    Button { showLogWindow() } label: { Text("Show log")
+                        .font(.app(.body)) }
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -900,7 +903,10 @@ struct MusicGenView: View {
         }
         .buttonStyle(.borderless)
         .foregroundStyle(.secondary)
-        .help(MediaStorage.musicRoot)
+        .labelStyle(.iconOnly)
+        .accessibilityLabel("Open output folder in Finder")
+        .help("Open output folder in Finder")
+        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
     // MARK: - Sticky settings

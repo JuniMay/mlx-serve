@@ -8,6 +8,10 @@ conditional sections only when the selected model exposes them.
    The result occupies the main canvas, with an input dock below it. Model
    configuration and technical parameters start closed. The prompt, selected
    model and Generate action remain visible without scrolling the page.
+   Idle canvases show a muted symbol and instruction. They have no full-canvas
+   card background. Empty Voice and Music style editors show their placeholders.
+   Image, Video, Voice and Sound prompt editors use the shared 72-point cap.
+   With no attachments, the plus control is circular.
    The Audio type toolbar menu must visibly name the current family, including
    before the menu opens. Switch between Voice, Music and Sound Effects, verify
    the title and selected checkmark match the displayed workspace, then restore
@@ -17,18 +21,21 @@ conditional sections only when the selected model exposes them.
    dismiss without choosing or downloading. Open the attachment popover where
    supported. References, first/last frames, source audio and voice inputs must
    remain reachable; a short popover must not leave a large empty region.
-3. Open Generation settings. Verify quality, dimensions, duration, sampler,
+3. Open Generation settings from the toolbar. Verify quality, dimensions, duration, sampler,
    adapters and residency controls that the selected model supports. Close it
    again. Input and result remain present, with no lost draft or reset state.
-4. At narrow and wide window sizes, check the dock controls for clipping and
-   overlap. Controls wrap when needed. Long prompts scroll inside a bounded
+4. At narrow and wide window sizes, verify the result and dock share both edges.
+   Check the dock controls for clipping and overlap. Controls wrap when needed.
+   Long prompts scroll inside a bounded
    input area so the result remains visible. Use a fixture profile to verify
    long-input growth, shrinkage and draft retention across model selection.
+   Music lyrics scroll within their editor; Instrumental preserves their text.
 5. Verify unavailable-model and required-input explanations remain visible
    beside the disabled action. On Music, retain the required-lyrics rule. On
    3D, retain the source-image requirement. Do not generate to test these states.
 6. Inspect existing output, progress and errors. File names, players, history,
-   save and Finder actions remain reachable. Do not play or delete outputs.
+   save and Finder actions remain reachable. The trailing folder icon opens the
+   output folder and has an accessible name. Do not play or delete outputs.
 7. Open Choose Model (⌘L). Search available models by name or capability and
    dismiss. In an isolated fixture, select each local model capability and
    verify its matching workspace opens without starting media generation.

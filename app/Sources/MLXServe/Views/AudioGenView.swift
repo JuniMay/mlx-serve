@@ -284,8 +284,18 @@ struct VoiceGenView: View {
             TextEditor(text: $text)
                 .accessibilityLabel("Text to speak")
                 .font(.app(.body))
-                .frame(height: 120)
+                .frame(height: AppLayout.generationPromptHeight)
                 .scrollContentBackground(.hidden)
+                .overlay(alignment: .topLeading) {
+                    if text.isEmpty {
+                        Text("Enter the words you want to hear…")
+                            .font(.app(.body))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 8)
+                            .allowsHitTesting(false)
+                    }
+                }
             if let err = dictationError {
                 Text(err).font(.app(.caption2)).foregroundStyle(.orange)
             }
@@ -518,38 +528,38 @@ struct VoiceGenView: View {
     }
 
     private var previewArea: some View {
-        GroupBox {
-            Group {
-                switch service.phase {
-                case .idle:
-                    ContentUnavailableView("No audio yet", systemImage: "waveform",
-                                           description: Text("Enter the words you want to hear.").font(.app(.body)))
-                case .running(let step, let total, let message):
-                    VStack(spacing: AppLayout.rowSpacing) {
-                        // Audio length is unknown until the model stops (total==0)
-                        // → indeterminate bar; encode/decode stages are determinate.
-                        if total == 0 {
-                            ProgressView().frame(maxWidth: 240)
-                        } else {
-                            ProgressView(value: Double(step), total: max(1, Double(total)))
-                                .progressViewStyle(.linear).frame(maxWidth: 240)
-                        }
-                        Text(message).font(.app(.footnote)).foregroundStyle(.secondary)
+        Group {
+            switch service.phase {
+            case .idle:
+                VStack(spacing: AppLayout.rowSpacing) {
+                    Image(systemName: "waveform").font(.app(.title2))
+                    Text("Enter the words you want to hear.").font(.app(.body))
+                }
+                .foregroundStyle(.secondary)
+            case .running(let step, let total, let message):
+                VStack(spacing: AppLayout.rowSpacing) {
+                    // Audio length is unknown until the model stops (total==0)
+                    // → indeterminate bar; encode/decode stages are determinate.
+                    if total == 0 {
+                        ProgressView().frame(maxWidth: 240)
+                    } else {
+                        ProgressView(value: Double(step), total: max(1, Double(total)))
+                            .progressViewStyle(.linear).frame(maxWidth: 240)
                     }
-                case .completed(let path):
-                    completedPreview(path: path)
-                case .failed(let msg):
-                    ContentUnavailableView {
-                        Label("Failed", systemImage: "exclamationmark.triangle").font(.app(.body))
-                    } description: {
-                        Text(msg)
-                    } actions: {
-                        Button { showLogWindow() } label: { Text("Show log")
-                            .font(.app(.body)) }
-                    }
+                    Text(message).font(.app(.footnote)).foregroundStyle(.secondary)
+                }
+            case .completed(let path):
+                completedPreview(path: path)
+            case .failed(let msg):
+                ContentUnavailableView {
+                    Label("Failed", systemImage: "exclamationmark.triangle").font(.app(.body))
+                } description: {
+                    Text(msg)
+                } actions: {
+                    Button { showLogWindow() } label: { Text("Show log")
+                        .font(.app(.body)) }
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -593,7 +603,10 @@ struct VoiceGenView: View {
         }
         .buttonStyle(.borderless)
         .foregroundStyle(.secondary)
-        .help(MediaStorage.audiosRoot)
+        .labelStyle(.iconOnly)
+        .accessibilityLabel("Open output folder in Finder")
+        .help("Open output folder in Finder")
+        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
     // MARK: - Reference actions

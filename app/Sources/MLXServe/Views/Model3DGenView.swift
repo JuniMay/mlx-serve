@@ -267,31 +267,30 @@ struct Model3DGenView: View {
     }
 
     private var previewArea: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: AppLayout.surfaceRadius, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
-            Group {
-                switch service.phase {
-                case .idle:
-                    ContentUnavailableView("No 3D model yet", systemImage: "cube.transparent",
-                                           description: Text("Choose a photo and press Generate.").font(.app(.body)))
-                case .running(let step, let total, let message):
-                    VStack(spacing: 12) {
-                        ProgressView(value: Double(step), total: max(1, Double(total)))
-                            .progressViewStyle(.linear).frame(width: 240)
-                        Text(message).font(.app(.footnote)).foregroundStyle(.secondary)
-                    }
-                case .completed(let path):
-                    completedPreview(path: path)
-                case .failed(let msg):
-                    ContentUnavailableView {
-                        Label("Failed", systemImage: "exclamationmark.triangle").font(.app(.body))
-                    } description: {
-                        Text(msg)
-                    } actions: {
-                        Button { showLogWindow() } label: { Text("Show log")
-                            .font(.app(.body)) }
-                    }
+        Group {
+            switch service.phase {
+            case .idle:
+                VStack(spacing: AppLayout.rowSpacing) {
+                    Image(systemName: "cube.transparent").font(.app(.title2))
+                    Text("Choose a photo to create a 3D model.").font(.app(.body))
+                }
+                .foregroundStyle(.secondary)
+            case .running(let step, let total, let message):
+                VStack(spacing: 12) {
+                    ProgressView(value: Double(step), total: max(1, Double(total)))
+                        .progressViewStyle(.linear).frame(width: 240)
+                    Text(message).font(.app(.footnote)).foregroundStyle(.secondary)
+                }
+            case .completed(let path):
+                completedPreview(path: path)
+            case .failed(let msg):
+                ContentUnavailableView {
+                    Label("Failed", systemImage: "exclamationmark.triangle").font(.app(.body))
+                } description: {
+                    Text(msg)
+                } actions: {
+                    Button { showLogWindow() } label: { Text("Show log")
+                        .font(.app(.body)) }
                 }
             }
         }
@@ -328,7 +327,10 @@ struct Model3DGenView: View {
         }
         .buttonStyle(.borderless)
         .foregroundStyle(.secondary)
-        .help(MediaStorage.models3dRoot)
+        .labelStyle(.iconOnly)
+        .accessibilityLabel("Open output folder in Finder")
+        .help("Open output folder in Finder")
+        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
     // MARK: - History shelf

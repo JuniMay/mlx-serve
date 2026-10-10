@@ -17,6 +17,17 @@ enum ComposerControlMetrics {
 }
 
 extension View {
+    func floatingInputSurface() -> some View {
+        padding(AppLayout.contentInset)
+            .background(Color(nsColor: .textBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: AppLayout.surfaceRadius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: AppLayout.surfaceRadius, style: .continuous)
+                    .strokeBorder(Color.secondary.opacity(0.25), lineWidth: 0.5)
+            }
+            .shadow(color: .black.opacity(0.06), radius: 10, y: 3)
+    }
+
     func composerCapsule() -> some View {
         controlSize(.regular)
             .glassEffect(.regular, in: .capsule)

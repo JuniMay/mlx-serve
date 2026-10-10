@@ -87,16 +87,23 @@ Settings ▸ Tools & MCP owns `ChatToolDefaults`: built-in tools, MCP access and
 `AppLayout` defines page insets, section/row spacing and shared content corners.
 Native lists, group boxes and controls use their platform geometry. Glass is
 reserved for navigation and floating controls; reading content uses semantic
-backgrounds.
+backgrounds. Chat and media input docks share `floatingInputSurface()` for their
+insets, background, border, continuous corners and shadow. The sidebar places
+New above saved sessions and groups Models, Agents and Tasks under Manage.
 
 `GenerationWorkspace` gives Image, Video, Voice, Music, Sound and 3D a result
-canvas above a bounded input dock. Model and reference controls live in measured,
-height-capped popovers. Generation parameters occupy a native trailing inspector,
-closed initially. The primary action and missing-input/model notices stay in the
-dock. Each modality retains its capability gates, request builders, progress,
+canvas above a bounded input dock. Both share a centered column capped at 1,000
+points. Model and reference controls live in measured, height-capped popovers.
+The toolbar opens generation parameters in a native trailing inspector, closed
+initially. The primary action and missing-input/model notices stay in the dock.
+Empty canvases show a muted symbol and instruction. Image, Video, Voice and Sound
+prompt editors share a 72-point height cap; lyrics use a 96-point cap. Native
+text editors scroll within these limits. Each modality
+retains its capability gates, request builders, progress,
 output handling and saved defaults. Recording Stop remains visible when the
-reference popover closes. Hosted `GenerationWorkspaceTests` cover canvas width,
-control visibility and long-input growth and shrinkage.
+reference popover closes. Hosted `GenerationWorkspaceTests` cover aligned canvas
+and dock edges at narrow and wide sizes, control visibility, and long-input
+growth and shrinkage.
 
 `ModelInteractionRoute` maps available local models to chat, a media modality,
 or the decision interface. The global `ModelPalette` searches their names and

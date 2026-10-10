@@ -1063,8 +1063,9 @@ struct ChatSidebar: View {
     private var conversationsSidebar: some View {
         List(selection: listSelection) {
             Section {
-                destinationLabel("Models", icon: "square.stack.3d.up", badge: activeDownloadCount)
-                    .tag(SidebarItem.models)
+                newSessionMenu()
+                    .padding(.vertical, 4)
+                    .selectionDisabled()
             }
             let rows = panelRows
             if !rows.agents.isEmpty {
@@ -1088,10 +1089,16 @@ struct ChatSidebar: View {
             Section {
                 ForEach(rows.sessions) { panelRow($0, ordered: rows.chats, all: rows.all) }
             } header: {
-                sectionHeader("Sessions") { newSessionMenu() }
+                Text("Sessions")
+                    .font(.system(.caption, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .textCase(nil)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .onDrop(of: [.text], delegate: groupDrop(nil))
             }
             Section("Manage") {
+                destinationLabel("Models", icon: "square.stack.3d.up", badge: activeDownloadCount)
+                    .tag(SidebarItem.models)
                 destinationLabel("Agents", icon: "person.2")
                     .tag(SidebarItem.agents)
                 destinationLabel("Tasks", icon: "clock.badge.checkmark")
@@ -1368,23 +1375,7 @@ struct ChatSidebar: View {
         Divider()
     }
 
-    private func sectionHeader<T: View>(_ title: String,
-                                        @ViewBuilder trailing: () -> T) -> some View {
-        HStack(alignment: .center, spacing: 6) {
-            Text(L10n.text(title))
-            Spacer()
-            trailing()
-        }
-        .font(.system(.caption, weight: .medium))
-        .foregroundStyle(.secondary)
-        .textCase(nil)
-        .padding(.trailing, 6)
-    }
-
-    /// The + beside Sessions and each group: a new chat first, then the coding
-    /// CLIs (the tray's own list, shared, so the two cannot drift; DMG-only —
-    /// the App Store build can't detect or launch other apps' CLIs). A group's
-    /// + files the new row under it.
+    /// The main New menu also opens model workspaces; group menus assign new sessions to their group.
     private func newSessionMenu(group: UUID? = nil) -> some View {
         Menu {
             Button {
@@ -1417,19 +1408,36 @@ struct ChatSidebar: View {
                     openHostCLI: { appState.startTerminal(hostCLI: $0, group: group) })
             }
         } label: {
-            Image(systemName: "plus")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
-                .frame(width: 22, height: 22)
+            if group == nil {
+                HStack(spacing: 8) {
+                    Image(systemName: "square.and.pencil")
+                        .foregroundStyle(.secondary)
+                    Text("New")
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.down")
+                        .font(.app(.caption))
+                        .foregroundStyle(.secondary)
+                }
+                .font(.app(.rowTitle))
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
+                .accessibilityElement(children: .combine)
+            } else {
+                Image(systemName: "plus")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
+            }
         }
         .menuStyle(.button)
-        .buttonStyle(.borderless)
-        .controlSize(.small)
+        .buttonStyle(.plain)
+        .controlSize(group == nil ? .regular : .small)
         .menuIndicator(.hidden)
-        .fixedSize()
-        .accessibilityLabel("New Chat")
-        .help("New chat, or a coding agent in a terminal")
+        .fixedSize(horizontal: group != nil, vertical: true)
+        .accessibilityLabel(group == nil ? "New" : "New Chat")
+        .help(group == nil ? "Start a chat, choose a model, or open a creation workspace"
+              : "New chat, or a coding agent in a terminal")
     }
 
     /// One conversation row, shared by both sections. `ordered` is the panel's
@@ -2704,18 +2712,11 @@ struct ChatDetailView: View {
             // One rounded container, two rows: the input on top with the
             // full width of the column, its controls beneath — inside the
             // same border, so they read as belonging to it.
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: AppLayout.compactSpacing) {
                 composerField
                 composerControls
             }
-            .padding(10)
-            .background(Color(nsColor: .textBackgroundColor))
-            .clipShape(RoundedRectangle(cornerRadius: ChatMetrics.composerCornerRadius, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: ChatMetrics.composerCornerRadius, style: .continuous)
-                    .stroke(Color.secondary.opacity(0.25), lineWidth: 0.5)
-            )
-            .shadow(color: .black.opacity(0.06), radius: 10, y: 3)
+            .floatingInputSurface()
             // "/" skill menu — FLOATS over the transcript rather than
             // sitting in the bar: as a sibling it grew the composer and
             // shoved the conversation up on every keystroke. An overlay

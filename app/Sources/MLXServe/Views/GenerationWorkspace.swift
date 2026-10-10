@@ -24,7 +24,7 @@ struct GenerationWorkspace<Prompt: View, Model: View, Attachments: View,
         GeometryReader { geometry in
             VStack(spacing: 0) {
                 VStack(spacing: AppLayout.rowSpacing) { result }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(maxWidth: AppLayout.generationColumnWidth, maxHeight: .infinity)
                     .padding(AppLayout.pageInset)
 
                 VStack(spacing: AppLayout.compactSpacing) {
@@ -37,17 +37,22 @@ struct GenerationWorkspace<Prompt: View, Model: View, Attachments: View,
                     }
                     controls(size: geometry.size)
                 }
-                .padding(AppLayout.contentInset)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: AppLayout.surfaceRadius))
-                .overlay {
-                    RoundedRectangle(cornerRadius: AppLayout.surfaceRadius)
-                        .strokeBorder(Color(nsColor: .separatorColor).opacity(0.6), lineWidth: 0.5)
-                }
-                .frame(maxWidth: 1000)
+                .floatingInputSurface()
+                .frame(maxWidth: AppLayout.generationColumnWidth)
                 .padding(.horizontal, AppLayout.pageInset)
                 .padding(.bottom, AppLayout.pageInset)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { showingParameters.toggle() } label: {
+                    Image(systemName: "sidebar.right")
+                }
+                .accessibilityLabel("Generation settings")
+                .accessibilityValue(showingParameters ? "Open" : "Closed")
+                .help("Generation settings")
+            }
         }
         .inspector(isPresented: $showingParameters) {
             if showingParameters {
@@ -118,7 +123,7 @@ struct GenerationWorkspace<Prompt: View, Model: View, Attachments: View,
                     .frame(minWidth: 20, minHeight: 20)
                 }
                 .buttonStyle(.glass)
-                .buttonBorderShape(.capsule)
+                .buttonBorderShape(attachmentCount > 0 ? .capsule : .circle)
                 .accessibilityLabel("Attachments")
                 .accessibilityValue("\(attachmentCount) attached")
                 .help("Attachments and reference inputs")
@@ -142,19 +147,8 @@ struct GenerationWorkspace<Prompt: View, Model: View, Attachments: View,
             .popover(isPresented: $showingModel, arrowEdge: .top) {
                 popoverContent(size: size) { model }
             }
-
-            Button { showingParameters.toggle() } label: {
-                Image(systemName: "slider.horizontal.3")
-                    .frame(width: 20, height: 20)
-            }
-            .buttonStyle(.glass)
-            .buttonBorderShape(.circle)
-            .tint(showingParameters ? .accentColor : nil)
-            .accessibilityLabel("Generation settings")
-            .accessibilityValue(showingParameters ? "Open" : "Closed")
-            .help("Generation settings")
         }
-        .controlSize(.regular)
+        .controlSize(.large)
     }
 
     private func popoverContent<Content: View>(size: CGSize,

@@ -50,7 +50,12 @@ struct SoundGenView: View {
                 } label: {
                     Label("Open output folder in Finder", systemImage: "folder").font(.app(.caption))
                 }
-                .buttonStyle(.borderless).foregroundStyle(.secondary).help(MediaStorage.soundRoot)
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .labelStyle(.iconOnly)
+                .accessibilityLabel("Open output folder in Finder")
+                .help("Open output folder in Finder")
+                .frame(maxWidth: .infinity, alignment: .trailing)
             })
         .onAppear {
             if !didHydrate {
@@ -109,7 +114,7 @@ struct SoundGenView: View {
             TextEditor(text: $prompt)
                 .accessibilityLabel("Describe the sound")
                 .font(.app(.body))
-                .frame(height: 80)
+                .frame(height: AppLayout.generationPromptHeight)
                 .scrollContentBackground(.hidden)
                 .help("Describe what makes the sound, its material and its surroundings, such as a heavy wooden door creaking open in a stone hall.")
                 .overlay(alignment: .topLeading) {
@@ -197,55 +202,55 @@ struct SoundGenView: View {
     }
 
     private var previewArea: some View {
-        GroupBox {
-            Group {
-                switch service.phase {
-                case .idle:
-                    ContentUnavailableView("No sounds yet", systemImage: "speaker.wave.3",
-                                           description: Text("Describe a sound and press Generate.").font(.app(.body)))
-                case .running(let step, let total, let message):
-                    VStack(spacing: AppLayout.rowSpacing) {
-                        if total == 0 {
-                            ProgressView().frame(maxWidth: 240)
-                        } else {
-                            ProgressView(value: Double(step), total: max(1, Double(total))).progressViewStyle(.linear).frame(maxWidth: 240)
-                        }
-                        Text(message).font(.app(.footnote)).foregroundStyle(.secondary)
+        Group {
+            switch service.phase {
+            case .idle:
+                VStack(spacing: AppLayout.rowSpacing) {
+                    Image(systemName: "speaker.wave.3").font(.app(.title2))
+                    Text("Describe the sound you want to create.").font(.app(.body))
+                }
+                .foregroundStyle(.secondary)
+            case .running(let step, let total, let message):
+                VStack(spacing: AppLayout.rowSpacing) {
+                    if total == 0 {
+                        ProgressView().frame(maxWidth: 240)
+                    } else {
+                        ProgressView(value: Double(step), total: max(1, Double(total))).progressViewStyle(.linear).frame(maxWidth: 240)
                     }
-                case .completed(let path):
-                    let playing = clipPlayer.playingPath == path
-                    VStack(spacing: AppLayout.rowSpacing) {
-                        Image(systemName: "speaker.wave.3.fill")
-                            .font(.app(.largeTitle)).foregroundStyle(.tint)
-                            .symbolEffect(.variableColor.iterative, options: .repeat(.continuous), isActive: playing)
-                        Button { playing ? clipPlayer.stop() : clipPlayer.play(path) } label: {
-                            Label(playing ? "Stop" : "Play", systemImage: playing ? "stop.fill" : "play.fill").font(.app(.body))
-                        }
-                        .buttonStyle(.bordered)
-                        HStack(spacing: AppLayout.compactSpacing) {
-                            Text(URL(fileURLWithPath: path).lastPathComponent)
-                                .font(.app(.caption)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                            Button { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) } label: {
-                                Image(systemName: "folder")
-                            }
-                            .buttonStyle(.borderless).help("Reveal in Finder")
-                            .accessibilityLabel("Reveal in Finder")
-                        }
+                    Text(message).font(.app(.footnote)).foregroundStyle(.secondary)
+                }
+            case .completed(let path):
+                let playing = clipPlayer.playingPath == path
+                VStack(spacing: AppLayout.rowSpacing) {
+                    Image(systemName: "speaker.wave.3.fill")
+                        .font(.app(.largeTitle)).foregroundStyle(.tint)
+                        .symbolEffect(.variableColor.iterative, options: .repeat(.continuous), isActive: playing)
+                    Button { playing ? clipPlayer.stop() : clipPlayer.play(path) } label: {
+                        Label(playing ? "Stop" : "Play", systemImage: playing ? "stop.fill" : "play.fill").font(.app(.body))
                     }
-                    .padding(AppLayout.contentInset)
-                case .failed(let msg):
-                    ContentUnavailableView {
-                        Label("Failed", systemImage: "exclamationmark.triangle").font(.app(.body))
-                    } description: {
-                        Text(msg)
-                    } actions: {
-                        Button { AppActivation.openWindow(id: "serverLog", using: openWindow) } label: {
-                            Text("Show log").font(.app(.body))
+                    .buttonStyle(.bordered)
+                    HStack(spacing: AppLayout.compactSpacing) {
+                        Text(URL(fileURLWithPath: path).lastPathComponent)
+                            .font(.app(.caption)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        Button { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) } label: {
+                            Image(systemName: "folder")
                         }
+                        .buttonStyle(.borderless).help("Reveal in Finder")
+                        .accessibilityLabel("Reveal in Finder")
+                    }
+                }
+                .padding(AppLayout.contentInset)
+            case .failed(let msg):
+                ContentUnavailableView {
+                    Label("Failed", systemImage: "exclamationmark.triangle").font(.app(.body))
+                } description: {
+                    Text(msg)
+                } actions: {
+                    Button { AppActivation.openWindow(id: "serverLog", using: openWindow) } label: {
+                        Text("Show log").font(.app(.body))
                     }
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
