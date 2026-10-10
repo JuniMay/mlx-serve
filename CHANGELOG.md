@@ -56,6 +56,7 @@ Estimated from the measured per-step cost:
 - **Full quality:** Turbo off, Max quality on (`"fast": false`), 30 steps.
 
 ### Fixes
+- Manage appears above session history, terminal launchers remain in the menu bar, and primary composer actions use the system accent.
 - Chat and media share input controls, model actions align, and Settings uses consistent captions, grouped cache controls, and Nearby Macs discovery under Providers.
 - `mlx-serve launch omp` and the app send omp's thinking level as `reasoning_effort` (off as `none`) and offer every level up to `xhigh`; before, every level ran at the server default (#760).
 - MiniMax-H3 Turbo accepts any distillation built for its DiT: `turbo_lora.safetensors` must attach every module it ships rather than the bundled adapter's 259, so Lightx2v's distills (`lightx2v/Minimax-h3-Turbo`) run as Turbo with its exact audio step instead of being refused.

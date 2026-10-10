@@ -28,9 +28,10 @@ Use an isolated fixture profile for model selections and draft changes.
    and an existing terminal. The main sidebar must retain its width and scroll
    position. Agents and Tasks add their secondary lists only within the main pane.
 7. Click New in the sidebar. A fresh conversation must open directly. Open its
-   model control and select a model in the fixture profile; the model must route
-   keep the interaction page and offer its supported controls. Verify Models, Agents, and Tasks remain in the
-   sidebar and terminal creation remains available from the Sessions menu.
+   model control and select a model in the fixture profile; the selection must
+   keep the interaction page and offer its supported controls. Verify Models,
+   Agents and Tasks appear under Manage above the session sections. Terminal
+   creation remains available from the app's menu-bar Code control.
 
 `WorkspaceSplitViewTests` checks sidebar lifetime. `ModelPaletteTests` and
 `ModelInteractionRouteTests` check model eligibility, capability routing, and the

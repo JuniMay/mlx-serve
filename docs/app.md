@@ -50,12 +50,14 @@ when the required inputs are ready. Stop cancels generation belonging to the
 current conversation, including after a model change. Another conversation using
 the same generation service shows that it is busy and cannot stop its work.
 
-Models, Agents and Tasks provide management views in the main pane while the
-sidebar stays in place. App-wide server, engine, tool and appearance preferences
+Models, Agents and Tasks appear under **Manage** above the session sections.
+They provide management views in the main pane while the sidebar stays in place.
+App-wide server, engine, tool and appearance preferences
 stay in **Settings**. The model browser is the place to find and download models.
 
-Terminal sessions appear alongside conversations and remain running when you switch
-workspaces. A host session runs its coding agent on macOS; a sandbox session
+Open terminal sessions from the app's menu-bar **Code** control. Terminal sessions
+appear alongside conversations and remain running when you switch workspaces.
+A host session runs its coding agent on macOS; a sandbox session
 connects to the Linux guest. The terminal pane shows the session's workspace and
 provides its session controls.
 

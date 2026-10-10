@@ -10,7 +10,7 @@ send anything in personal conversations during layout checks.
 3. Open the conversation actions menu. Rename must open the existing name
    dialog with the correct value; Cancel must leave it unchanged. Branch must
    be unavailable for an empty conversation or while its turn is running.
-4. Switch to Models, Create, Tasks, Agents and an existing terminal. Verify the
+4. Switch to Models, Tasks, Agents and an existing terminal. Verify the
    destination title and native toolbar material remain consistent, with no
    conversation actions left over in another destination.
 5. Collapse and restore the sidebar. Check traffic lights, sidebar toggle,
@@ -18,8 +18,10 @@ send anything in personal conversations during layout checks.
 6. Inspect sidebar groups and selection. Group collapse, row ordering and
    multi-selection must still behave as before; do not reorder personal data
    during a read-only check.
-   New opens one empty interaction directly. The Sessions add menu offers
-   terminal sessions. Models, Agents and Tasks appear under Manage.
+   New opens one empty interaction directly. Manage contains Models, Agents
+   and Tasks above every session section, including agent conversations and
+   custom groups. Sessions has no launcher button or menu. A custom group's
+   plus button creates a chat directly in that group.
    Session selection uses a neutral highlight, including while the sidebar
    has keyboard focus. Move between sessions with the keyboard and verify
    that focus and selection remain visible.
@@ -36,3 +38,15 @@ Use an isolated fixture profile to activate Branch. Verify the new conversation
 ends at the latest complete boundary, keeps its settings and leaves the source
 unchanged. `ChatWindowPresentationTests` covers title and eligibility rules;
 `ChatForkTests` covers the copied transcript and settings.
+
+## Growing session history
+
+1. In an isolated fixture profile, open a sidebar with at least 40 sessions.
+   At its top, verify New, then Manage with Models, Agents and Tasks, then
+   the session sections. The management rows must remain before the history.
+2. Resize the window to its minimum height. Return the sidebar to its top.
+   Verify that the management rows are visible without scrolling past sessions.
+3. Open the app's menu-bar Code control. Verify that the existing host and
+   sandbox terminal choices remain available; do not start a terminal.
+4. In the fixture profile, click a custom group's plus button. Verify that it
+   creates one empty chat in the group directly, with no launcher menu.

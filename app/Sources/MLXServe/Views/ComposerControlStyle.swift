@@ -63,7 +63,6 @@ struct ComposerActionButton: View {
         }
         .buttonStyle(.glassProminent)
         .buttonBorderShape(.circle)
-        .tint(.primary)
         .controlSize(.regular)
         .accessibilityLabel(L10n.text(label))
         .help(L10n.text(label))

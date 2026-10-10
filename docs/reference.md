@@ -73,7 +73,7 @@ Sampling defaults for request fields the client OMITS resolve as: request body >
 
 #### Conversation controls and tool access
 
-Models, Tasks, Agents and media generation are destinations in one interaction window. `WorkspaceSplitView` keeps the main sidebar mounted while its detail switches workspaces; Agents and Tasks add a secondary list inside that detail. Settings opens in a separate window. The composer contains attachment, Tools & MCP, model/thinking and send controls. New opens an interaction directly. The composer model picker routes to the workspace supported by the chosen model; the toolbar identifies the current destination and exposes its actions. The model/thinking popover starts with thinking controls and the selected model; selecting the model opens a separate list with Back, arrow-key navigation and type-ahead. `ModelPickerScrollView` measures the list's content and gives it a 72–300 point viewport; Back and Manage Models remain outside that scroll area. Model-only surfaces open that list directly. Model thinking preferences persist across conversations. Generation Defaults lists saved model preferences so each can be changed or reset. Agent-owned values show their effective state and owner. `ModelPickerScrollViewTests` and `app/Tests/ComposerWindowChecks.md` cover sizing and page transitions.
+Chat and media models share one interaction page, transcript and input dock. The composer model picker changes the available attachments, parameters and submission behavior while preserving the page and draft. Models, Tasks and Agents provide management views; `WorkspaceSplitView` keeps the main sidebar mounted while those views open in its detail. Agents and Tasks add a secondary list inside that detail. Settings opens in a separate window. The composer contains attachment, Tools & MCP, model/thinking and send controls. New opens an interaction directly. The toolbar identifies the current destination and exposes its actions. The model/thinking popover starts with thinking controls and the selected model; selecting the model opens a separate list with Back, arrow-key navigation and type-ahead. `ModelPickerScrollView` measures the list's content and gives it a 72–300 point viewport; Back and Manage Models remain outside that scroll area. Model-only surfaces open that list directly. Model thinking preferences persist across conversations. Generation Defaults lists saved model preferences so each can be changed or reset. Agent-owned values show their effective state and owner. `ModelPickerScrollViewTests` and `app/Tests/ComposerWindowChecks.md` cover sizing and page transitions.
 
 Settings ▸ Tools & MCP owns `ChatToolDefaults`: Tools, MCP, and per-tool switches. Workspace tools are grouped separately from memory and task features. New chats store `ChatToolPreferences(followsDefaults: true)` and read current defaults for each turn. Chats with no preferences retain their saved `mode`, `useMCP` and `disabledTools` until the user chooses **Use Settings Defaults** in the Tools & MCP popover. Toggling Plain Chat on such a chat records `followsDefaults: false`, preserving those choices. With no stored global defaults, built-in tools start off and MCP inherits the existing global `mcpMode` preference. Changing tool access does not grant tool approval.
 
@@ -88,7 +88,11 @@ Native lists, group boxes and controls use their platform geometry. Glass is
 reserved for navigation and floating controls; reading content uses semantic
 backgrounds. The interaction dock uses `floatingInputSurface()` for its
 insets, background, border, continuous corners and shadow. The sidebar places
-New above saved sessions and groups Models, Agents and Tasks under Manage.
+New first, then Models, Agents and Tasks under Manage, then the session sections.
+Session headings contain no terminal launcher. A custom group's plus button
+creates a chat in that group. Terminal creation remains in the menu-bar Code
+control. Primary Send, Generate and Stop controls inherit the accent color;
+sidebar selection uses a neutral highlight.
 
 `ChatDetailView` owns the transcript and input dock for chat, image, video, voice,
 music, sound and 3D models. Model changes preserve that view and its prompt.

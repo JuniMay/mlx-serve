@@ -880,9 +880,6 @@ struct ChatSidebar: View {
     /// alone by shift itself so dragging a range up and down keeps re-ranging
     /// from the same origin instead of walking away from it.
     @State private var selectionAnchor: UUID?
-    /// Scans for installed agent CLIs — the Code Launcher row renders the tray's
-    /// shared menu body, which needs it.
-    @StateObject private var cliDetector = CLILauncher()
     /// Holding ⌘ numbers the conversation rows. A modifier held down is STATE,
     /// which SwiftUI does not report outside a hovered view — see the monitor.
     @StateObject private var modifiers = ModifierKeyMonitor()
@@ -1055,6 +1052,14 @@ struct ChatSidebar: View {
                     .padding(.vertical, 4)
                     .selectionDisabled()
             }
+            Section("Manage") {
+                destinationLabel("Models", icon: "square.stack.3d.up", badge: activeDownloadCount)
+                    .tag(SidebarItem.models)
+                destinationLabel("Agents", icon: "person.2")
+                    .tag(SidebarItem.agents)
+                destinationLabel("Tasks", icon: "clock.badge.checkmark")
+                    .tag(SidebarItem.tasks)
+            }
             let rows = panelRows
             if !rows.agents.isEmpty {
                 Section("Agent Conversations") {
@@ -1077,32 +1082,12 @@ struct ChatSidebar: View {
             Section {
                 ForEach(rows.sessions) { panelRow($0, ordered: rows.chats, all: rows.all) }
             } header: {
-                HStack {
-                    Text("Sessions")
-                        .font(.system(.caption, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .textCase(nil)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .onDrop(of: [.text], delegate: groupDrop(nil))
-                    if BuildFeatures.current.cliLauncher {
-                        Menu { terminalCreationItems(group: nil) } label: {
-                            Image(systemName: "terminal")
-                        }
-                        .menuStyle(.borderlessButton)
-                        .menuIndicator(.hidden)
-                        .fixedSize()
-                        .help("New Terminal")
-                        .accessibilityLabel("New Terminal")
-                    }
-                }
-            }
-            Section("Manage") {
-                destinationLabel("Models", icon: "square.stack.3d.up", badge: activeDownloadCount)
-                    .tag(SidebarItem.models)
-                destinationLabel("Agents", icon: "person.2")
-                    .tag(SidebarItem.agents)
-                destinationLabel("Tasks", icon: "clock.badge.checkmark")
-                    .tag(SidebarItem.tasks)
+                Text("Sessions")
+                    .font(.system(.caption, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .textCase(nil)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .onDrop(of: [.text], delegate: groupDrop(nil))
             }
         }
         .listStyle(.sidebar)
@@ -1329,15 +1314,15 @@ struct ChatSidebar: View {
         }
     }
 
-    /// A user group's heading: the label folds it, the + adds a chat or
-    /// terminal straight into it, a row dropped on it joins it, right-click
+    /// A user group's heading: the label folds it, the + adds a chat
+    /// straight into it, a row dropped on it joins it, right-click
     /// renames or deletes it (its rows go back to their sections).
     private func groupHeader(_ group: SidebarGroups.Group) -> some View {
         HStack(alignment: .center, spacing: 6) {
             Label(group.name, systemImage: "folder")
                 .lineLimit(1)
             Spacer()
-            newSessionMenu(group: group.id)
+            newChatButton(group: group.id)
         }
         .font(.system(.caption, weight: .medium))
         .foregroundStyle(.secondary)
@@ -1376,18 +1361,10 @@ struct ChatSidebar: View {
         Divider()
     }
 
-    private func newSessionMenu(group: UUID) -> some View {
-        Menu {
-            Button {
-                appState.showConversation()
-                appState.sidebarGroups.assign([appState.newChatSession()], to: group)
-            } label: {
-                Label("New Chat", systemImage: "square.and.pencil")
-            }
-            if BuildFeatures.current.cliLauncher {
-                Divider()
-                terminalCreationItems(group: group)
-            }
+    private func newChatButton(group: UUID) -> some View {
+        Button {
+            appState.showConversation()
+            appState.sidebarGroups.assign([appState.newChatSession()], to: group)
         } label: {
             Image(systemName: "plus")
                 .font(.system(size: 11, weight: .medium))
@@ -1395,24 +1372,11 @@ struct ChatSidebar: View {
                 .frame(width: 22, height: 22)
                 .contentShape(Rectangle())
         }
-        .menuStyle(.button)
         .buttonStyle(.plain)
         .controlSize(.small)
-        .menuIndicator(.hidden)
         .fixedSize()
         .accessibilityLabel("New Chat")
-        .help("New chat, or a coding agent in a terminal")
-    }
-
-    private func terminalCreationItems(group: UUID?) -> some View {
-        CLILauncherMenuItems(
-            detector: cliDetector,
-            baseURL: appState.server.baseURL,
-            servedModelId: appState.server.chatModelId ?? "mlx-serve",
-            serverContextLength: appState.server.chatModelInfo?.contextLength,
-            models: appState.server.allModels,
-            openSandboxAgent: { appState.startTerminal(agentId: $0, group: group) },
-            openHostCLI: { appState.startTerminal(hostCLI: $0, group: group) })
+        .help("New Chat")
     }
 
     /// One conversation row, shared by both sections. `ordered` is the panel's

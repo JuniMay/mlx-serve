@@ -37,3 +37,15 @@ Plain Chat must instead read as an override of the two independent choices.
 
 `ChatToolPreferencesTests` and `ChatModeTogglesTests` cover resolution and
 restoration independently of the popover layout.
+
+## Primary action color
+
+Use an idle interaction with an unsent draft. Keep the existing appearance and
+accent settings. The enabled Send or Generate button must use the system accent,
+with a contrasting arrow. The Stop state must use the same shared button style.
+An empty draft must still disable submission. Repeat in light and dark fixture
+profiles without changing the user's settings. Do not start inference to check
+Stop; use a simulated running service.
+
+The native glass fill needs a live window. Offscreen AppKit bitmap captures do
+not include that fill, including for a standard prominent glass button.
