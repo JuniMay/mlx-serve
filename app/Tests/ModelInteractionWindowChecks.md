@@ -29,8 +29,8 @@ Use an isolated fixture profile for model selections and draft changes.
    position. Agents and Tasks add their secondary lists only within the main pane.
 7. Click New in the sidebar. A fresh conversation must open directly. Open its
    model control and select a model in the fixture profile; the selection must
-   keep the interaction page and offer its supported controls. Verify Models,
-   Agents and Tasks appear under Manage above the session sections. Terminal
+   keep the interaction page and offer its supported controls. Verify New, Models,
+   Agents and Tasks form one group above the session sections. Terminal
    creation remains available from the app's menu-bar Code control.
 
 `WorkspaceSplitViewTests` checks sidebar lifetime. `ModelPaletteTests` and
@@ -43,12 +43,34 @@ tests cover model changes without inference or disk output.
 1. Open Models and visit Recommended, Discover, My Models, Downloads and Media.
    The window title must remain Models. The section control must identify the
    selected section once, without repeating it as a second page title.
-2. Check that section navigation uses a neutral native control. It must not add
-   a glass capsule, a colored outline or a second frame around the content.
-   Switching sections must preserve the main sidebar and the content margins.
+2. Check that the five section pills appear in the window toolbar with a Liquid
+   Glass background. The Models title stays visible. The selected pill uses a
+   clear neutral highlight. Content begins directly below the toolbar, without
+   a second section-control row. Switching sections preserves the sidebar.
 3. Use the keyboard to choose sections. Narrow the window and verify that all
    five sections remain reachable through the compact menu without clipping.
    Download counts and activity must remain visible without changing selection.
+
+## Model lists
+
+The layout uses Apple's [toolbar grouping](https://developer.apple.com/design/human-interface-guidelines/toolbars),
+[navigation materials](https://developer.apple.com/design/human-interface-guidelines/materials),
+and [list guidance](https://developer.apple.com/design/human-interface-guidelines/lists-and-tables).
+Glass belongs to the section controls; native rows present model content.
+
+1. Visit all five Models sections. Each uses the same native list surface,
+   row insets, separators and section headings. Media groups use list sections.
+   Compare the first and last rows and scroll to the bottom of each list.
+2. Keep Discover and My Models column headings aligned with their rows at wide
+   and narrow window sizes. Search/filter controls and summary footers stay in
+   their own fixed rows. Model names yield space before action columns clip.
+3. Open and dismiss a model card, a quant menu and a model-settings sheet.
+   Check download, Use, settings, lock, deletion and Reveal affordances without
+   activating downloads, model loads or deletions. A row button must invoke only
+   its own action, even when several buttons share the row.
+4. In a fixture profile, check empty, loading, failed and partially downloaded
+   lists. Retry and Load More must remain reachable. Check that an active
+   download keeps its progress and Cancel action when changing sections.
 
 ## My Models action alignment
 

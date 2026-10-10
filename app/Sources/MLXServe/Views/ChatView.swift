@@ -426,29 +426,55 @@ struct ChatView: View {
     @StateObject private var agentsModel = AgentsWorkspaceModel()
     /// Flipped by the gate sheet's Cancel, and by nothing else.
     @State private var gateCancelled = false
+    @State private var groupTarget: UUID?
 
     @ToolbarContentBuilder
     private var conversationActions: some ToolbarContent {
         if appState.chatWorkspace.isConversation, let session = appState.activeSession {
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Button { appState.pendingRename = session.id } label: {
-                        Label("Rename…", systemImage: "pencil")
-                    }
-                    Button {
-                        guard let current = appState.chatSessions.first(where: { $0.id == session.id }),
-                              let messageID = branchMessageID(for: current) else { return }
-                        appState.forkSession(current.id, from: messageID)
-                    } label: {
-                        Label("Branch Chat", systemImage: "arrow.trianglehead.branch")
-                    }
-                    .disabled(branchMessageID(for: session) == nil)
-                } label: {
-                    Label("Conversation actions", systemImage: "ellipsis")
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button { appState.pendingRename = session.id } label: {
+                    Label("Rename Chat", systemImage: "pencil")
                 }
-                .labelStyle(.iconOnly)
+                .help("Rename Chat")
+                Menu {
+                    Button { appState.sidebarGroups.assign([session.id], to: nil) } label: {
+                        Label("Sessions", systemImage: "bubble.left")
+                    }
+                    .disabled(appState.sidebarGroups.group(of: session.id) == nil)
+                    ForEach(appState.sidebarGroups.groups) { group in
+                        Button { appState.sidebarGroups.assign([session.id], to: group.id) } label: {
+                            Text(verbatim: group.name)
+                        }
+                        .disabled(appState.sidebarGroups.group(of: session.id) == group.id)
+                    }
+                    Divider()
+                    Button("New Group…") { groupTarget = session.id }
+                } label: {
+                    Label("Move to Group", systemImage: "folder")
+                }
                 .menuIndicator(.hidden)
-                .help("Conversation actions")
+                .help("Move to Group")
+                Button(role: .destructive) { appState.pendingChatDeletion = [session.id] } label: {
+                    Label("Delete Chat", systemImage: "trash")
+                }
+                .help("Delete Chat")
+            }
+            if branchMessageID(for: session) != nil {
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        Button {
+                            guard let current = appState.chatSessions.first(where: { $0.id == session.id }),
+                                  let messageID = branchMessageID(for: current) else { return }
+                            appState.forkSession(current.id, from: messageID)
+                        } label: {
+                            Label("Branch Chat", systemImage: "arrow.trianglehead.branch")
+                        }
+                    } label: {
+                        Label("More", systemImage: "ellipsis")
+                    }
+                    .menuIndicator(.hidden)
+                    .help("More conversation actions")
+                }
             }
         }
     }
@@ -490,6 +516,14 @@ struct ChatView: View {
         .toolbarBackground(.visible, for: .windowToolbar)
         .toolbar {
             conversationActions
+        }
+        .sheet(isPresented: Binding(get: { groupTarget != nil },
+                                    set: { if !$0 { groupTarget = nil } })) {
+            if let id = groupTarget {
+                SidebarGroupSheet(title: "New Group", action: "Create", name: "") {
+                    appState.sidebarGroups.create($0, with: [id])
+                }
+            }
         }
         .sheet(isPresented: $appState.modelPalettePresented) {
             ModelPaletteSheet()
@@ -1051,8 +1085,6 @@ struct ChatSidebar: View {
                     .buttonStyle(.plain)
                     .padding(.vertical, 4)
                     .selectionDisabled()
-            }
-            Section("Manage") {
                 destinationLabel("Models", icon: "square.stack.3d.up", badge: activeDownloadCount)
                     .tag(SidebarItem.models)
                 destinationLabel("Agents", icon: "person.2")
@@ -1731,6 +1763,7 @@ struct ChatDetailView: View {
         ChatMetrics.proseWidth(panelWidth: columnWidth)
     }
     @State private var composerHeight: CGFloat = 36
+    @State private var isComposerExpanded = false
     @State private var inputAreaHeight: CGFloat = 120
     // Issue #227: built once per messages change, not per body pass. Rebuilding
     // inside the ForEach handed SwiftUI a fresh array on every layout pass and
@@ -2395,10 +2428,13 @@ struct ChatDetailView: View {
 
             if isEmptyConversation { Spacer(minLength: 0) }
         }
+        .opacity(isComposerExpanded ? 0 : 1)
+        .allowsHitTesting(!isComposerExpanded)
+        .accessibilityHidden(isComposerExpanded)
         .background { mediaCapabilityControls }
         .overlayPreferenceValue(MediaInteractionPreferenceKey.self) { media in
             VStack {
-                Spacer(minLength: 0)
+                if !isComposerExpanded { Spacer(minLength: 0) }
                 inputArea(media: media)
             }
         }
@@ -2584,6 +2620,7 @@ struct ChatDetailView: View {
             }
         }
         .onChange(of: sessionId) { _, _ in
+            isComposerExpanded = false
             pendingMessageDeletion = nil
             // The view is reused across tabs, so reload the toolbar toggles from
             // the newly-visible session. The allow-list is NOT reset here — it's
@@ -2671,13 +2708,29 @@ struct ChatDetailView: View {
             }
             }
 
-            // One rounded container, two rows: the input on top with the
-            // full width of the column, its controls beneath — inside the
-            // same border, so they read as belonging to it.
+            // The editor and its controls share one native glass surface.
             VStack(alignment: .leading, spacing: AppLayout.compactSpacing) {
+                if isComposerExpanded || composerHeight >= 80 {
+                    HStack {
+                        Spacer()
+                        Button {
+                            isComposerExpanded.toggle()
+                            inputFocused = true
+                        } label: {
+                            Label(isComposerExpanded ? "Reduce message" : "Expand message",
+                                  systemImage: isComposerExpanded
+                                    ? "arrow.down.right.and.arrow.up.left"
+                                    : "arrow.up.left.and.arrow.down.right")
+                        }
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.borderless)
+                        .help(isComposerExpanded ? "Reduce message" : "Expand message")
+                    }
+                }
                 composerField(media: media)
                 composerControls(media: media)
             }
+            .frame(maxHeight: isComposerExpanded ? .infinity : nil)
             .floatingInputSurface()
             // "/" skill menu — FLOATS over the transcript rather than
             // sitting in the bar: as a sibling it grew the composer and
@@ -2691,13 +2744,14 @@ struct ChatDetailView: View {
                     SlashSkillMenu(matches: slashMatches,
                                    selection: min(slashSelection, max(0, slashMatches.count - 1)),
                                    onPick: { pickSlashSkill($0) })
-                        .alignmentGuide(.top) { $0[.bottom] + 8 }
+                        .alignmentGuide(.top) { isComposerExpanded ? -40 : $0[.bottom] + 8 }
                         .shadow(color: .black.opacity(0.28), radius: 14, y: 4)
                 }
             }
           }   // end editable conversation
         }
-        .chatColumn(width: contentWidth)
+        .frame(maxHeight: isComposerExpanded ? .infinity : nil)
+        .chatColumn(width: isComposerExpanded ? max(1, columnWidth - 2 * ChatMetrics.gutter) : contentWidth)
         .padding(.vertical, 10)
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { inputAreaHeight = $0 }
     }
@@ -2717,6 +2771,7 @@ struct ChatDetailView: View {
                           measuredHeight: $composerHeight,
                           selection: $inputSelection,
                           maxLines: 8,
+                          fillsAvailableHeight: isComposerExpanded,
                           isIdle: media.map { mediaActivity($0) == .idle && $0.canSubmit } ?? (composerState == .idle),
                           canSteer: appState.interactionMedia == nil,
                           returnInsertsNewline: appState.interactionMedia != nil,
@@ -2726,6 +2781,7 @@ struct ChatDetailView: View {
                           // the edit bubble and the approval sheet keep the key
                           // while they are up (ComposerKey.onEscape).
                           onCancel: {
+                              if isComposerExpanded { isComposerExpanded = false; return true }
                               if let media, let modality = appState.interactionMedia {
                                   guard mediaActivity(media).canCancel else { return false }
                                   appState.mediaInteractions.cancel(modality: modality, sessionId: sessionId)
@@ -2742,7 +2798,8 @@ struct ChatDetailView: View {
                           },
                           onKeyCommand: { appState.interactionMedia == nil && handleSlashKey($0) })
             .composerTextField(height: composerHeight,
-                               placeholder: inputText.isEmpty ? (media?.placeholder ?? composerPlaceholder) : nil)
+                               placeholder: inputText.isEmpty ? (media?.placeholder ?? composerPlaceholder) : nil,
+                               expanded: isComposerExpanded)
             // Escape closes the menu for the text as it stands; the next
             // keystroke is a new query, so it opens again.
             .onChange(of: inputText) { _, _ in
@@ -2817,6 +2874,7 @@ struct ChatDetailView: View {
         guard let media, media.canSubmit, mediaActivity(media) == .idle,
               let submission = appState.prepareMediaInteraction(modality, sessionId: sessionId, prompt: inputText) else { return }
         media.submit(submission)
+        isComposerExpanded = false
     }
 
     @ViewBuilder
@@ -3530,6 +3588,7 @@ struct ChatDetailView: View {
         guard !text.isEmpty else { return }
         chatEngine.setSteeringNote(text, for: sessionId)
         inputText = ""
+        isComposerExpanded = false
         composerWalk = .idle
     }
 
@@ -3558,6 +3617,7 @@ struct ChatDetailView: View {
         guard !text.isEmpty || attachedImages != nil || attachedVideos != nil || attachedAudio != nil || !pdfText.isEmpty,
               composerState != .generatingHere, canAnswer else { return }
         inputText = ""
+        isComposerExpanded = false
         if !pdfText.isEmpty {
             text = text.isEmpty ? pdfText : pdfText + "\n\n" + text
         }
@@ -4021,6 +4081,7 @@ struct MessageBubble: View {
     /// buttons themselves start invisible.
     /// Explicit so the accordion HEADER can drive it, not just the chevron.
     @State private var thinkingExpanded = false
+    @State private var thinkingEnlarged = false
     /// Unfolding a long turn is an act of reading, and it belongs to the row
     /// for the same reason the accordion above does: writing it into the
     /// transcript's own state re-evaluates every row in the conversation, and
@@ -4052,18 +4113,19 @@ struct MessageBubble: View {
         message.isStreaming && message.content.isEmpty
     }
 
-    /// Hand-built, not a `DisclosureGroup`: that pins its chevron to the
-    /// leading edge and hit-tests only the chevron.
     @ViewBuilder
     private var thinkingBlock: some View {
         if let reasoning = message.reasoningContent, !reasoning.isEmpty {
-            VStack(alignment: .leading, spacing: AppLayout.compactSpacing) {
+            TranscriptDetailPanel(isExpanded: thinkingExpanded) {
                 HStack(spacing: AppLayout.compactSpacing) {
                     TranscriptDisclosureButton(isExpanded: thinkingExpanded) {
                         if thinkingExpanded {
-                            resize { thinkingExpanded = false }
+                            resize(animated: false) {
+                                thinkingExpanded = false
+                                thinkingEnlarged = false
+                            }
                         } else {
-                            withAnimation(.easeInOut(duration: 0.15)) { thinkingExpanded = true }
+                            thinkingExpanded = true
                         }
                     } label: {
                         HStack(spacing: 6) {
@@ -4073,40 +4135,24 @@ struct MessageBubble: View {
                         }
                     }
                     if thinkingExpanded {
-                        TranscriptReaderButton(title: "Thinking", textToCopy: reasoning) {
-                            reasoningText(reasoning)
-                        }
+                        TranscriptDetailActions(textToCopy: reasoning, isEnlarged: Binding(
+                            get: { thinkingEnlarged },
+                            set: { value in
+                                resize(animated: false) { thinkingEnlarged = value }
+                            }))
                     }
                 }
-
-                if thinkingExpanded {
-                    TranscriptDetailSurface {
-                        TranscriptDetailViewport(followsTail: isThinkingNow) {
-                            reasoningText(reasoning)
-                        }
-                    }
-                }
+            } content: {
+                reasoningText(reasoning)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
     func reasoningText(_ reasoning: String) -> some View {
-        Group {
-            if isThinkingNow {
-                // Splitting streamed text avoids remeasuring one ever-growing Text.
-                VStack(alignment: .leading, spacing: ChatMetrics.userLineSpacing) {
-                    ForEach(Array(StreamingLines.split(reasoning).enumerated()), id: \.offset) { _, line in
-                        Text(verbatim: line)
-                    }
-                }
-            } else {
-                Text(verbatim: reasoning).textSelection(.enabled)
-            }
-        }
-        .transcriptDetailText()
-        .foregroundStyle(.primary)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        TranscriptDetailText(text: reasoning,
+                             maximumHeight: TranscriptDetailSizing.maximumHeight(enlarged: thinkingEnlarged),
+                             followsTail: isThinkingNow)
     }
 
     private var messageBody: some View {
@@ -4824,6 +4870,7 @@ private struct ToolCallRow: View {
     /// (`ProcessRegistry.isAlive(handle:sessionId:)`).
     var sessionId: UUID?
     @State private var expanded = false
+    @State private var isEnlarged = false
     @EnvironmentObject var processRegistry: ProcessRegistry
 
     private var isRunning: Bool { call.isStreaming }
@@ -4893,12 +4940,11 @@ private struct ToolCallRow: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppLayout.compactSpacing) {
+        TranscriptDetailPanel(isExpanded: expanded) {
             headerRow
-            if expanded {
-                TranscriptDetailSurface {
-                    TranscriptDetailViewport { expandedBody }
-                }
+        } content: {
+            TranscriptDetailViewport(maximumHeight: TranscriptDetailSizing.maximumHeight(enlarged: isEnlarged)) {
+                expandedBody.padding(AppLayout.contentInset)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -4911,7 +4957,8 @@ private struct ToolCallRow: View {
     @ViewBuilder private var headerRow: some View {
         HStack(spacing: AppLayout.compactSpacing) {
             TranscriptDisclosureButton(isExpanded: expanded) {
-                withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() }
+                expanded.toggle()
+                if !expanded { isEnlarged = false }
             } label: {
                 headerLabel
             }
@@ -4922,10 +4969,7 @@ private struct ToolCallRow: View {
                 RunningIndicator()
             }
             if expanded {
-                TranscriptReaderButton(title: "Tool details", textToCopy: readerText) {
-                    Text(verbatim: readerText)
-                        .transcriptDetailText(monospaced: true)
-                }
+                TranscriptDetailActions(textToCopy: readerText, isEnlarged: $isEnlarged)
             }
         }
     }

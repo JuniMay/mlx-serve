@@ -89,16 +89,19 @@ Layout follows Apple's [alignment and spacing guidance](https://developer.apple.
 Native lists, group boxes and controls use their platform geometry. Glass is
 reserved for navigation and floating controls; reading content uses semantic
 backgrounds. The interaction dock uses `floatingInputSurface()` for its
-insets, background, border, continuous corners and shadow. The sidebar places
-New first, then Models, Agents and Tasks under Manage, then the session sections.
-Custom groups use plain collapsible headings; their context menus provide chat creation and group management. Terminal creation remains in the menu-bar Code control. Send, Generate and Stop share a neutral glass style. Dock controls have a shared 10-point gap, and sidebar selection uses a neutral highlight. Models retains one toolbar title and a native section picker over an opaque content surface. Agents and Tasks use opaque secondary lists.
+insets and native Liquid Glass surface. The sidebar groups New, Models, Agents
+and Tasks together above the session sections.
+Custom groups use plain collapsible headings; their context menus provide chat creation and group management. Terminal creation remains in the menu-bar Code control. Send, Generate and Stop share a neutral glass style. Dock controls have a shared 10-point gap, and sidebar selection uses a neutral highlight. Models retains one toolbar title with glass section pills and a compact menu fallback. Its sections share native list rows, spacing and separators over an opaque content surface. Agents and Tasks use opaque secondary lists.
 
 `ChatDetailView` owns the transcript and input dock for chat, image, video, voice,
 music, sound and 3D models. Model changes preserve that view and its prompt.
 The selected capability supplies attachments, parameter controls and submission
 behavior. Model, reference and parameter controls use bounded popovers. The
 shared `GrowingTextEditor` grows within a line cap, scrolls thereafter and
-reflows when its width changes. For media requests, Return inserts a newline
+reflows when its width or line limit changes. Longer drafts expose an expand
+control that fills the detail pane with the same native editor; Reduce or Escape
+restores its compact frame. Selection and undo history stay in the editor.
+Scrollbars use the system preference. For media requests, Return inserts a newline
 and Command-Return invokes Generate. Each modality retains its capability
 gates, request builders, generation service and saved defaults.
 
@@ -133,14 +136,14 @@ boundaries. The main window uses a unified native toolbar. `chatColumn(width:)`
 aligns the transcript, composer and empty state; `ChatMetrics.proseWidth` reserves
 the outer gutters at narrow widths. Thinking and tool disclosure headers use
 secondary gray text that darkens on hover or press, with a chevron beside the
-label. Headers stay outside the expanded details frame. `TranscriptDetailViewport`
+label. Expanded headers and details share one card. `TranscriptDetailViewport`
 caps inline thinking, tool results and plans at 240 points, while short content
-uses its natural height. Detail prose and Reader content follow the conversation's
-Text Size setting; code and tool identifiers can retain a monospaced face.
-`TranscriptReaderButton` opens the complete content in a sheet sized within the
-originating window, with Copy and Close. Reader and process Stop controls are
-siblings of the disclosure button, so their actions do not toggle expansion.
-Plan approval actions remain outside the scrolling content.
+uses its natural height. Enlarge increases that card's height within the window;
+Reduce restores the cap. Thinking uses a read-only TextKit 2 view, which lays out
+visible text while retaining the full selectable source. Detail text follows the
+conversation's Text Size setting. Copy, Enlarge and process Stop controls act
+independently of the disclosure button. Plan approval actions remain outside
+the scrolling content.
 
 Markdown keeps prose, lists and tables in selectable attributed text. Each list
 run reserves one marker column per nesting level. Tables draw horizontal row

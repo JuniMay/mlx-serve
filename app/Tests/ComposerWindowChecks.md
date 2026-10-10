@@ -21,8 +21,7 @@ rows and with a long list. These checks cover native popover resizing and focus.
 
 ## Conversation tool controls
 
-The reported layout showed Tools, MCP and Plain Chat as three peer switches.
-Plain Chat must instead read as an override of the two independent choices.
+Plain Chat overrides the independent Tools and MCP choices.
 
 1. Open Tools & MCP. Plain Chat appears first with a caption describing its
    effect. A divider separates it from Tools and MCP.
@@ -54,3 +53,19 @@ Stop; use a simulated running service.
 
 `ComposerControlsLayoutTests` checks measured gaps and horizontal bounds. Native
 glass fill needs a live window; offscreen AppKit captures omit that fill.
+
+## Expanded draft and native surface
+
+1. Open a conversation with no generation running. Record its model and draft.
+2. Enter a disposable multiline draft. The native editor grows to its compact
+   limit. Its overflow scrolls within the text area using the system-preferred native scrollbar.
+3. Once the draft fills several lines, Expand message appears inside the dock.
+   Activate it. The same editor fills the conversation pane; the sidebar and
+   conversation title remain visible. No sheet or second editor opens.
+4. Select text and undo an edit before and after expanding. The draft, selection,
+   undo history, attachments, model and tool choices must be preserved.
+5. Use Reduce message or Escape to return to the dock. Return and Shift-Return
+   retain their chat/media behavior. Clear the disposable draft and restore the
+   recorded draft without sending it.
+6. Verify that the floating dock uses the system Liquid Glass material, with one
+   outer shape and no opaque editor rectangle. Respect Reduce Transparency.

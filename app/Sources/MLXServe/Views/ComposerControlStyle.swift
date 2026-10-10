@@ -71,8 +71,9 @@ struct ComposerActionButton: View {
 }
 
 extension View {
-    func composerTextField(height: CGFloat, placeholder: String?) -> some View {
-        frame(height: max(ChatMetrics.composerMinHeight, height))
+    func composerTextField(height: CGFloat, placeholder: String?, expanded: Bool = false) -> some View {
+        frame(height: expanded ? nil : max(ChatMetrics.composerMinHeight, height))
+            .frame(minHeight: ChatMetrics.composerMinHeight, maxHeight: expanded ? .infinity : nil)
             .padding(.horizontal, ComposerTextMetrics.fieldHorizontalPadding)
             .overlay(alignment: .topLeading) {
                 if let placeholder {
@@ -88,13 +89,7 @@ extension View {
 
     func floatingInputSurface() -> some View {
         padding(AppLayout.contentInset)
-            .background(Color(nsColor: .textBackgroundColor))
-            .clipShape(RoundedRectangle(cornerRadius: AppLayout.surfaceRadius, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: AppLayout.surfaceRadius, style: .continuous)
-                    .strokeBorder(Color.secondary.opacity(0.25), lineWidth: 0.5)
-            }
-            .shadow(color: .black.opacity(0.06), radius: 10, y: 3)
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: AppLayout.surfaceRadius))
     }
 
     func composerCapsule() -> some View {

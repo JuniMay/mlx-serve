@@ -2400,3 +2400,17 @@
 "Choose voice clip" = "选择语音片段";
 "Remove voice clip" = "移除语音片段";
 "Choose a wake phrase" = "选择唤醒词";
+
+"Rename Chat" = "重命名聊天";
+
+"More conversation actions" = "更多聊天操作";
+
+"Expand message" = "展开输入框";
+
+"Reduce message" = "收起输入框";
+
+"Enlarge details" = "放大详情";
+"Expanded" = "已展开";
+"Collapsed" = "已折叠";
+
+"Reduce details" = "缩小详情";

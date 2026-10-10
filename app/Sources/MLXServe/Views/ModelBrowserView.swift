@@ -1,11 +1,7 @@
 import SwiftUI
 
-/// Model Browser: five sections (`ModelBrowserSection`), switched by the bar
-/// across the top of the content area.
+/// Model management with shared list content and toolbar section navigation.
 struct ModelBrowserPane: View {
-    /// Which section is showing. The pane's own bar drives it: the sidebar is
-    /// the conversation list (plus the Models row that gets you here), so the
-    /// sub-items live across the top of the content area.
     @Binding var section: ModelBrowserSection
 
     @EnvironmentObject var searchService: HFSearchService
@@ -42,12 +38,14 @@ struct ModelBrowserPane: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            ModelBrowserSectionBar(section: $section, badges: badges,
-                                   isDownloading: downloadSummary.running > 0)
-            // Empty states must fill the remainder so navigation stays at the top.
-            detail
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        detail
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                ModelBrowserSectionBar(section: $section, badges: badges,
+                                       isDownloading: downloadSummary.running > 0)
+            }
+            .sharedBackgroundVisibility(.hidden)
         }
         // The floor the browser's table needs, asserted from INSIDE the chat
         // window's detail column: below it the action cell clips off the right
@@ -97,45 +95,82 @@ struct ModelBrowserPane: View {
 
 // MARK: - Section bar
 
-/// The browser's five sections, across the top of the content area.
+/// Section navigation shares the window toolbar's glass layer.
 private struct ModelBrowserSectionBar: View {
     @Binding var section: ModelBrowserSection
     let badges: ModelBrowserBadgeCounts
     let isDownloading: Bool
     @Environment(\.layoutDirection) private var layoutDirection
+    @FocusState private var focusedSection: ModelBrowserSection?
 
     var body: some View {
-        HStack(spacing: AppLayout.rowSpacing) {
+        GlassEffectContainer(spacing: AppLayout.compactSpacing) {
             ViewThatFits(in: .horizontal) {
-                sectionPicker
-                    .pickerStyle(.segmented)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .onKeyPress(.leftArrow) { moveSelection(movingRight: false) }
-                    .onKeyPress(.rightArrow) { moveSelection(movingRight: true) }
-                sectionPicker
-                    .pickerStyle(.menu)
-                    .fixedSize(horizontal: true, vertical: false)
-            }
-            if isDownloading {
-                ProgressView()
-                    .controlSize(.mini)
-                    .accessibilityLabel("Models are downloading")
+                sectionPills.fixedSize(horizontal: true, vertical: false)
+                sectionMenu.fixedSize(horizontal: true, vertical: false)
             }
         }
-        .tint(.gray)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, AppLayout.contentInset)
-        .padding(.vertical, AppLayout.rowSpacing)
     }
 
-    private var sectionPicker: some View {
-        Picker("Models section", selection: $section) {
+    private var sectionPills: some View {
+        HStack(spacing: 2) {
             ForEach(ModelBrowserSection.allCases) { item in
-                Text(verbatim: title(for: item)).tag(item)
+                Button {
+                    section = item
+                    focusedSection = item
+                } label: {
+                    HStack(spacing: AppLayout.labelSpacing) {
+                        Text(verbatim: title(for: item))
+                        if item == .downloads, isDownloading {
+                            downloadActivity
+                        }
+                    }
+                    .font(.app(.body))
+                    .foregroundStyle(section == item ? .primary : .secondary)
+                    .padding(.horizontal, 10)
+                    .frame(minHeight: 28)
+                    .background {
+                        if section == item {
+                            Capsule().fill(.primary.opacity(0.10))
+                        }
+                    }
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .focused($focusedSection, equals: item)
+                .accessibilityAddTraits(section == item ? .isSelected : [])
             }
         }
-        .labelsHidden()
+        .padding(3)
+        .glassEffect(.regular, in: .capsule)
+        .onKeyPress(.leftArrow) { moveSelection(movingRight: false) }
+        .onKeyPress(.rightArrow) { moveSelection(movingRight: true) }
+        .accessibilityElement(children: .contain)
         .accessibilityLabel("Models section")
+    }
+
+    private var sectionMenu: some View {
+        Menu {
+            Picker("Models section", selection: $section) {
+                ForEach(ModelBrowserSection.allCases) { item in
+                    Text(verbatim: title(for: item)).tag(item)
+                }
+            }
+        } label: {
+            HStack(spacing: AppLayout.labelSpacing) {
+                Text(verbatim: title(for: section))
+                if isDownloading { downloadActivity }
+            }
+        }
+        .buttonStyle(.glass)
+        .buttonBorderShape(.capsule)
+        .accessibilityLabel("Models section")
+    }
+
+    private var downloadActivity: some View {
+        ProgressView()
+            .controlSize(.mini)
+            .accessibilityLabel("Models are downloading")
     }
 
     private func title(for item: ModelBrowserSection) -> String {
@@ -145,10 +180,28 @@ private struct ModelBrowserSectionBar: View {
 
     private func moveSelection(movingRight: Bool) -> KeyPress.Result {
         let destination = ModelBrowserSectionNavigation.destination(
-            from: section, movingRight: movingRight,
+            from: focusedSection ?? section, movingRight: movingRight,
             rightToLeft: layoutDirection == .rightToLeft)
         section = destination
+        focusedSection = destination
         return .handled
+    }
+}
+
+private struct ModelCatalogList<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        List {
+            content
+                .listRowInsets(EdgeInsets(top: 0, leading: ModelBrowserMetrics.rowPaddingH,
+                                         bottom: 0, trailing: ModelBrowserMetrics.rowPaddingH))
+                .listRowSeparator(.visible)
+        }
+        .listStyle(.plain)
+        .contentMargins(.horizontal, 0, for: .scrollContent)
+        .scrollContentBackground(.hidden)
+        .buttonStyle(.bordered)
     }
 }
 
@@ -237,7 +290,7 @@ private struct RecommendedModelList: View {
     }
 
     var body: some View {
-        List {
+        ModelCatalogList {
             ForEach(families) { family in
                 Section(L10n.text(family.title)) {
                     ForEach(family.picks) { pick in
@@ -250,7 +303,6 @@ private struct RecommendedModelList: View {
                 }
             }
         }
-        .listStyle(.inset)
     }
 }
 
@@ -349,7 +401,7 @@ private struct RecommendedModelRow: View {
             }
             modelFacts
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 8)
         .sheet(item: $card) { ModelDetailSheet(request: $0) }
     }
 
@@ -573,40 +625,37 @@ private struct DiscoverPane: View {
 
             let onDiskCount = searchService.models.filter { downloads.isReady($0.id) }.count
 
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(searchService.models) { model in
-                        ModelBrowserRow(
-                            model: model,
-                            fitness: searchService.ramFitness(for: model),
-                            tier: tier
-                        )
-                        Divider().padding(.horizontal, 12)
-                    }
+            ModelCatalogList {
+                ForEach(searchService.models) { model in
+                    ModelBrowserRow(
+                        model: model,
+                        fitness: searchService.ramFitness(for: model),
+                        tier: tier
+                    )
+                }
 
-                    if searchService.isLoading {
-                        ProgressView()
-                            .padding(20)
-                    } else if let error = searchService.error {
-                        Text(error)
-                            .foregroundStyle(.red)
-                            .font(.app(.caption))
-                            .padding(20)
-                    } else if searchService.models.isEmpty {
-                        Text(L10n.text("No models found"))
-                            .foregroundStyle(.secondary)
-                            .padding(40).font(.app(.body))
-                    }
+                if searchService.isLoading {
+                    ProgressView()
+                        .padding(20)
+                } else if let error = searchService.error {
+                    Text(error)
+                        .foregroundStyle(.red)
+                        .font(.app(.caption))
+                        .padding(20)
+                } else if searchService.models.isEmpty {
+                    Text(L10n.text("No models found"))
+                        .foregroundStyle(.secondary)
+                        .padding(40).font(.app(.body))
+                }
 
-                    if searchService.hasMore && !searchService.models.isEmpty && !searchService.isLoading {
-                        Button {
-                            Task { await searchService.loadMore() }
-                        } label: { Text("Load More")
-                            .font(.app(.body)) }
-                        .buttonStyle(.bordered)
-                        .controlSize(.regular)
-                        .padding(16)
-                    }
+                if searchService.hasMore && !searchService.models.isEmpty && !searchService.isLoading {
+                    Button {
+                        Task { await searchService.loadMore() }
+                    } label: { Text("Load More")
+                        .font(.app(.body)) }
+                    .buttonStyle(.bordered)
+                    .controlSize(.regular)
+                    .padding(16)
                 }
             }
 
@@ -643,9 +692,7 @@ private struct DiscoverPane: View {
 
 // MARK: - My Models
 
-/// Everything on this Mac the tray picker can offer, grouped by where it came
-/// from. The old "Downloaded" tab listed only `source == .mlxServe`, so it was a
-/// strict subset of what you could actually load.
+/// Models on this Mac, grouped by their source folder.
 private struct MyModelsPane: View {
     @Binding var filter: String
     @EnvironmentObject var appState: AppState
@@ -697,30 +744,19 @@ private struct MyModelsPane: View {
 
             Divider()
 
-            ScrollView {
-                LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
-                    ForEach(groups) { group in
-                        Section {
-                            ForEach(group.models) { model in
-                                LocalModelRow(model: model)
-                                Divider().padding(.horizontal, 12)
-                            }
-                        } header: {
-                            Text(L10n.text(group.title))
-                                .font(.app(.caption).weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 4)
-                                .background(.bar)
+            ModelCatalogList {
+                ForEach(groups) { group in
+                    Section(L10n.text(group.title)) {
+                        ForEach(group.models) { model in
+                            LocalModelRow(model: model)
                         }
                     }
-
-                    if groups.isEmpty {
-                        Text(L10n.text(filter.isEmpty ? "No models on this Mac yet" : "No models match “\(filter)”"))
-                            .foregroundStyle(.secondary)
-                            .padding(40).font(.app(.body))
-                    }
+                }
+                if groups.isEmpty {
+                    Text(L10n.text(filter.isEmpty ? "No models on this Mac yet" : "No models match “\(filter)”"))
+                        .foregroundStyle(.secondary)
+                        .padding(.vertical, 40)
+                        .font(.app(.body))
                 }
             }
 
@@ -799,8 +835,7 @@ private struct MyModelsPane: View {
 
 // MARK: - Downloads
 
-/// The transfer queue. Promoted out of the old Downloaded tab so an in-flight
-/// download is reachable (and badged) from anywhere in the browser.
+/// Transfer progress, failures and completed downloads from every model section.
 private struct DownloadsPane: View {
     let items: [(repoId: String, state: DownloadManager.DownloadState)]
     let showModels: () -> Void
@@ -815,12 +850,11 @@ private struct DownloadsPane: View {
                     Text("Downloads you start from Recommended, Discover, or Media appear here.")
                 }
             } else {
-                List {
+                ModelCatalogList {
                     rows(status: .downloading, title: "Downloading")
                     rows(status: .failed, title: "Needs Attention")
                     rows(status: .completed, title: "Completed")
                 }
-                .listStyle(.inset)
                 if items.contains(where: { $0.state.status == .completed }) {
                     HStack {
                         Spacer()
@@ -852,107 +886,61 @@ private struct DownloadsPane: View {
 
 // MARK: - Media pane
 
-/// Every media-generation model (image/audio/video/music), grouped by
-/// modality. Its own sidebar destination — there's one catalog per modality
-/// and none of them are large enough to need Discover-style search, so one
-/// scrollable page beats splitting each modality into its own sidebar row.
+/// Media models grouped by the output they generate.
 private struct MediaPane: View {
     private var physicalMemory: UInt64 { ProcessInfo.processInfo.physicalMemory }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                ModelGroupSection(
-                    title: "Image",
-                    subtitle: "Text-to-image generation and image editing.",
-                    systemImage: "photo",
-                    tint: .pink
-                ) {
-                    ForEach(ImageModelPreset.all) { MediaModelRow(preset: $0, modality: .image, physicalMemoryBytes: physicalMemory) }
-                }
-                ModelGroupSection(
-                    title: "Audio",
-                    subtitle: "Text-to-speech, with optional voice cloning.",
-                    systemImage: "waveform",
-                    tint: .green
-                ) {
-                    // The browser lists the FULL catalog — Kokoro is voice-mode
-                    // only (out of `.all`, which the media panes offer) but is
-                    // still a model the user can fetch from here.
-                    ForEach(AudioModelPreset.allIncludingVoiceOnly) { MediaModelRow(preset: $0, modality: .voice, physicalMemoryBytes: physicalMemory) }
-                }
-                ModelGroupSection(
-                    title: "Video",
-                    subtitle: "Text/image-to-video, with optional audio.",
-                    systemImage: "film",
-                    tint: .indigo
-                ) {
-                    ForEach(VideoModelPreset.all) { MediaModelRow(preset: $0, modality: .video, physicalMemoryBytes: physicalMemory) }
-                }
-                ModelGroupSection(
-                    title: "Music",
-                    subtitle: "Text-to-music, with optional lyrics.",
-                    systemImage: "music.note",
-                    tint: .orange
-                ) {
-                    ForEach(MusicModelPreset.all) { MediaModelRow(preset: $0, modality: .music, physicalMemoryBytes: physicalMemory) }
-                }
-                ModelGroupSection(
-                    title: "Sound Effects",
-                    subtitle: "Text-to-audio: effects and ambiences.",
-                    systemImage: "speaker.wave.3",
-                    tint: .teal
-                ) {
-                    ForEach(SoundModelPreset.all) { MediaModelRow(preset: $0, modality: .sound, physicalMemoryBytes: physicalMemory) }
+        ModelCatalogList {
+            ModelGroupSection(title: "Image", subtitle: "Text-to-image generation and image editing.") {
+                ForEach(ImageModelPreset.all) {
+                    MediaModelRow(preset: $0, modality: .image, physicalMemoryBytes: physicalMemory)
                 }
             }
-            .padding(16)
+            ModelGroupSection(title: "Audio", subtitle: "Text-to-speech, with optional voice cloning.") {
+                ForEach(AudioModelPreset.allIncludingVoiceOnly) {
+                    MediaModelRow(preset: $0, modality: .voice, physicalMemoryBytes: physicalMemory)
+                }
+            }
+            ModelGroupSection(title: "Video", subtitle: "Text/image-to-video, with optional audio.") {
+                ForEach(VideoModelPreset.all) {
+                    MediaModelRow(preset: $0, modality: .video, physicalMemoryBytes: physicalMemory)
+                }
+            }
+            ModelGroupSection(title: "Music", subtitle: "Text-to-music, with optional lyrics.") {
+                ForEach(MusicModelPreset.all) {
+                    MediaModelRow(preset: $0, modality: .music, physicalMemoryBytes: physicalMemory)
+                }
+            }
+            ModelGroupSection(title: "Sound Effects", subtitle: "Text-to-audio: effects and ambiences.") {
+                ForEach(SoundModelPreset.all) {
+                    MediaModelRow(preset: $0, modality: .sound, physicalMemoryBytes: physicalMemory)
+                }
+            }
         }
     }
 }
 
-/// One family/modality group's header (icon, name, what it's for) over its
-/// list of rows — shared by the Recommended pane (grouped by model family)
-/// and the Media pane (grouped by modality).
 private struct ModelGroupSection<Content: View>: View {
     let title: String
     let subtitle: String
-    let systemImage: String
-    let tint: Color
     @ViewBuilder let content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Image(systemName: systemImage)
-                    .foregroundStyle(tint)
-                    .frame(width: 18)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(L10n.text(title)).font(.app(.subheadline).weight(.semibold))
-                    Text(L10n.text(subtitle)).font(.app(.caption2)).foregroundStyle(.secondary)
-                }
-                Spacer()
+        Section {
+            content
+        } header: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(L10n.text(title))
+                Text(L10n.text(subtitle))
+                    .font(.app(.caption2))
+                    .fontWeight(.regular)
             }
-
-            VStack(spacing: 0) {
-                content
-            }
-            .background(.quaternary.opacity(0.15), in: RoundedRectangle(cornerRadius: 8))
         }
     }
 }
 
-/// One row for any media preset (image/audio/video/music) — generic over
-/// `MediaModelPreset` so the four modalities share this instead of four
-/// near-duplicate views. Download/progress/retry mirrors `BundleDownloadBar`.
-///
-/// The terminal state used to be on-disk + Delete and nothing else, on the
-/// reasoning that each gen pane keeps its own sticky model selection. But that
-/// left "throw it away" as the only verb the browser offered for a model it
-/// had just finished downloading (#228). `Use` opens the owning pane; the pane
-/// still keeps its own selection, so this is navigation, not a second loader.
-/// The modality is passed in rather than derived — the Media pane already
-/// groups by it, so the call site knows it exactly.
+/// Shared media preset row with model details, download state and actions.
 private struct MediaModelRow<Preset: MediaModelPreset>: View {
     let preset: Preset
     let modality: MediaModality
@@ -979,7 +967,7 @@ private struct MediaModelRow<Preset: MediaModelPreset>: View {
             Button { card = ModelCardRequest(repoId: bundle.primaryRepo, title: preset.name) } label: {
             VStack(alignment: .leading, spacing: 3) {
                 Text(L10n.text(preset.name))
-                    .font(.app(.callout).weight(.medium))
+                    .font(.app(.body).weight(.medium))
 
                 Text(L10n.text(preset.description))
                     .font(.app(.caption))
@@ -1020,7 +1008,6 @@ private struct MediaModelRow<Preset: MediaModelPreset>: View {
                 actionControl
             }
         }
-        .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .sheet(item: $card) { ModelDetailSheet(request: $0) }
     }
@@ -1131,9 +1118,7 @@ private struct UseModelButton: View {
     }
 }
 
-/// "Use" for a media checkpoint: open the pane that owns it.
-///
-/// Model selection and workspace routing share the global chooser's path.
+/// Choose a media checkpoint in the shared interaction page.
 private struct UseMediaModelButton: View {
     let modality: MediaModality
     let name: String
@@ -1326,7 +1311,7 @@ private struct ModelBrowserRow: View {
             Button { card = ModelCardRequest(repoId: model.id, title: model.modelName) } label: {
             VStack(alignment: .leading, spacing: 1) {
                 Text(L10n.text(model.modelName))
-                    .font(.app(.callout).weight(.medium))
+                    .font(.app(.body).weight(.medium))
                     .lineLimit(1)
                 HStack(spacing: 6) {
                     Text(L10n.text(model.author))
@@ -1406,8 +1391,7 @@ private struct ModelBrowserRow: View {
             actionCell
                 .frame(width: ModelBrowserMetrics.actionWidth, alignment: .center)
         }
-        .padding(.horizontal, ModelBrowserMetrics.rowPaddingH)
-        .padding(.vertical, 6)
+        .padding(.vertical, 8)
         .opacity(disabled ? 0.4 : 1.0)
         .sheet(item: $card) { ModelDetailSheet(request: $0) }
     }
@@ -1910,7 +1894,7 @@ private struct LocalModelRow: View {
                     // quant suffix so two quants of one GGUF repo are two
                     // distinguishable rows) survives as the subtext below —
                     Text(L10n.text(ModelDisplayName.pretty(model.displayLabel)))
-                        .font(.app(.callout).weight(.medium))
+                        .font(.app(.body).weight(.medium))
                         .lineLimit(1)
                     // Drafter checkpoints are real, supported models — they
                     // just aren't loadable as a target on their own. Show a
@@ -2140,8 +2124,7 @@ private struct LocalModelRow: View {
             }
             .frame(width: ModelBrowserMetrics.localActionWidth)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.vertical, 8)
         // The alert lives on the ROW so both the trash and the context menu
         // raise the same confirmation — two delete paths with two dialogs is
         // two chances to word the consequence differently.
@@ -2237,7 +2220,7 @@ private struct ActiveDownloadRow: View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(verbatim: modelName)
-                    .font(.app(.callout).weight(.medium))
+                    .font(.app(.body).weight(.medium))
                     .textSelection(.enabled)
                 Text(verbatim: repoId)
                     .font(.app(.caption))
@@ -2300,6 +2283,6 @@ private struct ActiveDownloadRow: View {
                 .controlSize(.small)
             }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 8)
     }
 }

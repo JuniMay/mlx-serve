@@ -5,16 +5,14 @@ import XCTest
 
 @MainActor
 final class TranscriptDetailViewportTests: XCTestCase {
-    func testReaderSizeStaysInsideThePresentingWindow() {
+    func testEnlargedDetailHeightStaysBoundedWithinTheWindow() {
         for available in [CGSize(width: 400, height: 350), CGSize(width: 900, height: 700),
                           CGSize(width: 1800, height: 1200)] {
-            let size = TranscriptDetailSizing.readerSize(in: available)
-            XCTAssertLessThanOrEqual(size.width, available.width - 40)
-            XCTAssertLessThanOrEqual(size.height, available.height - 80)
-            XCTAssertLessThanOrEqual(size.width, 760)
-            XCTAssertLessThanOrEqual(size.height, 640)
-            XCTAssertGreaterThan(size.width, 0)
-            XCTAssertGreaterThan(size.height, 0)
+            let height = TranscriptDetailSizing.maximumHeight(enlarged: true, windowHeight: available.height)
+            XCTAssertLessThanOrEqual(height, available.height - 80)
+            XCTAssertLessThanOrEqual(height, 640)
+            XCTAssertGreaterThanOrEqual(height, 240)
+            XCTAssertEqual(TranscriptDetailSizing.maximumHeight(enlarged: false, windowHeight: available.height), 240)
         }
     }
 

@@ -325,6 +325,7 @@ private struct NoSearchResults: View {
 
 /// Restores the selected section; General also offers the existing global reset.
 private struct ResetDefaultsFooter: View {
+    var isGroupAction = false
     @EnvironmentObject var appState: AppState
     @Environment(\.settingsSelection) private var selection
     @State private var showConfirm = false
@@ -336,7 +337,9 @@ private struct ResetDefaultsFooter: View {
 
     /// Nothing to reset in this section → no button.
     private var hidden: Bool {
-        if case .category(let c) = selection { return !SettingsReset.isResettable(c) }
+        if case .category(let c) = selection {
+            return !SettingsReset.isResettable(c) || (c == .providers && !isGroupAction)
+        }
         return false
     }
 
@@ -360,9 +363,9 @@ private struct ResetDefaultsFooter: View {
                     if let resetError { Text(verbatim: resetError).font(.app(.caption)).foregroundStyle(.red) }
                 }
                 .frame(maxWidth: .infinity, alignment: .trailing)
-                .padding(.horizontal, 20)
-                .padding(.top, 10)
-                .padding(.bottom, 20)
+                .padding(.horizontal, isGroupAction ? 0 : 20)
+                .padding(.top, isGroupAction ? 0 : 10)
+                .padding(.bottom, isGroupAction ? 0 : 20)
                 .confirmationDialog(
                     SettingsReset.confirmTitle(selection),
                     isPresented: $showConfirm,
@@ -852,7 +855,9 @@ private struct LanSharingSectionContent: View {
 
     var body: some View {
         if let m = meta["lanShareEnabled"] {
-            SettingsRow(title: m.title, explainer: m.explainer, summary: m.summary, isDirty: dirty.dirty(\.lanShareEnabled)) {
+            SettingsRow(title: m.title, explainer: m.explainer, summary: m.summary,
+                        note: Self.privacyNote, isDirty: dirty.dirty(\.lanShareEnabled),
+                        searchKeywords: ["Privacy"]) {
                 Toggle("", isOn: $appState.serverOptions.lanShareEnabled)
                     .labelsHidden()
                     .toggleStyle(.switch).font(.app(.body))
@@ -881,14 +886,6 @@ private struct LanSharingSectionContent: View {
                     .frame(width: 200).font(.app(.body))
                 }
             }
-        }
-        // Publishing models lets nearby Macs send prompts to this Mac.
-        SearchableRow(searchText: ["Privacy", Self.privacyNote]) {
-            Text(L10n.text(Self.privacyNote))
-                .font(.app(.caption))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 4)
         }
     }
 
@@ -944,6 +941,8 @@ private struct NearbyMacsSectionContent: View {
                     .toggleStyle(.switch)
             }
         }
+        ResetDefaultsFooter(isGroupAction: true)
+            .environment(\.settingsSelection, .category(.providers))
     }
 }
 

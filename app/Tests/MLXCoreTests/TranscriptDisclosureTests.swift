@@ -51,23 +51,23 @@ private struct DisclosureFixture: View {
     @ObservedObject var probe: DisclosureProbe
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppLayout.compactSpacing) {
-            HStack {
-                TranscriptDisclosureButton(isExpanded: probe.expanded) {
-                    probe.expanded.toggle()
-                } label: { Text("Thinking") }
-                .accessibilityIdentifier("disclosure")
-                Button("Reader") { probe.readerActions += 1 }.accessibilityIdentifier("reader")
-                Button("Stop") { probe.stopActions += 1 }.accessibilityIdentifier("stop")
-            }
-            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { probe.headerFrame = $0 }
-            if probe.expanded {
-                TranscriptDetailSurface {
-                    TranscriptDetailViewport {
-                        Text(String(repeating: "Detail\n", count: 100)).transcriptDetailText()
-                    }
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { probe.detailHeight = $0 }
+        VStack(alignment: .leading, spacing: 0) {
+            TranscriptDetailPanel(isExpanded: probe.expanded) {
+                HStack {
+                    TranscriptDisclosureButton(isExpanded: probe.expanded) {
+                        probe.expanded.toggle()
+                    } label: { Text("Thinking") }
+                    .accessibilityIdentifier("disclosure")
+                    Button("Enlarge") { probe.readerActions += 1 }.accessibilityIdentifier("enlarge")
+                    Button("Stop") { probe.stopActions += 1 }.accessibilityIdentifier("stop")
                 }
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { probe.headerFrame = $0 }
+            } content: {
+                TranscriptDetailViewport {
+                    Text(String(repeating: "Detail\n", count: 100)).transcriptDetailText()
+                        .padding(AppLayout.contentInset)
+                }
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { probe.detailHeight = $0 }
                 .onDisappear { probe.detailHeight = 0 }
             }
             Spacer(minLength: 0)

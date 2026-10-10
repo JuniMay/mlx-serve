@@ -10,6 +10,7 @@ struct GrowingTextEditor: NSViewRepresentable {
     var font: NSFont = .preferredFont(forTextStyle: .body)
     var minLines: Int = 1
     var maxLines: Int = 15
+    var fillsAvailableHeight = false
     var isIdle: Bool
     var canSteer: Bool = false
     var returnInsertsNewline = false
@@ -29,11 +30,12 @@ struct GrowingTextEditor: NSViewRepresentable {
     func makeNSView(context: Context) -> NSScrollView {
         context.coordinator.isApplyingState = true
         defer { context.coordinator.isApplyingState = false }
-        let scroll = NSScrollView()
+        let scroll = ComposerScrollView()
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
         scroll.hasHorizontalScroller = false
         scroll.autohidesScrollers = true
+        scroll.scrollerStyle = NSScroller.preferredScrollerStyle
         scroll.borderType = .noBorder
         scroll.verticalScrollElasticity = .allowed
 
@@ -61,6 +63,9 @@ struct GrowingTextEditor: NSViewRepresentable {
         }
 
         scroll.documentView = tv
+        scroll.onSizeChange = { [weak c = context.coordinator] in
+            DispatchQueue.main.async { c?.recomputeHeight() }
+        }
         context.coordinator.textView = tv
         context.coordinator.applySelection(to: tv)
         DispatchQueue.main.async { context.coordinator.recomputeHeight() }
@@ -69,6 +74,9 @@ struct GrowingTextEditor: NSViewRepresentable {
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         guard let tv = scroll.documentView as? ComposerTextView else { return }
+        let previous = context.coordinator.parent
+        let layoutChanged = previous.minLines != minLines || previous.maxLines != maxLines
+            || previous.font != font || previous.fillsAvailableHeight != fillsAvailableHeight
         context.coordinator.parent = self
         context.coordinator.isApplyingState = true
         defer { context.coordinator.isApplyingState = false }
@@ -77,8 +85,9 @@ struct GrowingTextEditor: NSViewRepresentable {
             tv.string = text
             // Recalled drafts place the caret at the end unless a selection is supplied.
             tv.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
-            context.coordinator.recomputeHeight()
         }
+        if tv.font != font { tv.font = font }
+        if textChanged || layoutChanged { context.coordinator.recomputeHeight() }
         context.coordinator.applySelection(to: tv, textChanged: textChanged)
         let enabled = context.environment.isEnabled
         if tv.isEditable != enabled { tv.isEditable = enabled }
@@ -202,13 +211,26 @@ struct GrowingTextEditor: NSViewRepresentable {
                                            maxLines: parent.maxLines,
                                            verticalInset: parent.inset.height * 2)
             // Past the cap the scroll view owns overflow; below it the frame grows.
-            if let scroll = tv.enclosingScrollView, scroll.hasVerticalScroller != r.scrolls {
-                scroll.hasVerticalScroller = r.scrolls
+            if let scroll = tv.enclosingScrollView {
+                let scrolls = parent.fillsAvailableHeight
+                    ? content + parent.inset.height * 2 > scroll.contentSize.height + 0.5
+                    : r.scrolls
+                if scroll.hasVerticalScroller != scrolls { scroll.hasVerticalScroller = scrolls }
             }
             if abs(parent.measuredHeight - r.height) > 0.5 {
                 DispatchQueue.main.async { self.parent.measuredHeight = r.height }
             }
         }
+    }
+}
+
+final class ComposerScrollView: NSScrollView {
+    var onSizeChange: (() -> Void)?
+
+    override func setFrameSize(_ newSize: NSSize) {
+        let changed = newSize != frame.size
+        super.setFrameSize(newSize)
+        if changed { onSizeChange?() }
     }
 }
 

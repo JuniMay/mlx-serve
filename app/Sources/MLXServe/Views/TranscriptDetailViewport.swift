@@ -4,16 +4,20 @@ import AppKit
 enum TranscriptDetailSizing {
     static let inlineMaximumHeight: CGFloat = 240
 
-    static func readerSize(in available: CGSize) -> CGSize {
-        CGSize(width: max(1, min(760, available.width - 40)),
-               height: max(1, min(640, available.height - 80)))
+    static func maximumHeight(enlarged: Bool, windowHeight: CGFloat) -> CGFloat {
+        enlarged ? max(inlineMaximumHeight, min(640, windowHeight - 160)) : inlineMaximumHeight
+    }
+
+    @MainActor static func maximumHeight(enlarged: Bool) -> CGFloat {
+        maximumHeight(enlarged: enlarged, windowHeight: NSApp.keyWindow?.contentLayoutRect.height ?? 800)
     }
 }
 
 struct TranscriptDetailViewport<Content: View>: View {
     var followsTail = false
+    var maximumHeight = TranscriptDetailSizing.inlineMaximumHeight
     @ViewBuilder var content: Content
-    @State private var height = TranscriptDetailSizing.inlineMaximumHeight
+    @State private var contentHeight = TranscriptDetailSizing.inlineMaximumHeight
     @State private var isAtBottom = true
 
     var body: some View {
@@ -22,10 +26,11 @@ struct TranscriptDetailViewport<Content: View>: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) {
-                    min(TranscriptDetailSizing.inlineMaximumHeight, ceil($0.size.height))
-                } action: { height = $0 }
+                    ceil($0.size.height)
+                } action: { contentHeight = $0 }
         }
-        .frame(height: height)
+        .frame(height: min(maximumHeight, contentHeight))
+        .scrollIndicators(.automatic)
         .scrollBounceBehavior(.basedOnSize)
         .defaultScrollAnchor(followsTail ? .bottom : .top, for: .initialOffset)
         .defaultScrollAnchor(followsTail && isAtBottom ? .bottom : nil, for: .sizeChanges)
@@ -39,67 +44,29 @@ struct TranscriptDetailViewport<Content: View>: View {
     }
 }
 
-struct TranscriptReaderButton<Content: View>: View {
-    let title: String
+struct TranscriptDetailActions: View {
     let textToCopy: String
-    @ViewBuilder var content: Content
-    @State private var isPresented = false
-    @State private var readerSize = CGSize(width: 760, height: 640)
+    @Binding var isEnlarged: Bool
 
     var body: some View {
-        Button {
-            let available = NSApp.keyWindow?.contentLayoutRect.size ?? CGSize(width: 800, height: 720)
-            readerSize = TranscriptDetailSizing.readerSize(in: available)
-            isPresented = true
-        } label: {
-            Image(systemName: "arrow.up.left.and.arrow.down.right")
+        HStack(spacing: AppLayout.rowSpacing) {
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(textToCopy, forType: .string)
+            } label: {
+                Image(systemName: "doc.on.doc")
+            }
+            .help("Copy")
+            .accessibilityLabel("Copy")
+
+            Button { isEnlarged.toggle() } label: {
+                Image(systemName: isEnlarged ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+            }
+            .help(isEnlarged ? "Reduce details" : "Enlarge details")
+            .accessibilityLabel(isEnlarged ? "Reduce details" : "Enlarge details")
         }
         .buttonStyle(.borderless)
         .controlSize(.small)
-        .help("Open in Reader")
-        .accessibilityLabel("Open in Reader")
-        .accessibilityHint(Text(L10n.text(title)))
-        .sheet(isPresented: $isPresented) {
-            TranscriptDetailReader(title: title, textToCopy: textToCopy, size: readerSize) {
-                content
-            }
-        }
-    }
-}
-
-private struct TranscriptDetailReader<Content: View>: View {
-    let title: String
-    let textToCopy: String
-    let size: CGSize
-    @ViewBuilder var content: Content
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: AppLayout.rowSpacing) {
-                Text(L10n.text(title)).font(.headline).lineLimit(1)
-                Spacer(minLength: AppLayout.compactSpacing)
-                Button {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(textToCopy, forType: .string)
-                } label: {
-                    Label("Copy", systemImage: "doc.on.doc")
-                }
-                Button("Close") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-            }
-            .controlSize(.small)
-            .padding(.horizontal, AppLayout.pageInset)
-            .padding(.vertical, AppLayout.rowSpacing)
-            Divider()
-            ScrollView {
-                content
-                    .transcriptDetailText()
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(AppLayout.contentInset)
-            }
-        }
-        .frame(width: size.width, height: size.height)
+        .foregroundStyle(.secondary)
     }
 }

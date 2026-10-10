@@ -163,3 +163,20 @@ and [Motion](https://developer.apple.com/design/human-interface-guidelines/motio
 6. In Voice, Wake phrase appears once on the left. Choose a wake phrase must
    appear only as an empty field's placeholder. The field keeps its Wake phrase
    accessibility name and preserves any saved phrase.
+
+## Settings group scope and separators
+
+1. Open LAN Sharing. Its privacy note must appear under the sharing option in
+   the label column. It must remain visible before sharing is enabled and remain
+   searchable by Privacy. A section introduction describes the whole category;
+   the privacy consequence belongs beside the control that enables it.
+2. Open Providers. Reset Nearby Macs belongs inside the Nearby Macs card, below
+   discovery. It must not appear below Chat Services as a category-wide reset.
+   Open its confirmation and verify that only discovery is turned off. Chat
+   services, LAN publishing, the sharing name, and shared-model choices are kept.
+   Cancel without changing settings. Search for Reset Nearby Macs and verify
+   that the action remains associated with its group.
+3. Open Generation Defaults. Adjacent parameter rows must have the same subtle
+   horizontal separators as other Settings rows. Search for one parameter:
+   no divider should remain above or below a single result. Clearing the search
+   restores separators without changing parameter values.

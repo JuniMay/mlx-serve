@@ -11,7 +11,7 @@ struct GenerationDefaultsRows: View {
     var body: some View {
         let search = GenerationDefaultsSearch(query: query, fields: fields, inheritance: inheritance)
         if search.hasContent {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 0) {
                 if search.showsBulkControls {
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
@@ -28,6 +28,7 @@ struct GenerationDefaultsRows: View {
                         }
                         .frame(width: AppLayout.settingsControlWidth, alignment: .leading)
                     }
+                    .padding(.vertical, 12)
                     Divider()
                 }
                 ForEach(search.fields) { field in
@@ -38,6 +39,7 @@ struct GenerationDefaultsRows: View {
                             setMode: { profile.setMode($0, field: field, inherited: inherited.rules[field.rawValue]?.value) },
                             setValue: { set($0, field) })
                     }
+                    if field != search.fields.last { Divider() }
                 }
             }
         }
@@ -104,7 +106,7 @@ struct GenerationParameterRow: View {
             }
             .frame(width: AppLayout.settingsControlWidth)
         }
-        .padding(.vertical, 7)
+        .padding(.vertical, 12)
     }
 
     @ViewBuilder

@@ -5,6 +5,80 @@ import XCTest
 
 @MainActor
 final class GrowingTextEditorTests: XCTestCase {
+    func testExpandedDraftKeepsEmptySpaceEditableAndPreservesUndo() async throws {
+        let probe = EditorProbe()
+        probe.text = "A draft"
+        let hosting = NSHostingView(rootView: EditorFixture(probe: probe).frame(width: 480, height: 600))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 600),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = hosting
+        defer { window.contentView = nil }
+        let editor = try await textView(in: hosting)
+        editor.insertText(" revised", replacementRange: NSRange(location: 7, length: 0))
+        try await settle(hosting)
+        probe.expanded = true
+        try await settle(hosting)
+        let scroll = try XCTUnwrap(editor.enclosingScrollView)
+        XCTAssertTrue(try textViewSync(in: hosting) === editor)
+        XCTAssertGreaterThan(scroll.contentSize.height, 400)
+        XCTAssertGreaterThanOrEqual(editor.frame.height, scroll.contentSize.height)
+        XCTAssertFalse(scroll.hasVerticalScroller)
+        XCTAssertTrue(editor.undoManager?.canUndo == true)
+        probe.expanded = false
+        try await settle(hosting)
+        XCTAssertTrue(try textViewSync(in: hosting) === editor)
+        XCTAssertEqual(editor.string, "A draft revised")
+        editor.undoManager?.undo()
+        XCTAssertEqual(editor.string, "A draft")
+    }
+
+    func testChangingTheLineLimitResizesTheSameEditorAndKeepsSelection() async throws {
+        let probe = EditorProbe()
+        probe.text = Array(repeating: "A line in a long prompt", count: 40).joined(separator: "\n")
+        let hosting = NSHostingView(rootView: EditorFixture(probe: probe))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 800),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = hosting
+        defer { window.contentView = nil }
+        let editor = try await textView(in: hosting)
+        let shortHeight = probe.height
+        let selection = NSRange(location: 3, length: 5)
+        editor.setSelectedRange(selection)
+        try await settle(hosting)
+
+        probe.maxLines = 24
+        try await settle(hosting)
+        XCTAssertTrue(try textViewSync(in: hosting) === editor)
+        XCTAssertGreaterThan(probe.height, shortHeight + 200)
+        XCTAssertEqual(editor.selectedRange(), selection)
+        XCTAssertEqual(editor.string, probe.text)
+
+        probe.maxLines = 6
+        try await settle(hosting)
+        XCTAssertEqual(probe.height, shortHeight, accuracy: 1)
+        XCTAssertEqual(editor.selectedRange(), selection)
+    }
+
+    func testScrollingDraftUsesPreferredNativeScrollerWithoutASecondFrame() async throws {
+        let probe = EditorProbe()
+        probe.text = Array(repeating: "A line", count: 40).joined(separator: "\n")
+        let hosting = NSHostingView(rootView: EditorFixture(probe: probe))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 360),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = hosting
+        defer { window.contentView = nil }
+        let editor = try await textView(in: hosting)
+        let scroll = try XCTUnwrap(editor.enclosingScrollView)
+        XCTAssertEqual(scroll.scrollerStyle, NSScroller.preferredScrollerStyle)
+        XCTAssertTrue(scroll.autohidesScrollers)
+        XCTAssertEqual(scroll.borderType, .noBorder)
+        XCTAssertFalse(scroll.drawsBackground)
+    }
+
+    private func textViewSync<V: View>(in hosting: NSHostingView<V>) throws -> NSTextView {
+        try XCTUnwrap(findTextView(hosting))
+    }
+
     func testEscapeUsesTheCancelCallbacksConsumptionResult() async throws {
         let probe = EditorProbe()
         let hosting = NSHostingView(rootView: EditorFixture(probe: probe))
@@ -220,6 +294,8 @@ private final class EditorProbe: ObservableObject {
     @Published var focused = false
     @Published var keepFocusRequested = false
     @Published var height: CGFloat = 36
+    @Published var maxLines = 6
+    @Published var expanded = false
     var returnInsertsNewline = false
     var submissions = 0
     var consumeCancel = false
@@ -235,7 +311,8 @@ private struct EditorFixture: View {
         GrowingTextEditor(text: $probe.text,
                           isFocused: probe.keepFocusRequested ? .constant(true) : $probe.focused,
                           measuredHeight: $probe.height, selection: $probe.selection,
-                          maxLines: 6, isIdle: true, returnInsertsNewline: probe.returnInsertsNewline,
+                          maxLines: probe.maxLines, fillsAvailableHeight: probe.expanded,
+                          isIdle: true, returnInsertsNewline: probe.returnInsertsNewline,
                           onSend: { probe.submissions += 1 },
                           onCancel: {
                               probe.cancelCalls += 1
@@ -250,7 +327,8 @@ private struct EditorFixture: View {
                               probe.lastArrow = EditorArrow(direction: name, atStart: start, atEnd: end)
                               return probe.consumeArrow
                           })
-            .composerTextField(height: probe.height, placeholder: probe.text.isEmpty ? "Prompt" : nil)
+            .composerTextField(height: probe.height, placeholder: probe.text.isEmpty ? "Prompt" : nil,
+                               expanded: probe.expanded)
     }
 }
 

@@ -2400,3 +2400,17 @@
 "Choose voice clip" = "음성 클립 선택";
 "Remove voice clip" = "음성 클립 제거";
 "Choose a wake phrase" = "호출 문구 선택";
+
+"Rename Chat" = "채팅 이름 변경";
+
+"More conversation actions" = "더 많은 채팅 작업";
+
+"Expand message" = "입력창 확대";
+
+"Reduce message" = "입력창 축소";
+
+"Enlarge details" = "세부 내용 확대";
+"Expanded" = "펼쳐짐";
+"Collapsed" = "접힘";
+
+"Reduce details" = "세부 내용 축소";

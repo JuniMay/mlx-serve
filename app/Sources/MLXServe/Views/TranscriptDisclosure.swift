@@ -21,6 +21,7 @@ struct TranscriptDisclosureButton<Label: View>: View {
         }
         .buttonStyle(TranscriptDisclosureButtonStyle(isHovered: isHovered))
         .onHover { isHovered = $0 }
+        .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
     }
 }
 
@@ -33,14 +34,29 @@ private struct TranscriptDisclosureButtonStyle: ButtonStyle {
     }
 }
 
-struct TranscriptDetailSurface<Content: View>: View {
+struct TranscriptDetailPanel<Header: View, Content: View>: View {
+    let isExpanded: Bool
+    @ViewBuilder var header: Header
     @ViewBuilder var content: Content
 
     var body: some View {
-        content
-            .padding(AppLayout.contentInset)
-            .background(.quaternary.opacity(0.5),
-                        in: RoundedRectangle(cornerRadius: AppLayout.surfaceRadius, style: .continuous))
+        VStack(spacing: 0) {
+            header
+                .padding(.horizontal, AppLayout.contentInset)
+                .padding(.vertical, AppLayout.rowSpacing)
+            if isExpanded {
+                Divider().padding(.horizontal, AppLayout.contentInset)
+                content
+            }
+        }
+        .background {
+            if isExpanded {
+                RoundedRectangle(cornerRadius: AppLayout.surfaceRadius, style: .continuous)
+                    .fill(.quaternary.opacity(0.5))
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: AppLayout.surfaceRadius, style: .continuous))
+        .transaction { $0.animation = nil }
     }
 }
 

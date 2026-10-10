@@ -45,15 +45,18 @@ conversation. Completed files are referenced by path in saved history; deleting
 or moving a file outside the app produces a missing-file notice in the transcript.
 
 The shared prompt grows as you type, then scrolls within a bounded area.
+For longer drafts, **Expand message** fills the detail pane with the same editor.
+**Reduce message** or Escape restores the dock. The draft, selection and undo
+history stay in that editor. The dock uses the system Liquid Glass material.
 For media models, Return inserts a newline and **⌘Return** starts generation
 when the required inputs are ready. Stop cancels generation belonging to the
 current conversation, including after a model change. Another conversation using
 the same generation service shows that it is busy and cannot stop its work.
 
-Models, Agents and Tasks appear under **Manage** above the session sections.
+New, Models, Agents and Tasks form one sidebar group above the session sections.
 They provide management views in the main pane while the sidebar stays in place.
 App-wide server, engine, tool and appearance preferences
-stay in **Settings**. Models keeps one title and a native section picker over a stable content surface. Agents and Tasks use opaque secondary lists. Custom session groups use plain headings with collapse controls; their context menus provide New Chat in Group, Rename and Delete.
+stay in **Settings**. Models keeps one title, with glass section pills in the window toolbar and consistent native lists across its sections. Agents and Tasks use opaque secondary lists. Custom session groups use plain headings with collapse controls; their context menus provide New Chat in Group, Rename and Delete.
 
 Open terminal sessions from the app's menu-bar **Code** control. Terminal sessions
 appear alongside conversations and remain running when you switch workspaces.
@@ -72,18 +75,19 @@ The composer's **Tools & MCP** popover provides separate Tools and MCP switches 
 **Plain Chat** disables built-in tools, MCP and attached-folder search for that conversation, including conversations with saved agents. Turning it off uses the conversation's saved choices or current Settings defaults again. Thinking remains a separate preference: when an agent fixes its value, the popover names that agent and links to its settings. Apple's on-device model has no thinking or MCP support and limits built-in tools to browsing and web search.
 
 The main window uses a native title bar. Conversations show their title and a
-**Conversation actions** menu with Rename and Branch Chat. Branch Chat uses
-the latest completed conversation boundary and is unavailable during a turn.
+direct Rename, Move to Group and Delete actions. Delete asks for confirmation.
+The More menu offers Branch Chat at the latest completed conversation boundary
+when no turn is running.
 The sidebar and detail pane share the window toolbar.
 
 Thinking and tool headers use quiet gray text that darkens on hover or press.
-A chevron beside the label shows whether the details are expanded. The header
-stays outside the details frame, whose content scrolls within a 240-point height
-limit. Detail text follows the conversation's **Text Size** setting, including
-in the larger Reader; code and tool identifiers can retain a monospaced face.
-**Open in Reader** provides the full text, Copy and Close; Escape closes it.
-Reader and background-process Stop buttons act independently of the header.
-Plans keep approval actions outside the scrolling content.
+A chevron beside the label expands details within one card. The card's header
+holds Copy and Enlarge controls. Details scroll within a 240-point height limit;
+Enlarge gives the same card more room within the window, and Reduce restores
+its compact height. Detail text follows the conversation's **Text Size** setting.
+Code and tool identifiers can retain a monospaced face. Thinking uses native
+selectable text with viewport layout. Scrollbars follow the system preference.
+Process Stop and plan approval controls keep their own actions.
 
 The conversation and composer share a centered reading column. Custom message
 surfaces use shared corner and spacing values; native controls keep their

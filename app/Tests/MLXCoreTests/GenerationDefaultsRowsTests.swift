@@ -43,6 +43,48 @@ final class GenerationDefaultsRowsTests: XCTestCase {
     }
 
     @MainActor
+    func testRenderedParameterRowsSeparateOnlyVisibleNeighbors() async throws {
+        let fields: [GenerationField] = [.temperature, .topP, .topK]
+        for (query, expectedLines) in [("Model default", 2), ("temperature", 0)] {
+            let hosting = NSHostingView(rootView:
+                GenerationDefaultsRows(profile: .constant(.init()), inheritance: "Model default", fields: fields)
+                    .environment(\.settingsSearchQuery, query)
+                    .padding(12).frame(width: 640, height: 400, alignment: .top)
+                    .background(Color.white).environment(\.colorScheme, .light))
+            hosting.appearance = NSAppearance(named: .aqua)
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 400),
+                                  styleMask: [.borderless], backing: .buffered, defer: false)
+            window.contentView = hosting
+            defer { window.contentView = nil }
+            for _ in 0..<20 {
+                hosting.layoutSubtreeIfNeeded()
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            let bitmap = try XCTUnwrap(hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds))
+            hosting.cacheDisplay(in: hosting.bounds, to: bitmap)
+            let inset = Int(CGFloat(bitmap.pixelsWide) * 16 / 640)
+            var lines = 0
+            var previousWasLine = false
+            for y in 0..<bitmap.pixelsHigh {
+                var samples = 0
+                var shaded = 0
+                for x in stride(from: inset, to: bitmap.pixelsWide - inset, by: 4) {
+                    let color = try XCTUnwrap(bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB))
+                    samples += 1
+                    if min(color.redComponent, color.greenComponent, color.blueComponent) < 0.95 {
+                        shaded += 1
+                    }
+                }
+                let isLine = Double(shaded) / Double(max(samples, 1)) > 0.9
+                if isLine && !previousWasLine { lines += 1 }
+                previousWasLine = isLine
+            }
+            XCTAssertEqual(lines, expectedLines,
+                "Parameter separators must span the row and appear only between visible settings.")
+        }
+    }
+
+    @MainActor
     func testSharedRowsRenderAtModelSheetWidth() throws {
         var profile = GenerationDefaults()
         profile.setMode(.enabled, field: .temperature)

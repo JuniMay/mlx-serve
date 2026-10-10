@@ -8,6 +8,7 @@ struct PlanCardView: View {
     let currentStepIndex: Int?
     let onApprove: () -> Void
     let onReject: () -> Void
+    @State private var isEnlarged = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppLayout.compactSpacing) {
@@ -18,14 +19,12 @@ struct PlanCardView: View {
                     .font(.app(.subheadline).weight(.semibold))
                 Spacer()
                 statusBadge
-                TranscriptReaderButton(title: "Plan", textToCopy: planText) {
-                    steps
-                }
+                TranscriptDetailActions(textToCopy: planText, isEnlarged: $isEnlarged)
             }
 
             Divider()
 
-            TranscriptDetailViewport {
+            TranscriptDetailViewport(maximumHeight: TranscriptDetailSizing.maximumHeight(enlarged: isEnlarged)) {
                 steps
             }
 
@@ -149,12 +148,14 @@ struct ToolResultBlockView: View {
     let step: PlanStep
     let result: StepResult
     @State private var isExpanded = false
+    @State private var isEnlarged = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppLayout.compactSpacing) {
+        TranscriptDetailPanel(isExpanded: isExpanded) {
             HStack(spacing: AppLayout.compactSpacing) {
                 TranscriptDisclosureButton(isExpanded: isExpanded) {
-                    withAnimation(.easeInOut(duration: 0.15)) { isExpanded.toggle() }
+                    isExpanded.toggle()
+                    if !isExpanded { isEnlarged = false }
                 } label: {
                     Image(systemName: step.tool.icon)
                     Text(verbatim: step.description).lineLimit(1)
@@ -166,15 +167,12 @@ struct ToolResultBlockView: View {
                     .foregroundStyle(result.status == .success ? .green : .red)
                     .font(.app(.caption))
                 if isExpanded {
-                    TranscriptReaderButton(title: "Tool result", textToCopy: resultText) {
-                        resultContent
-                    }
+                    TranscriptDetailActions(textToCopy: resultText, isEnlarged: $isEnlarged)
                 }
             }
-            if isExpanded {
-                TranscriptDetailSurface {
-                    TranscriptDetailViewport { resultContent }
-                }
+        } content: {
+            TranscriptDetailViewport(maximumHeight: TranscriptDetailSizing.maximumHeight(enlarged: isEnlarged)) {
+                resultContent.padding(AppLayout.contentInset)
             }
         }
     }
