@@ -304,9 +304,7 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
         var enableThinking: Bool
         var voiceStyle: Bool
         var workingDirectory: String?
-        /// Per-session document index (mini RAG). Non-nil while the user has a
-        /// folder attached — advertises the searchDocuments tool and, with both
-        /// Agent and MCP off, routes the turn through the loop in docs-only mode.
+        /// Folder search requires Tools and an attached document index.
         var documentIndex: DocumentIndex? = nil
         // MARK: The agent (persona) driving this turn
 
@@ -346,16 +344,18 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
         static func from(_ r: ResolvedAgentSettings,
                          voiceStyle: Bool = false,
                          documentIndex: DocumentIndex? = nil) -> TurnConfig {
-            TurnConfig(
-                agentMode: r.toolsEnabled,
+            let index = r.toolsEnabled && r.tools.contains(.searchDocuments) ? documentIndex : nil
+            let tools = index == nil ? r.tools.subtracting([.searchDocuments]) : r.tools
+            return TurnConfig(
+                agentMode: r.toolsEnabled && !tools.isEmpty,
                 mcpMode: r.mcpEnabled,
                 enableThinking: r.thinkingEnabled,
                 voiceStyle: voiceStyle,
                 workingDirectory: r.workingDirectory,
-                documentIndex: documentIndex,
+                documentIndex: index,
                 agentId: r.agentId,
                 systemPromptPrefix: r.systemPromptPrefix,
-                tools: r.tools,
+                tools: tools,
                 autoApprove: r.autoApprove,
                 temperature: r.temperatureOverride,
                 maxTokens: r.maxTokensOverride,
@@ -409,19 +409,15 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
         /// The tools to ADVERTISE: none unless the Tools toggle is on.
         var advertisedTools: Set<AgentToolKind> { agentMode ? tools : [] }
 
-        /// The tools this turn may RUN. With Tools off the loop still runs for
-        /// MCP or an attached folder, and a model re-calls built-ins it saw in
-        /// history — so only the document search survives.
-        var dispatchTools: Set<AgentToolKind> {
-            agentMode ? tools : tools.intersection([.searchDocuments])
-        }
+        /// Dispatch enforces the same Tools switch as the advertised definitions.
+        var dispatchTools: Set<AgentToolKind> { advertisedTools }
 
-        /// This turn with the Tools switch off; MCP and an attached folder keep
-        /// their say.
+        /// Revoking Tools also withdraws folder search; MCP remains independent.
         func revokingTools(_ revoked: Bool) -> TurnConfig {
             guard revoked else { return self }
             var c = self
             c.agentMode = false
+            c.documentIndex = nil
             return c
         }
 
@@ -636,7 +632,7 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
             ActiveAgentVoice.set(config.voice)
         }
 
-        if config.agentMode || config.mcpMode || config.documentIndex != nil {
+        if config.agentMode || config.mcpMode {
             runAgentTurn(sessionId: sessionId, text: text, images: images, videos: videos, audio: audio,
                          config: config, token: token, approval: approval)
         } else {
@@ -996,8 +992,7 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
                 try Task.checkCancellation()
                 guard ledger.owns(session: sessionId, token: token) else { throw CancellationError() }
             }
-            // Tools switched off mid-turn withdraw the OFFER; the system prompt
-            // stays the turn's, so it never claims a folder that is not there.
+            // Re-read revocation before advertising the next round's tools.
             let config = turnConfig.revokingTools(ledger.toolsRevoked(session: sessionId))
                 .revokingMCP(ledger.mcpRevoked(session: sessionId))
                 .revokingAllTools(ledger.allToolsRevoked(session: sessionId))
@@ -1071,11 +1066,7 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
                 // MCP-only mode: minimal system prompt focused on MCP tool use, no shell/file rules.
                 systemPrompt = AgentPrompt.mcpOnlySystemPrompt(toolListing: mcpListing)
             } else {
-                // Docs-only mode: plain chat with a document folder attached.
-                let index = config.documentIndex
-                systemPrompt = AgentPrompt.docsOnlySystemPrompt(
-                    folderName: index?.folderName ?? "documents",
-                    fileCount: indexedFileCount(index))
+                systemPrompt = ""
             }
             // A skill invoked by NAME (`/music3 …`) works in every mode: the
             // user asked for it explicitly, so it does not wait for the agent
@@ -1083,9 +1074,7 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
             if !turnConfig.agentMode {
                 agentVolatileTail += AgentPrompt.skillManager.invokedSkill(for: userMsg)
             }
-            // Attached-docs section for the modes whose base prompt doesn't
-            // already explain the searchDocuments tool.
-            if let index = config.documentIndex, turnConfig.agentMode || turnConfig.mcpMode {
+            if let index = config.documentIndex {
                 systemPrompt += AgentPrompt.attachedDocumentsSection(
                     folderName: index.folderName, fileCount: indexedFileCount(index))
             }
@@ -1137,8 +1126,8 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
             let combinedToolsJSON = Self.combinedToolsJSON(
                 tools: config.advertisedTools,
                 mcpToolsJSON: mcpToolsJSON,
-                // The docs tool normally rides along with an attached folder;
-                // on-device there is no room for a third definition.
+                // The resolved index requires Tools access; the on-device model
+                // excludes document search from its allowed set.
                 docsToolJSON: config.documentIndex != nil && !appState.useAppleModel
                     ? AgentPrompt.searchDocumentsToolJSON : nil
             )
@@ -1756,7 +1745,7 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
     // MARK: - Tool JSON + multimodal content (relocated from ChatDetailView)
 
     /// Build the JSON tools array sent to the model. Concatenates agent tools (when agent mode is on),
-    /// MCP tools (when MCP mode is on), and the searchDocuments tool (when a folder is attached).
+    /// MCP tools (when MCP mode is on), and folder search (when Tools and its index are available).
     /// Returns nil when no tools should be advertised.
     /// `nonisolated` so it stays a pure helper callable off the main actor (unit tests).
     /// Assemble the system prompt so cacheable content stays first and volatile

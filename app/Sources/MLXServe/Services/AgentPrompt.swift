@@ -350,23 +350,6 @@ enum AgentPrompt {
     ]
     """#
 
-    /// Minimal system prompt for docs-only mode (plain chat + attached folder —
-    /// Agent and MCP toggles both off). Mirrors `mcpOnlySystemPrompt`: just
-    /// enough instruction to drive the one available tool well.
-    static func docsOnlySystemPrompt(folderName: String, fileCount: Int) -> String {
-        """
-        You are a helpful assistant. The user attached a folder of documents named "\(folderName)" (\(fileCount) files: chat transcripts, notes, PDFs, etc.). You cannot read whole files — your only access is the searchDocuments tool, which returns the passages most relevant to a query.
-
-        For any question about the documents:
-        1. Call searchDocuments with a focused query BEFORE answering. Never answer from memory alone.
-        2. If results look incomplete, search again with different wording (names, dates, synonyms) — up to a few attempts.
-        3. Answer from the retrieved excerpts and mention the source filenames you used.
-        4. If nothing relevant comes back, say the documents don't seem to cover it.
-
-        Questions unrelated to the documents can be answered normally without the tool.
-        """
-    }
-
     /// Section appended to the agent/MCP system prompt while a folder is attached.
     static func attachedDocumentsSection(folderName: String, fileCount: Int) -> String {
         """

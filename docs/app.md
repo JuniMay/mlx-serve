@@ -53,7 +53,7 @@ the same generation service shows that it is busy and cannot stop its work.
 Models, Agents and Tasks appear under **Manage** above the session sections.
 They provide management views in the main pane while the sidebar stays in place.
 App-wide server, engine, tool and appearance preferences
-stay in **Settings**. The model browser is the place to find and download models.
+stay in **Settings**. Models keeps one title and a native section picker over a stable content surface. Agents and Tasks use opaque secondary lists. Custom session groups use plain headings with collapse controls; their context menus provide New Chat in Group, Rename and Delete.
 
 Open terminal sessions from the app's menu-bar **Code** control. Terminal sessions
 appear alongside conversations and remain running when you switch workspaces.
@@ -67,7 +67,7 @@ Click the model control in the composer to open thinking settings. The first pag
 
 **Settings ▸ Tools & MCP** controls the built-in tool and MCP defaults for new conversations. Expand the tool groups to choose which built-in tools are available, and use **Configure…** to manage MCP servers. Saved agents retain their own tool capabilities and MCP choice; individual tool exclusions can further restrict their available tools, but cannot grant a capability the agent excludes. Scheduled tasks keep their own tool settings, and tool approval rules still apply.
 
-The composer's **Tools & MCP** popover provides separate Tools and MCP switches for the conversation. These switches override Settings defaults within the saved agent's capabilities. Turning a switch off applies to upcoming tool calls. **Use Settings Defaults** clears these overrides while preserving the Plain Chat choice.
+The composer's **Tools & MCP** popover provides separate Tools and MCP switches for the conversation. These switches override Settings defaults within the saved agent's capabilities. Tools includes attached-folder search. Turning a switch off applies to upcoming tool calls, including calls waiting for approval. **Reset Tool Choices** appears when saved overrides exist and restores the choices from Tools & MCP Settings, or the saved agent, while preserving Plain Chat.
 
 **Plain Chat** disables built-in tools, MCP and attached-folder search for that conversation, including conversations with saved agents. Turning it off uses the conversation's saved choices or current Settings defaults again. Thinking remains a separate preference: when an agent fixes its value, the popover names that agent and links to its settings. Apple's on-device model has no thinking or MCP support and limits built-in tools to browsing and web search.
 

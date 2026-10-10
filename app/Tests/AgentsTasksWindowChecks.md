@@ -10,6 +10,8 @@ preview a voice, change saved settings, or delete any data during layout checks.
    Open Agents and select a built-in starter. Check that both list sections,
    selection, names, availability text and the chat buttons remain readable.
    Move between starter rows with the arrow keys without activating a chat.
+   The secondary list must use an opaque content background with a neutral
+   selection. Content or colors behind the window must not show through it.
 2. Open and dismiss Create New Agent. Verify that starter types and Blank agent
    remain available without creating an agent.
 3. Check the name, description, prompt and identity sections. Built-in fields

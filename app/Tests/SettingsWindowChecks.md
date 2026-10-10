@@ -56,7 +56,9 @@ appearance when those configurations are available.
 4. Repeat the alignment check in Memory and LAN Sharing with sliders and switches.
    Compare memory-reserve in Memory and KV quantization in Cache: their
    visible right edges must align despite differently sized selected labels.
-   Check the same menu alignment in General, Server, Engines and Appearance. Voice menus in the leading custom groups should stay left aligned.
+   Check the same menu alignment in General, Server, Engines, Appearance, and
+   Voice. Voice engine, system voice, Kokoro, and clone-clip controls must use the
+   trailing column, with descriptions under their names in the label column.
    In Appearance, verify that Color Mode shows every segment in full and keeps
    its right edge clear of the card's rounded corner.
 5. Narrow the window until a long option name wraps. Verify that its information
@@ -84,7 +86,8 @@ appearance when those configurations are available.
    conversation cache, SSD conversation cache, and applicable GGUF cache settings.
    Engines must use the same card style without a second frame inside each card.
    Search for a setting in one card; empty cards and headings must disappear.
-   Performance groups Neural Engine settings under hardware acceleration.
+   Performance has separate native cards for execution controls and Neural Engine
+   acceleration. Each card has its own heading and description.
 6. Open Generation Defaults. Verify that saved per-model thinking preferences can be
    read and that reset controls are clearly associated with their model. Use
    unit tests or an isolated fixture profile to change them.
@@ -93,8 +96,10 @@ appearance when those configurations are available.
 
 ## Captions, help, and disclosure motion
 
-1. Compare Server, Cache, Performance, and Engines. Each option has one short
-   caption in its label column. Its full explanation opens from the information
+1. Compare Model Folders, Server, Cache, Performance, Engines, and Voice. Each option
+   has one short caption in its label column. In Model Folders, long paths and
+   Choose, Reset, and Clear controls remain in the trailing column; the caption
+   must wrap in the label column instead of crossing beneath those controls. Its full explanation opens from the information
    button beside the name. Dynamic cautions and resource costs stay readable.
 2. Open Disable vision help. It must describe model-dependent memory savings and
    image-input support without promising a fixed memory reduction.
@@ -109,3 +114,52 @@ Design references: [Offering help](https://developer.apple.com/design/human-inte
 [Boxes](https://developer.apple.com/design/human-interface-guidelines/boxes),
 [Disclosure controls](https://developer.apple.com/design/human-interface-guidelines/disclosure-controls),
 and [Motion](https://developer.apple.com/design/human-interface-guidelines/motion).
+
+## Generation parameter controls
+
+1. Open Generation Defaults. Verify that each parameter has one trailing control
+   column. Its named mode menu comes before the numeric value, with the slider
+   below both. The mode menu must not float in a third column beside the slider.
+2. Open Temperature's mode menu. It must name Model default, Custom value, and
+   Override client value. Dismiss it without changing the saved value.
+   In an isolated profile, select each choice and verify that the numeric field
+   and slider enable for Custom value and Override client value, and disable
+   for the inherited source. Reopen the menu to verify the selected choice.
+   Changing Custom value to Override client value must preserve the value.
+3. Open the per-model generation settings and an editable agent's sampling
+   settings. Their controls must use the same layout. The inherited choice must
+   name its source. Agent settings must not offer Override client value.
+4. Compare inherited, custom, forced, and mixed states in an isolated fixture.
+   The controls must keep stable widths, reserve the numeric value's space, and
+   show the slider's endpoints directly below its track. At the 620-point model
+   sheet width, every label and control must remain inside the sheet.
+
+## Voice controls
+
+1. Inspect Voice engine, System voice, Kokoro voice, and Voice clone clip in an
+   isolated settings profile. Their explanations must stay beneath their names
+   and their controls must use the shared trailing column.
+2. With local fixture download states, inspect Kokoro's Download, progress with
+   Cancel, and error with Retry controls at the minimum settings width. All
+   controls and status text must remain inside the trailing column. Use fixture
+   data; do not download a model to check layout.
+3. Verify that a long clip name truncates without moving Choose file, Record,
+   and Remove outside the column. Leave the user's clip and voice unchanged.
+
+## Compound row accessibility
+
+1. Inspect Model Folders with VoiceOver or the native accessibility tree. The
+   folder paths must expose their text. Choose default model folder, Choose
+   additional model folder, Reset, and Clear must retain distinct button names.
+2. Inspect Kokoro and Voice clone clip in an isolated profile. The voice picker,
+   Play voice sample, Choose voice clip, Record, and Remove voice clip controls
+   must each expose their own name. The row title must not replace child names.
+3. Compare a simple switch or menu row. Its control must still expose the option
+   name. Inspect labels without changing saved values or starting playback.
+4. Inspect saved model-thinking rows. The effort picker and reset action must
+   identify their action and model separately; Reset must not expose only a model ID.
+5. Generation Defaults must show one section introduction explaining client
+   defaults, model-rule precedence, and application to the next request.
+6. In Voice, Wake phrase appears once on the left. Choose a wake phrase must
+   appear only as an empty field's placeholder. The field keeps its Wake phrase
+   accessibility name and preserves any saved phrase.

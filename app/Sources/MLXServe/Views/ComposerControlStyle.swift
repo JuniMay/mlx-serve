@@ -14,6 +14,7 @@ struct ComposerControlSymbol: View {
 enum ComposerControlMetrics {
     static let height: CGFloat = 30
     static let horizontalPadding: CGFloat = 12
+    static let spacing: CGFloat = 10
 }
 
 struct ComposerControlsRow<Leading: View, Model: View, Actions: View>: View {
@@ -22,23 +23,23 @@ struct ComposerControlsRow<Leading: View, Model: View, Actions: View>: View {
     @ViewBuilder var actions: Actions
 
     var body: some View {
-        GlassEffectContainer(spacing: 8) {
+        GlassEffectContainer(spacing: 4) {
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 6) {
+                HStack(spacing: ComposerControlMetrics.spacing) {
                     leading
-                    Spacer(minLength: 8)
+                    Spacer(minLength: ComposerControlMetrics.spacing)
                     model
                     actions
                 }
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: ComposerControlMetrics.spacing) {
                     model
                     ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 6) {
+                        HStack(spacing: ComposerControlMetrics.spacing) {
                             leading
-                            Spacer(minLength: 8)
+                            Spacer(minLength: ComposerControlMetrics.spacing)
                             actions
                         }
-                        VStack(alignment: .leading, spacing: 8) {
+                        VStack(alignment: .leading, spacing: ComposerControlMetrics.spacing) {
                             leading
                             HStack {
                                 Spacer(minLength: 0)
@@ -61,7 +62,7 @@ struct ComposerActionButton: View {
         Button(action: action) {
             ComposerControlSymbol(name: isRunning ? "stop.fill" : "arrow.up")
         }
-        .buttonStyle(.glassProminent)
+        .buttonStyle(.glass)
         .buttonBorderShape(.circle)
         .controlSize(.regular)
         .accessibilityLabel(L10n.text(label))

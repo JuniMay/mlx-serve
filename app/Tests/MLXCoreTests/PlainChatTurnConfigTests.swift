@@ -22,9 +22,11 @@ final class PlainChatTurnConfigTests: XCTestCase {
         XCTAssertTrue(config.enableThinking)
     }
 
-    func testNormalConversationKeepsExplicitlyAttachedDocuments() {
+    func testToolsEnabledConversationKeepsExplicitlyAttachedDocuments() {
         let documentIndex = index()
-        let config = ChatTurnEngine.TurnConfig.from(ResolvedAgentSettings(), documentIndex: documentIndex)
+        let config = ChatTurnEngine.TurnConfig.from(
+            ResolvedAgentSettings(tools: [.searchDocuments], toolsEnabled: true),
+            documentIndex: documentIndex)
         XCTAssertTrue(config.documentIndex === documentIndex)
     }
 

@@ -10,5 +10,6 @@ enum AppLayout {
     static let contentInset: CGFloat = 16
     static let surfaceRadius: CGFloat = 16
     static let textEditorRadius: CGFloat = 6
+    static let settingsControlWidth: CGFloat = 280
     static let generationColumnWidth: CGFloat = 1000
 }

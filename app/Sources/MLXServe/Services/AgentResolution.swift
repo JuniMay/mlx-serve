@@ -96,21 +96,12 @@ enum AgentResolution {
     /// test.
     /// Apply the surface's per-chat switches to an allowed set.
     ///
-    /// Subtraction only — a chat tab must not be able to grant a tool the agent
-    /// forbids. `searchDocuments` is exempt because its gate is the attached
-    /// folder, not a toggle (it is also absent from the menu, so nothing can ask
-    /// for it to be removed).
+    /// Per-tool switches subtract capabilities. Folder search has no individual
+    /// switch; TurnConfig requires Tools access and an attached folder.
     private static func applying(_ disabled: Set<AgentToolKind>,
                                  to allowed: Set<AgentToolKind>) -> Set<AgentToolKind> {
         guard !disabled.isEmpty else { return allowed }
         return allowed.subtracting(disabled.subtracting([.searchDocuments]))
-    }
-
-    /// The loop only runs if it has a real tool left to offer. Advertising
-    /// nothing while still looping is a dead offer — the turn is plain chat.
-    /// `searchDocuments` doesn't count: it is folder-gated, not a capability.
-    private static func loopRuns(_ enabled: Bool, tools: Set<AgentToolKind>) -> Bool {
-        enabled && !tools.subtracting([.searchDocuments]).isEmpty
     }
 
     nonisolated static func resolve(agent: Agent?, defaults: AppDefaultsSnapshot) -> ResolvedAgentSettings {
@@ -132,7 +123,7 @@ enum AgentResolution {
     nonisolated static func clampedForApple(_ s: ResolvedAgentSettings) -> ResolvedAgentSettings {
         var out = s
         out.tools = s.tools.intersection(AppleFoundationChat.allowedTools)
-        out.toolsEnabled = loopRuns(s.toolsEnabled, tools: out.tools)
+        out.toolsEnabled = s.toolsEnabled && !out.tools.isEmpty
         out.thinkingEnabled = false
         out.mcpEnabled = false
         return out
@@ -145,9 +136,7 @@ enum AgentResolution {
                 agentId: nil,
                 systemPromptPrefix: "",
                 tools: tools,
-                toolsEnabled: defaults.disabledTools.isEmpty
-                    ? defaults.toolsEnabled
-                    : loopRuns(defaults.toolsEnabled, tools: tools),
+                toolsEnabled: defaults.toolsEnabled,
                 mcpEnabled: defaults.mcpEnabled,
                 thinkingEnabled: defaults.thinkingEnabled,
                 autoApprove: defaults.autoApprove,
@@ -166,20 +155,16 @@ enum AgentResolution {
         // (`AgentWriter.brevityLine`), so it's visible and editable rather than a
         // hidden setting.
         let persona = agent.systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        // searchDocuments rides along unconditionally: its real gate is whether a
-        // document folder is attached to the turn, which is stronger than any
-        // capability toggle (docs-only mode has Tools off and still needs it).
-        // The chat's own switches then subtract from what the agent allowed —
-        // they can take away, never add.
-        let capabilityTools = applying(defaults.disabledTools, to: agent.capabilities.resolvedTools())
+        // Folder search requires the resolved Tools switch and an attached index.
+        // Conversation switches can subtract from the agent's capabilities.
+        let agentTools = agent.capabilities.resolvedTools()
+        let capabilityTools = applying(defaults.disabledTools, to: agentTools)
 
         return ResolvedAgentSettings(
             agentId: agent.id,
             systemPromptPrefix: persona.isEmpty ? "" : persona + "\n\n",
             tools: capabilityTools.union([.searchDocuments]),
-            // The loop runs whenever the agent has any tool at all — an
-            // advertised tool the loop never executes would be a dead offer.
-            toolsEnabled: !capabilityTools.isEmpty,
+            toolsEnabled: !agentTools.isEmpty,
             mcpEnabled: agent.capabilities.mcp,
             thinkingEnabled: agent.enableThinking ?? defaults.thinkingEnabled,
             autoApprove: agent.autoApproveTools ?? defaults.autoApprove,

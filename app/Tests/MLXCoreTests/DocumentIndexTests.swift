@@ -256,7 +256,7 @@ final class DocumentIndexTests: XCTestCase {
     }
 
     func testCombinedToolsJSONWithDocs() throws {
-        // Docs only (plain chat + attached folder): just the search tool.
+        // A document-only allow-list advertises just the search tool.
         let docsOnly = ChatTurnEngine.combinedToolsJSON(
             tools: [], mcpToolsJSON: nil, docsToolJSON: AgentPrompt.searchDocumentsToolJSON)
         let docsArr = try XCTUnwrap(try JSONSerialization.jsonObject(

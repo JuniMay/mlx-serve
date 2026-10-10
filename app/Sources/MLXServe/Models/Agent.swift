@@ -283,8 +283,8 @@ struct AgentCapabilities: Codable, Equatable, Sendable {
     static let webTools: Set<AgentToolKind> = [.browse, .webSearch]
 
     /// Coarse flags → concrete tools, or the Advanced set verbatim.
-    /// `searchDocuments` is deliberately absent: its gate is whether a document
-    /// folder is attached, which is stronger than any capability toggle.
+    /// Folder search is added during resolution and requires Tools access plus
+    /// an attached folder when the turn starts.
     func resolvedTools() -> Set<AgentToolKind> {
         if let advancedTools { return advancedTools }
         var out: Set<AgentToolKind> = []

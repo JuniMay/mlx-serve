@@ -136,7 +136,10 @@ struct AgentListPane: View {
                 }
             }
         }
-        .listStyle(.sidebar)
+        .listStyle(.inset)
+        .scrollContentBackground(.hidden)
+        .background(Color(nsColor: .textBackgroundColor))
+        .tint(.gray)
     }
 
     /// An empty column has two very different causes; this one names the file the

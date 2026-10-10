@@ -30,7 +30,7 @@ final class ChatToolPreferencesTests: XCTestCase {
         let resolved = AgentResolution.resolve(agent: agent, defaults: .init())
         let toolsOff = ChatToolPreferences(toolsEnabled: false).applying(to: resolved)
         XCTAssertFalse(toolsOff.toolsEnabled)
-        XCTAssertEqual(toolsOff.tools, [.searchDocuments])
+        XCTAssertTrue(toolsOff.tools.isEmpty)
         XCTAssertTrue(toolsOff.mcpEnabled)
         XCTAssertTrue(toolsOff.thinkingEnabled)
         XCTAssertEqual(toolsOff.systemPromptPrefix, resolved.systemPromptPrefix)

@@ -21,7 +21,8 @@ send anything in personal conversations during layout checks.
    New opens one empty interaction directly. Manage contains Models, Agents
    and Tasks above every session section, including agent conversations and
    custom groups. Sessions has no launcher button or menu. A custom group's
-   plus button creates a chat directly in that group.
+   heading uses the same plain text style as Sessions. Its context menu creates
+   a chat in the group; it has no competing folder icon or inline plus button.
    Session selection uses a neutral highlight, including while the sidebar
    has keyboard focus. Move between sessions with the keyboard and verify
    that focus and selection remain visible.
@@ -48,5 +49,5 @@ unchanged. `ChatWindowPresentationTests` covers title and eligibility rules;
    Verify that the management rows are visible without scrolling past sessions.
 3. Open the app's menu-bar Code control. Verify that the existing host and
    sandbox terminal choices remain available; do not start a terminal.
-4. In the fixture profile, click a custom group's plus button. Verify that it
-   creates one empty chat in the group directly, with no launcher menu.
+4. In the fixture profile, open a custom group's context menu and choose New
+   Chat in Group. Verify that it creates one empty chat within the group.

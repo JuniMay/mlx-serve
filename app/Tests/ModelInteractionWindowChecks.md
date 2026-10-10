@@ -38,6 +38,18 @@ Use an isolated fixture profile for model selections and draft changes.
 setup gate. `InteractionSelectionTests` checks in-page model changes. Media draft
 tests cover model changes without inference or disk output.
 
+## Models section navigation
+
+1. Open Models and visit Recommended, Discover, My Models, Downloads and Media.
+   The window title must remain Models. The section control must identify the
+   selected section once, without repeating it as a second page title.
+2. Check that section navigation uses a neutral native control. It must not add
+   a glass capsule, a colored outline or a second frame around the content.
+   Switching sections must preserve the main sidebar and the content margins.
+3. Use the keyboard to choose sections. Narrow the window and verify that all
+   five sections remain reachable through the compact menu without clipping.
+   Download counts and activity must remain visible without changing selection.
+
 ## My Models action alignment
 
 1. Open My Models with chat and media models visible. Compare rows showing Use,

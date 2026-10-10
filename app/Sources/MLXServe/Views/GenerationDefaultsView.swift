@@ -16,15 +16,17 @@ struct GenerationDefaultsRows: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("All parameters").font(.app(.body))
-                            Text(L10n.format("Off: %@ · On: custom value", L10n.text(inheritance))
-                                 + (allowsForce ? L10n.text(" · Force: ignore client override") : ""))
+                            Text(allowsForce
+                                 ? "Choose a default value or override values sent by clients."
+                                 : "Choose inherited or custom values for this agent.")
                                 .font(.app(.caption2)).foregroundStyle(.secondary)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        GenerationModeSwitch(value: profile.mode(fields: fields), allowsForce: allowsForce,
+                        GenerationModePicker(value: profile.mode(fields: fields), allowsForce: allowsForce,
                                              inheritance: inheritance, title: "All parameters") {
                             profile.setMode($0, fields: fields, inherited: inherited)
                         }
+                        .frame(width: AppLayout.settingsControlWidth, alignment: .leading)
                     }
                     Divider()
                 }
@@ -72,17 +74,24 @@ struct GenerationParameterRow: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            VStack(alignment: .trailing, spacing: 5) {
-                if mode == .inherited && !hasInheritedValue {
-                    Text(L10n.text(inheritance)).font(.app(.caption)).foregroundStyle(.secondary)
-                        .frame(height: 22)
-                } else {
-                    valueControl
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .center, spacing: 12) {
+                    GenerationModePicker(value: mode, allowsForce: allowsForce,
+                        inheritance: inheritance, title: field.title, onChange: setMode)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Group {
+                        if mode == .inherited && !hasInheritedValue {
+                            Text("—").foregroundStyle(.secondary)
+                                .help(L10n.text(inheritance))
+                        } else {
+                            valueControl.disabled(mode == .inherited)
+                        }
+                    }
+                    .frame(width: 76, alignment: .trailing)
                 }
                 if field.showsSlider {
-                    // A Form reserves a label column for an unlabeled Slider; hide it so the
-                    // track spans the column its end labels sit under.
                     slider.labelsHidden().accessibilityLabel(L10n.text(field.title))
+                        .disabled(mode == .inherited)
                     if let guidance = field.guidance {
                         HStack {
                             Text(L10n.text(guidance.low))
@@ -93,10 +102,7 @@ struct GenerationParameterRow: View {
                     }
                 }
             }
-            .frame(width: 148)
-            .disabled(mode == .inherited)
-            GenerationModeSwitch(value: mode, allowsForce: allowsForce,
-                                 inheritance: inheritance, title: field.title, onChange: setMode)
+            .frame(width: AppLayout.settingsControlWidth)
         }
         .padding(.vertical, 7)
     }
@@ -150,84 +156,31 @@ struct GenerationParameterRow: View {
     }
 }
 
-struct GenerationModeSwitch: View {
+struct GenerationModePicker: View {
     let value: GenerationDefaults.Mode?
     let allowsForce: Bool
     let inheritance: String
     let title: String
     let onChange: (GenerationDefaults.Mode) -> Void
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private var stateLabel: String {
-        switch value {
-        case .inherited: "Off"
-        case .enabled: "On"
-        case .forced: "Force"
-        case nil: "Mixed"
-        }
-    }
-
-    private var ballColor: Color {
-        switch value {
-        case .inherited, nil: .gray
-        case .enabled: .accentColor
-        case .forced: .orange
-        }
-    }
-
-    private var modes: [GenerationDefaults.Mode] {
-        allowsForce ? [.inherited, .enabled, .forced] : [.inherited, .enabled]
-    }
 
     var body: some View {
-        VStack(spacing: 3) {
-            HStack(spacing: 0) {
-                ForEach(modes, id: \.rawValue) { mode in
-                    Button { onChange(mode) } label: {
-                        Circle()
-                            .fill(Color.secondary.opacity(value == mode ? 0 : 0.35))
-                            .frame(width: 6, height: 6)
-                            .frame(width: 20, height: 28)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help(help(mode))
-                    .accessibilityLabel(L10n.text(title) + ": " + help(mode))
-                    .accessibilityValue(value == mode ? L10n.text("Selected") : "")
-                }
+        Picker(L10n.format("%@ value source", L10n.text(title)), selection: Binding(
+            get: { value },
+            set: { if let mode = $0 { onChange(mode) } })) {
+            if value == nil {
+                Text("Mixed").tag(nil as GenerationDefaults.Mode?).disabled(true)
             }
-            .background {
-                Capsule().fill(Color.secondary.opacity(0.2)).frame(height: 2).padding(.horizontal, 10)
+            Text(L10n.text(inheritance)).tag(GenerationDefaults.Mode?.some(.inherited))
+            Text("Custom value").tag(GenerationDefaults.Mode?.some(.enabled))
+            if allowsForce {
+                Text("Override client value").tag(GenerationDefaults.Mode?.some(.forced))
             }
-            .overlay(alignment: .leading) {
-                Circle().fill(ballColor).frame(width: 14, height: 14)
-                    .offset(x: 3 + CGFloat(value?.rawValue ?? 0) * 20)
-                    .opacity(value == nil ? 0 : 1)
-                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.16), value: value)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-            }
-            .padding(.horizontal, 3)
-            .background(Color.secondary.opacity(0.1), in: Capsule())
-            .overlay(Capsule().strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1))
-            Text(L10n.text(stateLabel)).font(.app(.caption2))
-                .foregroundStyle(value == .forced ? Color.orange : Color.secondary)
-                .frame(height: 14)
-                .frame(maxWidth: .infinity)
-                .accessibilityHidden(true)
         }
-        .frame(width: CGFloat(modes.count * 20 + 6))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(L10n.text(title))
-        .accessibilityValue(L10n.text(stateLabel))
-    }
-
-    private func help(_ mode: GenerationDefaults.Mode) -> String {
-        switch mode {
-        case .inherited: L10n.format("Off: %@", L10n.text(inheritance))
-        case .enabled: L10n.text("On: use custom value")
-        case .forced: L10n.text("Force: ignore client override")
-        }
+        .labelsHidden()
+        .pickerStyle(.menu)
+        .help(allowsForce
+              ? "Inherit the default, use a custom value when a client omits it, or override the client's value."
+              : "Inherit the server default or use a custom value for this agent.")
     }
 }
 
@@ -243,10 +196,6 @@ struct GlobalGenerationDefaultsView: View {
         Group {
             if search.hasContent {
                 VStack(alignment: .leading, spacing: 8) {
-                    if search.showsBulkControls {
-                        Text("Defaults for app chats and external API clients. Model rules override global rules. Applies to the next request.")
-                            .font(.app(.caption)).foregroundStyle(.secondary)
-                    }
                     GenerationDefaultsRows(profile: $profile, inheritance: "Model default")
                         .disabled(!loaded)
                     if let error {

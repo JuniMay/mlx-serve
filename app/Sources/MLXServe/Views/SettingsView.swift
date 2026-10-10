@@ -145,7 +145,7 @@ struct SettingsView: View {
         EngineAwareSections()
         SettingsSection(
             category: .requestDefaults,
-            subtitle: "Defaults for all clients. Apply to the next request without a restart."
+            subtitle: "Defaults for app chats and API clients. Model rules override global rules. Changes apply to the next request without a restart."
         ) {
             GlobalGenerationDefaultsView()
             ModelThinkingSettings()
@@ -469,9 +469,13 @@ private struct EngineAwareSections: View {
             MemorySectionContent(showMLX: showMLX)
         }
         CacheSectionContent(showMLX: showMLX, showLlama: showLlama)
-        SettingsSection(category: .performance, subtitle: "Generation throughput and hardware acceleration. Restart to apply.") {
-            if showMLX { PerformanceSectionContent() }
-            SettingsSubheader("Neural Engine acceleration")
+        if showMLX {
+            SettingsSection(category: .performance, subtitle: "Generation throughput. Restart to apply.") {
+                PerformanceSectionContent()
+            }
+        }
+        SettingsSection(category: .performance, subtitle: "Optional hardware offload for supported models. Restart to apply.",
+                        groupTitle: "Neural Engine acceleration") {
             NeuralEngineSectionContent()
         }
         SettingsSection(category: .specDecode, subtitle: "Draft several tokens and verify them together on compatible models. Restart to apply.") {
@@ -591,14 +595,16 @@ private struct SettingsRow<Control: View>: View {
     var cost: String? = nil
     var costActive: Bool = false
     var leadingControl: Bool = false
+    var labelControl = true
+    var searchKeywords: [String] = []
     @ViewBuilder var control: Control
 
     var body: some View {
         let help = SettingsHelpText(explainer: explainer, summary: summary)
-        SearchableRow(searchText: [title] + help.searchText + [note, cost].compactMap { $0 }) {
+        SearchableRow(searchText: [title] + help.searchText + [note, cost].compactMap { $0 } + searchKeywords) {
             HStack(alignment: .firstTextBaseline, spacing: 16) {
                 if leadingControl {
-                    control.accessibilityLabel(Text(L10n.text(title)))
+                    accessibleControl
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -637,11 +643,19 @@ private struct SettingsRow<Control: View>: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 if !leadingControl {
-                    control
-                        .frame(width: 280, alignment: .trailing)
-                        .accessibilityLabel(Text(L10n.text(title)))
+                    accessibleControl
+                        .frame(width: AppLayout.settingsControlWidth, alignment: .trailing)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var accessibleControl: some View {
+        if labelControl {
+            control.accessibilityLabel(Text(L10n.text(title)))
+        } else {
+            control
         }
     }
 }
@@ -717,45 +731,32 @@ private struct ModelFoldersSectionContent: View {
         let roots = ModelRoots()
         let configured = roots.configuredDownloadRoot
         let unavailable = roots.downloadRootIsUnavailable
-        SearchableRow(searchText: ["Default folder", "download", Self.defaultExplainer]) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(L10n.text("Default folder"))
-                        .font(.app(.body))
-                    Spacer(minLength: 12)
-                    HStack(spacing: 8) {
-                        Text(configured ?? roots.downloadRoot)
-                            .font(.app(.caption).monospaced())
-                            // An unreachable folder is shown in the warning
-                            // colour rather than swapped for the fallback: the
-                            // path the user chose is the thing they need to see
-                            // to understand where their downloads went instead.
-                            .foregroundStyle(unavailable ? AnyShapeStyle(.orange) : AnyShapeStyle(configured == nil ? .secondary : .primary))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .frame(maxWidth: 220, alignment: .trailing)
-                        Button { chooseDownloadFolder() } label: { Text("Choose…")
-                            .font(.app(.body)) }
-                            .buttonStyle(.bordered)
-                        Button {
-                            SecurityScopedBookmark.clear(name: DownloadManager.downloadFolderBookmarkName)
-                            ModelRoots().configuredDownloadRoot = nil
-                            applyFolderChange()
-                        } label: { Text("Reset")
-                            .font(.app(.body)) }
-                        .buttonStyle(.bordered)
-                        .disabled(configured == nil)
+        SettingsRow(title: "Default folder", explainer: Self.defaultExplainer,
+                    summary: "Choose where new models are downloaded.",
+                    note: unavailable ? L10n.format("That folder isn't reachable right now, so downloads are going to %@ instead.", ModelRoots.builtInRoot) : nil,
+                    labelControl: false) {
+            VStack(alignment: .trailing, spacing: 6) {
+                Text(configured ?? roots.downloadRoot)
+                    .font(.app(.caption).monospaced())
+                    .foregroundStyle(unavailable ? AnyShapeStyle(.orange) : AnyShapeStyle(configured == nil ? .secondary : .primary))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(configured ?? roots.downloadRoot)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                HStack(spacing: 8) {
+                    Button("Choose…", action: chooseDownloadFolder)
+                        .accessibilityLabel("Choose default model folder")
+                    Button("Reset") {
+                        SecurityScopedBookmark.clear(name: DownloadManager.downloadFolderBookmarkName)
+                        ModelRoots().configuredDownloadRoot = nil
+                        applyFolderChange()
                     }
+                    .disabled(configured == nil)
                 }
-                Text(unavailable
-                     ? L10n.format("That folder isn't reachable right now, so downloads are going to %@ instead.", ModelRoots.builtInRoot)
-                     : L10n.text(Self.defaultExplainer))
-                    .font(.app(.caption2))
-                    .foregroundStyle(unavailable ? .orange : .secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                .buttonStyle(.bordered)
             }
-            .id(downloadFolderTick)
         }
+        .id(downloadFolderTick)
     }
 
     private func chooseDownloadFolder() {
@@ -795,35 +796,26 @@ private struct ModelFoldersSectionContent: View {
         }()
         let hasPath = !(downloads.customRoot?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
 
-        return SearchableRow(searchText: ["Custom folder", Self.explainer]) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(L10n.text("Custom folder"))
-                        .font(.app(.body))
-                    Spacer(minLength: 12)
-                    HStack(spacing: 8) {
-                        Text(L10n.text(pathText))
-                            .font(.app(.caption).monospaced())
-                            .foregroundStyle(hasPath ? .primary : .secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .frame(maxWidth: 220, alignment: .trailing)
-                        Button { choose() } label: { Text("Choose…")
-                            .font(.app(.body)) }
-                            .buttonStyle(.bordered)
-                        Button {
-                            downloads.customRoot = nil
-                            appState.refreshModels()
-                        } label: { Text("Clear")
-                            .font(.app(.body)) }
-                        .buttonStyle(.bordered)
-                        .disabled(!hasPath)
+        return SettingsRow(title: "Custom folder", explainer: Self.explainer,
+                           summary: "Add another folder to scan for models.", labelControl: false) {
+            VStack(alignment: .trailing, spacing: 6) {
+                Text(L10n.text(pathText))
+                    .font(.app(.caption).monospaced())
+                    .foregroundStyle(hasPath ? .primary : .secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(pathText)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                HStack(spacing: 8) {
+                    Button("Choose…", action: choose)
+                        .accessibilityLabel("Choose additional model folder")
+                    Button("Clear") {
+                        downloads.customRoot = nil
+                        appState.refreshModels()
                     }
+                    .disabled(!hasPath)
                 }
-                Text(L10n.text(Self.explainer))
-                    .font(.app(.caption2))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                .buttonStyle(.bordered)
             }
         }
     }
@@ -2122,7 +2114,7 @@ private struct ModelThinkingSettings: View {
             SettingsRow(
                 title: modelName(id),
                 explainer: "The model menu remembers this choice for future conversations. Saved agents can apply their own thinking settings. Reset removes this model's saved preference.",
-                summary: "Default thinking effort for this model."
+                summary: "Default thinking effort for this model.", labelControl: false
             ) {
                 HStack(spacing: 8) {
                     Picker("Thinking effort", selection: preference(id)) {
@@ -2133,7 +2125,9 @@ private struct ModelThinkingSettings: View {
                     }
                     .labelsHidden()
                     .pickerStyle(.menu)
+                    .accessibilityLabel(L10n.format("Thinking effort for %@", modelName(id)))
                     Button("Reset") { appState.modelThinkingPreferences.values.removeValue(forKey: id) }
+                        .accessibilityLabel(L10n.format("Reset thinking preference for %@", modelName(id)))
                 }
             }
         }
@@ -2252,7 +2246,9 @@ private struct WakePhraseSectionContent: View {
             explainer: "What you say to address the assistant in hands-free voice mode. Required when Require Wake Phrase is on. Matching ignores case and punctuation and accepts common greetings before the name. The assistant uses the phrase's last word as its name.",
             summary: "Required when Require Wake Phrase is on."
         ) {
-            TextField("Choose a wake phrase", text: $appState.serverOptions.wakePhrase)
+            TextField("Wake phrase", text: $appState.serverOptions.wakePhrase,
+                      prompt: Text("Choose a wake phrase"))
+                .labelsHidden()
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 220)
         }
@@ -2278,82 +2274,50 @@ private struct VoiceCloneSectionContent: View {
     @StateObject private var previewer = VoicePreviewer()
     @EnvironmentObject private var downloads: DownloadManager
 
-    private static let explainer = "A few seconds of clean speech works best. Answers are synthesized locally by the Audio pane's TTS model (downloaded on first use)."
-    /// Per-engine blurb. The old single string described Kokoro AND cloning and
-    /// was shown under every tab, so picking "System voice" read as advice about
-    /// a model you had not chosen.
+    private static let explainer = "Use a few seconds of clean speech. Spoken replies use the local Qwen3-TTS model, downloaded on first use. Without a clip, replies use the system voice."
     private static func engineExplainer(_ e: VoiceEngine) -> String {
         switch e {
         case .system:
-            return "The built-in macOS voice. No download and no GPU, but the least natural of the three."
+            return "Uses the built-in macOS voice for spoken replies. No model download is required."
         case .clone:
-            return "Copies the voice from the clip below using Qwen3-TTS. Slower and much heavier than Kokoro, and it needs the model downloaded from the Audio tile."
+            return "Copies the voice from your clip using Qwen3-TTS. The model uses more memory than Kokoro and is downloaded on first use."
         case .kokoro:
-            return "A small, very fast model (about 17x realtime, a tenth of the memory of the cloning model) with 54 built-in voices you can blend. It can't copy your voice."
+            return "Uses the local Kokoro model for spoken replies. Choose from its built-in voices; voice cloning uses Qwen3-TTS instead."
         }
     }
 
     var body: some View {
-        SearchableRow(searchText: ["Voice engine", "Kokoro", "System voice", "cloned"]) {
-            engineBody
-        }
-        // The clip control only makes sense for the backend that can USE it —
-        // Kokoro has no cloning and asking it to clone is a named 400, so the
-        // control is hidden rather than left dead (the image-preset rule).
-        if appState.serverOptions.voiceEngine == .clone {
-            SearchableRow(searchText: ["Voice clone clip", Self.explainer, "Record", "Choose file"]) {
-                clipBody
-            }
-        }
-        if appState.serverOptions.voiceEngine == .kokoro {
-            SearchableRow(searchText: ["Kokoro voice", "blend", "preview"]
-                          + AudioModelPreset.kokoroVoices) {
-                kokoroBody
-            }
-        }
-        if appState.serverOptions.voiceEngine == .system {
-            SearchableRow(searchText: ["System voice", "Apple voice"]) {
-                systemVoiceBody
-            }
-        }
+        engineBody
+        if appState.serverOptions.voiceEngine == .clone { clipBody }
+        if appState.serverOptions.voiceEngine == .kokoro { kokoroBody }
+        if appState.serverOptions.voiceEngine == .system { systemVoiceBody }
     }
 
-    /// The app-wide Apple voice; an agent with its own voice still overrides it.
-    @ViewBuilder
     private var systemVoiceBody: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(L10n.text("System voice")).font(.app(.headline).weight(.semibold))
-            HStack(spacing: 8) {
-                Picker("", selection: Binding(get: { appState.voice.selectedVoiceId },
-                                              set: { appState.voice.selectVoice($0) })) {
-                    ForEach(appState.voice.availableVoices) { v in
-                        Text(v.displayName).font(.app(.body)).tag(Optional(v.id))
-                    }
-                }
-                .labelsHidden()
-                .frame(width: 260, alignment: .leading)
-                Spacer(minLength: 0)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var engineBody: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(L10n.text("Voice engine")).font(.app(.rowTitle).weight(.semibold))
-            Picker("", selection: $appState.serverOptions.voiceEngine) {
-                ForEach(VoiceEngine.allCases, id: \.self) { e in
-                    Text(L10n.text(e.label)).tag(e)
+        SettingsRow(title: "System voice", explainer: "Choose the macOS voice used for spoken replies.",
+                    searchKeywords: ["Apple voice"]) {
+            Picker("", selection: Binding(get: { appState.voice.selectedVoiceId },
+                                          set: { appState.voice.selectVoice($0) })) {
+                ForEach(appState.voice.availableVoices) { voice in
+                    Text(voice.displayName).tag(Optional(voice.id))
                 }
             }
             .labelsHidden()
-            .pickerStyle(.segmented)
-            Text(L10n.text(Self.engineExplainer(appState.serverOptions.voiceEngine)))
-                .font(.app(.caption2)).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            .pickerStyle(.menu)
         }
-        // Stop a preview when the engine changes — otherwise a Kokoro sample
-        // keeps talking after switching to the system voice.
+    }
+
+    private var engineBody: some View {
+        SettingsRow(title: "Voice engine", explainer: Self.engineExplainer(appState.serverOptions.voiceEngine),
+                    searchKeywords: ["Kokoro", "System voice", "cloned"]) {
+            Picker("", selection: $appState.serverOptions.voiceEngine) {
+                ForEach(VoiceEngine.allCases, id: \.self) { engine in
+                    Text(L10n.text(engine.label)).tag(engine)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+        }
         .onChange(of: appState.serverOptions.voiceEngine) { _, _ in previewer.stop() }
         .onAppear { previewer.attach(server: appState.server) }
     }
@@ -2361,105 +2325,72 @@ private struct VoiceCloneSectionContent: View {
     private var kokoroBundle: MediaBundle { AudioModelPreset.kokoro82M.bundle }
     private var kokoroReady: Bool { downloads.bundleReady(kokoroBundle) }
 
-    @ViewBuilder
     private var kokoroBody: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(L10n.text("Kokoro voice")).font(.app(.headline).weight(.semibold))
-            // Selecting the engine has to be able to GET the model — the gen
-            // panes have had this bar all along; Settings ▸ Voice was the one
-            // place that offered a backend with no way to fetch it. Collapses to
-            // nothing once the bundle is complete.
-            BundleDownloadBar(bundle: kokoroBundle)
-            // A bare `.frame(maxWidth:)` centres the popup inside the flexible
-            // width; the row needs an explicit leading alignment plus a Spacer
-            // to sit against the left edge like every other control here.
-            HStack(spacing: 8) {
-                Picker("", selection: $appState.serverOptions.kokoroVoice) {
-                    // Grouped by language so 54 entries are navigable, and named
-                    // rather than shown as raw wire ids.
+        SettingsRow(title: "Kokoro voice", explainer: "Choose a voice for spoken replies and preview a short sample.",
+                    note: previewer.error, labelControl: false, searchKeywords: ["blend", "preview"] + AudioModelPreset.kokoroVoices) {
+            VStack(alignment: .trailing, spacing: 8) {
+                BundleDownloadBar(bundle: kokoroBundle)
+                Picker("Kokoro voice", selection: $appState.serverOptions.kokoroVoice) {
                     ForEach(KokoroVoiceCatalog.grouped(), id: \.language) { group in
                         Section(L10n.text(group.language)) {
-                            ForEach(group.voices, id: \.self) { v in
-                                Text(KokoroVoiceCatalog.displayName(for: v)).font(.app(.body)).tag(v)
+                            ForEach(group.voices, id: \.self) { voice in
+                                Text(KokoroVoiceCatalog.displayName(for: voice)).tag(voice)
                             }
                         }
                     }
                 }
                 .labelsHidden()
-                .frame(width: 260, alignment: .leading)
-
+                .pickerStyle(.menu)
                 Button {
                     previewer.preview(appState.serverOptions.kokoroVoice)
                 } label: {
                     if previewer.isPreviewing(appState.serverOptions.kokoroVoice) {
                         ProgressView().controlSize(.small)
                     } else {
-                        Label("Play", systemImage: "play.circle").font(.app(.body))
+                        Label("Play", systemImage: "play.circle")
                     }
                 }
-                .help(kokoroReady ? "Hear a short sample of this voice"
-                                  : "Download the model first")
+                .accessibilityLabel("Play voice sample")
+                .help(kokoroReady ? "Hear a short sample of this voice" : "Download the model first")
                 .disabled(previewer.active != nil || !kokoroReady)
-
-                Spacer(minLength: 0)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Text(L10n.text("Voices blend: type several separated by commas (af_bella,af_sky) to make a new one."))
-                .font(.app(.caption2)).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            if let e = previewer.error {
-                Text(L10n.text(e)).font(.app(.caption)).foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        // Auditioning on SELECTION is the whole point — the user asked to hear
-        // the voice they just picked, not to hunt for a play button.
-        // Audition on SELECTION — but only once the weights are here, or every
-        // pick would fire a request that can only fail.
         .onChange(of: appState.serverOptions.kokoroVoice) { _, newValue in
             if kokoroReady { previewer.preview(newValue) }
         }
         .onDisappear { previewer.stop() }
     }
 
-    @ViewBuilder
     private var clipBody: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(L10n.text("Voice clone clip")).font(.app(.headline).weight(.semibold))
-            HStack(spacing: 8) {
-                if !appState.serverOptions.voiceClonePath.isEmpty {
-                    Image(systemName: "waveform").foregroundStyle(.secondary)
-                    // Prefer the display label — the stored file is always the
-                    // normalized "voice-clone.wav", which says nothing.
-                    // "Recorded clip" is copy, not a file name: the row resolves
-                    // it, so the stored label stays language-neutral.
-                    let label = appState.serverOptions.voiceCloneLabel.isEmpty
-                        ? (appState.serverOptions.voiceClonePath as NSString).lastPathComponent
-                        : appState.serverOptions.voiceCloneLabel
-                    Text(L10n.text(label))
-                        .font(.app(.caption)).lineLimit(1).truncationMode(.middle)
-                    Button { clearVoice() } label: { Image(systemName: "xmark.circle.fill") }
-                        .buttonStyle(.borderless).foregroundStyle(.secondary)
-                        .help("Remove the clip — voice mode falls back to the system voice")
-                } else {
-                    Text(L10n.text("None — voice mode uses the system voice."))
-                        .font(.app(.caption)).foregroundStyle(.secondary)
+        SettingsRow(title: "Voice clone clip", explainer: Self.explainer, note: voiceError,
+                    labelControl: false, searchKeywords: ["Record", "Choose file"]) {
+            VStack(alignment: .trailing, spacing: 8) {
+                HStack(spacing: 8) {
+                    if !appState.serverOptions.voiceClonePath.isEmpty {
+                        Image(systemName: "waveform").foregroundStyle(.secondary)
+                        let label = appState.serverOptions.voiceCloneLabel.isEmpty
+                            ? (appState.serverOptions.voiceClonePath as NSString).lastPathComponent
+                            : appState.serverOptions.voiceCloneLabel
+                        Text(L10n.text(label))
+                            .font(.app(.caption)).lineLimit(1).truncationMode(.middle)
+                        Button { clearVoice() } label: { Image(systemName: "xmark.circle.fill") }
+                            .buttonStyle(.borderless).foregroundStyle(.secondary)
+                            .accessibilityLabel("Remove voice clip")
+                            .help("Remove the clip — voice mode falls back to the system voice")
+                    } else {
+                        Text("No clip selected").font(.app(.caption)).foregroundStyle(.secondary)
+                    }
                 }
-            }
-            HStack(spacing: 8) {
-                Button { chooseVoiceFile() } label: { Label("Choose file…", systemImage: "folder") }
-                if let recorder = formState.recorder {
-                    VoiceRecordControl(recorder: recorder, onRecord: startRecording, onStop: stopRecording)
-                } else {
-                    Button { startRecording() } label: { Label("Record", systemImage: "mic") }
+                HStack(spacing: 8) {
+                    Button { chooseVoiceFile() } label: { Label("Choose file…", systemImage: "folder") }
+                        .accessibilityLabel("Choose voice clip")
+                    if let recorder = formState.recorder {
+                        VoiceRecordControl(recorder: recorder, onRecord: startRecording, onStop: stopRecording)
+                    } else {
+                        Button { startRecording() } label: { Label("Record", systemImage: "mic") }
+                    }
                 }
-            }
-            .font(.app(.caption))
-            Text(L10n.text(Self.explainer))
-                .font(.app(.caption2)).foregroundStyle(.secondary)
-            if let voiceError {
-                Text(L10n.text(voiceError)).font(.app(.caption)).foregroundStyle(.red)
+                .buttonStyle(.bordered)
             }
         }
     }

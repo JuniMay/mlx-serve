@@ -113,6 +113,6 @@ struct GenerationDefaultsSearch {
     }
 
     static func text(for field: GenerationField, inheritance: String) -> [String] {
-        [field.title, field.parameterName, field.help, inheritance, "Force", "Ignore client override"]
+        [field.title, field.parameterName, field.help, inheritance, "Custom value", "Override client value", "Force", "Ignore client override"]
     }
 }

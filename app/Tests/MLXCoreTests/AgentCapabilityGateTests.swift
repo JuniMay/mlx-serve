@@ -222,11 +222,11 @@ final class AgentCapabilityGateTests: XCTestCase {
         XCTAssertTrue(config.revokingTools(true).mcpMode, "the Tools switch leaves MCP alone")
     }
 
-    func testToolsOffStillDispatchesTheDocumentSearch() {
+    func testToolsOffAlsoBlocksDocumentSearch() {
         let r = AgentResolution.resolve(agent: nil, defaults: AppDefaultsSnapshot(
             toolsEnabled: false, mcpEnabled: false, thinkingEnabled: false,
             autoApprove: false, workingDirectory: nil))
-        XCTAssertEqual(ChatTurnEngine.TurnConfig.from(r).dispatchTools, [.searchDocuments])
+        XCTAssertTrue(ChatTurnEngine.TurnConfig.from(r).dispatchTools.isEmpty)
     }
 
     func testToolsOnDispatchesEveryAllowedTool() {

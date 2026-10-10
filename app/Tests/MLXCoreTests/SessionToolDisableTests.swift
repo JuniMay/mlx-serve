@@ -56,9 +56,7 @@ final class SessionToolDisableTests: XCTestCase {
     // MARK: - searchDocuments is not a capability
 
     func testSearchDocumentsSurvivesTheDisableSet() {
-        // Its real gate is whether a folder is attached, which is stronger than
-        // any toggle — docs-only chats have Tools off and still need it. It is
-        // deliberately absent from the menu, so nothing can switch it off here.
+        // Folder search follows the Tools switch and folder attachment, not an individual switch.
         let r = resolve(disabled: Set(AgentToolKind.allCases))
         XCTAssertTrue(r.tools.contains(.searchDocuments))
     }
@@ -87,11 +85,11 @@ final class SessionToolDisableTests: XCTestCase {
 
     // MARK: - Turning everything off
 
-    func testDisablingEveryToolStopsTheLoopRunning() {
-        // Advertising nothing while still running the tool loop is a dead
-        // offer — the turn should just be plain chat.
+    @MainActor
+    func testDisablingEveryIndividualToolKeepsTheMasterChoiceButNeedsAFolderToRun() {
         let r = resolve(disabled: Set(AgentToolKind.chatToggleable), toolsEnabled: true)
-        XCTAssertFalse(r.toolsEnabled)
+        XCTAssertTrue(r.toolsEnabled)
+        XCTAssertFalse(ChatTurnEngine.TurnConfig.from(r).agentMode)
     }
 
     func testDisablingSomeToolsLeavesTheLoopOn() {

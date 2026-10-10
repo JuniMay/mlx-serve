@@ -57,8 +57,10 @@ struct TaskListPane: View {
                         .tag(task.id)
                 }
             }
-            .listStyle(.sidebar)
+            .listStyle(.inset)
             .scrollContentBackground(.hidden)
+            .background(Color(nsColor: .textBackgroundColor))
+            .tint(.gray)
     }
 }
 

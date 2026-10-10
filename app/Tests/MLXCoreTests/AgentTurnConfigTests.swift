@@ -32,7 +32,7 @@ final class AgentTurnConfigTests: XCTestCase {
         XCTAssertEqual(config.workingDirectory, "/tmp/agent")
         XCTAssertEqual(config.temperature, 0.25)
         XCTAssertEqual(config.maxTokens, 999)
-        XCTAssertEqual(config.tools, r.tools)
+        XCTAssertEqual(config.tools, r.tools.subtracting([.searchDocuments]))
         XCTAssertTrue(config.systemPromptPrefix.hasPrefix("You are a coder."))
         XCTAssertFalse(config.voiceStyle)
     }
@@ -160,7 +160,8 @@ final class AgentTurnConfigTests: XCTestCase {
         XCTAssertFalse(config.mcpMode)
         XCTAssertTrue(config.enableThinking)
         XCTAssertEqual(config.workingDirectory, "/tmp/default")
-        XCTAssertEqual(config.tools, Set(AgentToolKind.allCases), "full access, exactly as before")
+        XCTAssertEqual(config.tools, Set(AgentToolKind.allCases).subtracting([.searchDocuments]),
+                       "folder search requires an attached index")
         XCTAssertNil(config.temperature)
         XCTAssertNil(config.maxTokens)
     }

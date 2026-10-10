@@ -56,6 +56,8 @@ struct ModelBrowserPane: View {
         // much narrower.
         .frame(minWidth: ModelBrowserMetrics.minDetailWidth)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .scrollContentBackground(.hidden)
+        .background(Color(nsColor: .textBackgroundColor))
         .task {
             if searchService.models.isEmpty {
                 await searchService.search()
@@ -101,91 +103,39 @@ private struct ModelBrowserSectionBar: View {
     let badges: ModelBrowserBadgeCounts
     let isDownloading: Bool
     @Environment(\.layoutDirection) private var layoutDirection
-    @FocusState private var focusedSection: ModelBrowserSection?
 
     var body: some View {
-        GlassEffectContainer {
+        HStack(spacing: AppLayout.rowSpacing) {
             ViewThatFits(in: .horizontal) {
-                sectionTabs
+                sectionPicker
+                    .pickerStyle(.segmented)
                     .fixedSize(horizontal: true, vertical: false)
-                sectionMenu
+                    .onKeyPress(.leftArrow) { moveSelection(movingRight: false) }
+                    .onKeyPress(.rightArrow) { moveSelection(movingRight: true) }
+                sectionPicker
+                    .pickerStyle(.menu)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            if isDownloading {
+                ProgressView()
+                    .controlSize(.mini)
+                    .accessibilityLabel("Models are downloading")
             }
         }
-        .frame(maxWidth: .infinity, alignment: .center)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .tint(.gray)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, AppLayout.contentInset)
+        .padding(.vertical, AppLayout.rowSpacing)
     }
 
-    private var sectionTabs: some View {
-        HStack(spacing: 2) {
+    private var sectionPicker: some View {
+        Picker("Models section", selection: $section) {
             ForEach(ModelBrowserSection.allCases) { item in
-                sectionButton(item)
+                Text(verbatim: title(for: item)).tag(item)
             }
         }
-        .padding(4)
-        .glassEffect(.regular, in: .capsule)
-        .onKeyPress(.leftArrow) { moveSelection(movingRight: false) }
-        .onKeyPress(.rightArrow) { moveSelection(movingRight: true) }
-        .accessibilityElement(children: .contain)
+        .labelsHidden()
         .accessibilityLabel("Models section")
-    }
-
-    private func sectionButton(_ item: ModelBrowserSection) -> some View {
-        Button {
-            section = item
-            focusedSection = item
-        } label: {
-            HStack(spacing: 6) {
-                Text(verbatim: title(for: item))
-                    .font(.app(.body))
-                if item == .downloads, isDownloading {
-                    downloadActivity
-                }
-            }
-            .foregroundStyle(section == item ? Color.accentColor : Color.primary)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .contentShape(.capsule)
-            .background {
-                if section == item {
-                    Capsule().fill(Color.accentColor.opacity(0.18))
-                        .overlay(Capsule().strokeBorder(Color.accentColor.opacity(0.45), lineWidth: 1))
-                }
-            }
-        }
-        .buttonStyle(.borderless)
-        .buttonBorderShape(.capsule)
-        .focused($focusedSection, equals: item)
-        .accessibilityAddTraits(section == item ? .isSelected : [])
-    }
-
-    private var sectionMenu: some View {
-        Menu {
-            Picker("Models section", selection: $section) {
-                ForEach(ModelBrowserSection.allCases) { item in
-                    Text(verbatim: title(for: item)).tag(item)
-                }
-            }
-        } label: {
-            HStack(spacing: 6) {
-                Text(verbatim: title(for: section))
-                    .font(.app(.body))
-                if isDownloading { downloadActivity }
-            }
-            .foregroundStyle(.primary)
-        }
-        .buttonStyle(.glass)
-        .buttonBorderShape(.capsule)
-        .controlSize(.large)
-        .fixedSize(horizontal: true, vertical: false)
-        .accessibilityLabel("Models section")
-        .accessibilityValue(Text(verbatim: title(for: section)))
-    }
-
-    private var downloadActivity: some View {
-        ProgressView()
-            .controlSize(.mini)
-            .accessibilityLabel("Models are downloading")
     }
 
     private func title(for item: ModelBrowserSection) -> String {
@@ -195,10 +145,9 @@ private struct ModelBrowserSectionBar: View {
 
     private func moveSelection(movingRight: Bool) -> KeyPress.Result {
         let destination = ModelBrowserSectionNavigation.destination(
-            from: focusedSection ?? section, movingRight: movingRight,
+            from: section, movingRight: movingRight,
             rightToLeft: layoutDirection == .rightToLeft)
         section = destination
-        focusedSection = destination
         return .handled
     }
 }
@@ -222,7 +171,6 @@ private struct RecommendedPane: View {
             Divider()
             RecommendedModelList(memory: memory, recommendedId: starter.id)
         }
-        .navigationTitle("Recommended")
     }
 }
 
@@ -690,7 +638,6 @@ private struct DiscoverPane: View {
                     .onChange(of: geo.size.width) { _, w in paneWidth = w }
             }
         )
-        .navigationTitle("Discover")
     }
 }
 
@@ -832,7 +779,6 @@ private struct MyModelsPane: View {
                      : PackUpdateCheck.sweepMessage(sweepItems))
             }
         }
-        .navigationTitle("My Models")
         .onAppear {
             updateDiskSpace()
         }
@@ -889,7 +835,6 @@ private struct DownloadsPane: View {
                 }
             }
         }
-        .navigationTitle("Downloads")
     }
 
     @ViewBuilder
@@ -963,7 +908,6 @@ private struct MediaPane: View {
             }
             .padding(16)
         }
-        .navigationTitle("Media")
     }
 }
 

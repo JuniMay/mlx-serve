@@ -86,13 +86,8 @@ enum AgentToolKind: String, Codable, CaseIterable, Sendable {
         }
     }
 
-    /// Tools the chat's Tools menu can switch off.
-    ///
-    /// Everything except `searchDocuments`, whose real gate is whether a
-    /// document folder is attached — stronger than any toggle, and the reason a
-    /// docs-only chat works with Tools off. Offering a switch that the resolver
-    /// then ignores would be a lying control, so it is absent from both.
-    /// `SessionToolDisableTests` pins the two lists against each other.
+    /// Individual tool switches. Folder search follows the master Tools switch
+    /// and the attached folder instead of having a separate switch.
     static var chatToggleable: [AgentToolKind] {
         allCases.filter { $0 != .searchDocuments }
     }

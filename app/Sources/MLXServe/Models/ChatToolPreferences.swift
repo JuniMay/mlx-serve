@@ -66,7 +66,7 @@ struct ChatToolPreferences: Codable, Equatable, Sendable {
         var result = resolved
         if toolsEnabled == false {
             result.toolsEnabled = false
-            result.tools = result.tools.intersection([.searchDocuments])
+            result.tools = []
         }
         if mcpEnabled == false { result.mcpEnabled = false }
         return result

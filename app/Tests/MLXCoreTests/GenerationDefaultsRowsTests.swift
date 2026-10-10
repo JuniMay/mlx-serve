@@ -34,6 +34,14 @@ final class GenerationDefaultsRowsTests: XCTestCase {
         XCTAssertTrue(titleMatch.showsBulkControls)
     }
 
+    func testSearchFindsEveryParameterByItsVisibleValueSourceChoices() {
+        for choice in ["Model default", "Custom value", "Override client value"] {
+            let search = GenerationDefaultsSearch(query: choice, inheritance: "Model default")
+            XCTAssertEqual(search.fields, GenerationField.allCases, choice)
+            XCTAssertFalse(search.showsBulkControls)
+        }
+    }
+
     @MainActor
     func testSharedRowsRenderAtModelSheetWidth() throws {
         var profile = GenerationDefaults()
@@ -54,23 +62,6 @@ final class GenerationDefaultsRowsTests: XCTestCase {
             hosting.cacheDisplay(in: hosting.bounds, to: bitmap)
             let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
             try png.write(to: URL(fileURLWithPath: path))
-        }
-    }
-
-    @MainActor
-    func testModeSwitchStaysCompactAndKeepsLabelSpaceForMixedState() {
-        let states: [GenerationDefaults.Mode?] = [nil, .inherited, .enabled, .forced]
-        for allowsForce in [false, true] {
-            var previous: CGSize?
-            for state in states where allowsForce || state != .forced {
-                let view = GenerationModeSwitch(value: state, allowsForce: allowsForce,
-                    inheritance: "Model default", title: "Temperature", onChange: { _ in })
-                let size = NSHostingView(rootView: view).fittingSize
-                XCTAssertLessThanOrEqual(size.width, allowsForce ? 68 : 48)
-                XCTAssertGreaterThanOrEqual(size.height, 44)
-                if let previous { XCTAssertEqual(size, previous) }
-                previous = size
-            }
         }
     }
 

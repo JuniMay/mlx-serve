@@ -1314,22 +1314,20 @@ struct ChatSidebar: View {
         }
     }
 
-    /// A user group's heading: the label folds it, the + adds a chat
-    /// straight into it, a row dropped on it joins it, right-click
-    /// renames or deletes it (its rows go back to their sections).
     private func groupHeader(_ group: SidebarGroups.Group) -> some View {
-        HStack(alignment: .center, spacing: 6) {
-            Label(group.name, systemImage: "folder")
-                .lineLimit(1)
-            Spacer()
-            newChatButton(group: group.id)
-        }
+        Text(group.name)
+        .lineLimit(1)
         .font(.system(.caption, weight: .medium))
         .foregroundStyle(.secondary)
         .textCase(nil)
-        .padding(.trailing, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .onDrop(of: [.text], delegate: groupDrop(group.id))
         .contextMenu {
+            Button("New Chat in Group") {
+                appState.showConversation()
+                appState.sidebarGroups.assign([appState.newChatSession()], to: group.id)
+            }
+            Divider()
             Button { groupSheet = .rename(group.id, group.name) } label: { Text("Rename Group…")
                 .font(.app(.body)) }
             Button(role: .destructive) { appState.sidebarGroups.delete(group.id) } label: { Text("Delete Group")
@@ -1359,24 +1357,6 @@ struct ChatSidebar: View {
                 .font(.app(.body)) }
         }
         Divider()
-    }
-
-    private func newChatButton(group: UUID) -> some View {
-        Button {
-            appState.showConversation()
-            appState.sidebarGroups.assign([appState.newChatSession()], to: group)
-        } label: {
-            Image(systemName: "plus")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
-                .frame(width: 22, height: 22)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .controlSize(.small)
-        .fixedSize()
-        .accessibilityLabel("New Chat")
-        .help("New Chat")
     }
 
     /// One conversation row, shared by both sections. `ordered` is the panel's
@@ -2061,20 +2041,37 @@ struct ChatDetailView: View {
             VStack(alignment: .leading, spacing: 6) {
                 chatModeSwitch("Plain Chat", isOn: Binding(
                     get: { session?.isPlainChat == true }, set: setPlainChat))
-                Text("Turn off Tools, MCP, and attached-folder search for this conversation.")
+                Text("Temporarily turn off Tools and MCP for this conversation.")
                     .font(.app(.caption))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Divider()
-            chatModeSwitch("Tools", isOn: toolModeBinding(\.toolsEnabled))
-                .disabled(session?.isPlainChat == true || agentForbidsTools)
+            VStack(alignment: .leading, spacing: 6) {
+                chatModeSwitch("Tools", isOn: toolModeBinding(\.toolsEnabled))
+                    .disabled(session?.isPlainChat == true || agentForbidsTools)
+                Text("Includes attached-folder search.")
+                    .font(.app(.caption))
+                    .foregroundStyle(.secondary)
+            }
             chatModeSwitch("MCP", isOn: toolModeBinding(\.mcpEnabled))
                 .disabled(session?.isPlainChat == true || appState.useAppleModel
                           || activeAgent?.capabilities.mcp == false)
             Divider()
-            Button("Use Settings Defaults") {
-                updateToolPreferences(ChatToolPreferences(plainChat: session?.isPlainChat ?? false))
+            if session?.toolPreferences?.followsDefaults != true
+                || session?.toolPreferences?.toolsEnabled != nil
+                || session?.toolPreferences?.mcpEnabled != nil {
+                VStack(alignment: .leading, spacing: 6) {
+                    Button("Reset Tool Choices") {
+                        updateToolPreferences(ChatToolPreferences(plainChat: session?.isPlainChat ?? false))
+                    }
+                    Text(activeAgent == nil
+                         ? "Restore the choices in Tools & MCP Settings."
+                         : "Restore this agent's tool choices.")
+                        .font(.app(.caption))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             Button("Tools & MCP Settings…") { appState.showSettings(category: .tools) }
             if let agent = activeAgent {
@@ -2772,7 +2769,7 @@ struct ChatDetailView: View {
                 composerModes
             }
         } model: {
-            HStack(spacing: 6) {
+            HStack(spacing: ComposerControlMetrics.spacing) {
                 composerModel
                 if let media {
                     Button { showingMediaParameters.toggle() } label: {
@@ -2847,7 +2844,7 @@ struct ChatDetailView: View {
     }
 
     private var composerModes: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: ComposerControlMetrics.spacing) {
             attachmentMenu
             if audioSupported {
                 MicButton(recorder: recorder) { toggleRecording() }
@@ -2859,7 +2856,7 @@ struct ChatDetailView: View {
     }
 
     private var composerModel: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: ComposerControlMetrics.spacing) {
             ChatModelPill(
                 compact: true,
                 reasoningLabel: ComposerThinkingPresentation.summary(
@@ -2881,7 +2878,7 @@ struct ChatDetailView: View {
     }
 
     private var composerActions: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: ComposerControlMetrics.spacing) {
             voiceToggle
             ComposerActionButton(isRunning: composerState == .generatingHere,
                                  label: composerState == .generatingHere ? "Stop generating" : "Send message") {

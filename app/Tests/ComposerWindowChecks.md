@@ -34,18 +34,23 @@ Plain Chat must instead read as an override of the two independent choices.
 5. Verify the switch labels, help text, settings links and workspace path remain
    readable at the popover's fixed width. Dismiss without changing the user's
    saved choices when inspecting a real conversation.
+6. Tools describes attached-folder search as part of its scope. Turning Tools off
+   disables that search even while MCP stays on. Reset Tool Choices appears only
+   for saved overrides and explains that it restores Tools & MCP Settings choices.
 
 `ChatToolPreferencesTests` and `ChatModeTogglesTests` cover resolution and
 restoration independently of the popover layout.
 
-## Primary action color
+## Dock control appearance and spacing
 
 Use an idle interaction with an unsent draft. Keep the existing appearance and
-accent settings. The enabled Send or Generate button must use the system accent,
-with a contrasting arrow. The Stop state must use the same shared button style.
+accent settings. Send, Generate and Stop use the same neutral glass button style.
+Keep visible gaps between attachments, model controls, voice and the action.
+The controls must not fuse into an outlined strip or change the dock's surface
+when switching between chat and media models. Inspect both full and narrow widths.
 An empty draft must still disable submission. Repeat in light and dark fixture
 profiles without changing the user's settings. Do not start inference to check
 Stop; use a simulated running service.
 
-The native glass fill needs a live window. Offscreen AppKit bitmap captures do
-not include that fill, including for a standard prominent glass button.
+`ComposerControlsLayoutTests` checks measured gaps and horizontal bounds. Native
+glass fill needs a live window; offscreen AppKit captures omit that fill.

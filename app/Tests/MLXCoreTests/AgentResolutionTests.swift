@@ -182,7 +182,7 @@ final class AgentResolutionTests: XCTestCase {
                       "Tools brings the loop's own tools")
         XCTAssertTrue(all.contains(.browse), "Web is additive to Tools")
         XCTAssertFalse(all.contains(.searchDocuments),
-                       "searchDocuments is gated by the attached folder, never by a capability toggle")
+                       "folder search is added during resolution and gated when the turn starts")
 
         caps.web = false
         XCTAssertFalse(caps.resolvedTools().contains(.browse))
@@ -208,8 +208,7 @@ final class AgentResolutionTests: XCTestCase {
     }
 
     func testResolvedToolsAlwaysCarrySearchDocuments() {
-        // The dispatch gate reads `ResolvedAgentSettings.tools`; docs-only mode
-        // has Tools off yet must still be able to run searchDocuments.
+        // The resolved allow-list retains search; the Tools switch gates dispatch.
         let a = agent { $0.capabilities = AgentCapabilities(tools: false, mcp: false, web: false) }
         let r = AgentResolution.resolve(agent: a, defaults: defaults())
         XCTAssertTrue(r.tools.contains(.searchDocuments))
