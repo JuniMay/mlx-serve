@@ -10,6 +10,7 @@ import Foundation
 /// Case order IS render order — the sidebar lists them top to bottom exactly as
 /// the form lays them out.
 enum SettingsCategory: String, CaseIterable, Identifiable, Hashable {
+    case general
     case modelFolders
     case server
     case lanSharing
@@ -32,6 +33,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable, Hashable {
     case requestDefaults
     case interface
     case voice
+    case tools
     case sandbox
     case messaging
     case updates
@@ -46,6 +48,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable, Hashable {
     /// engine a knob applies to.
     var title: String {
         switch self {
+        case .general:           return "General"
         case .modelFolders:      return "Model Folders"
         case .server:            return "Server"
         case .lanSharing:        return "LAN Sharing"
@@ -58,6 +61,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable, Hashable {
         case .requestDefaults:   return "Generation Defaults"
         case .interface:         return "Interface"
         case .voice:             return "Voice"
+        case .tools:             return "Tools & MCP"
         case .sandbox:           return "Agent Sandbox"
         case .messaging:         return "Messaging — Telegram bot"
         case .updates:           return "Updates"
@@ -78,6 +82,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable, Hashable {
     /// SF Symbol for the sidebar row (free with the OS — no assets).
     var icon: String {
         switch self {
+        case .general:           return "gearshape"
         case .modelFolders:      return "folder"
         case .server:            return "server.rack"
         case .lanSharing:        return "antenna.radiowaves.left.and.right"
@@ -90,6 +95,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable, Hashable {
         case .requestDefaults:   return "slider.horizontal.3"
         case .interface:         return "paintbrush"
         case .voice:             return "waveform"
+        case .tools:             return "wrench.and.screwdriver"
         case .sandbox:           return "shield.lefthalf.filled"
         case .messaging:         return "paperplane"
         case .updates:           return "arrow.down.circle"
@@ -117,7 +123,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable, Hashable {
     }
 }
 
-/// What the Settings sidebar has selected: everything, or one category.
+/// One category while browsing, or all categories while searching.
 ///
 /// INVARIANT — a selection and search text never coexist. Typing in the filter
 /// forces this back to `.all` (`afterQueryEdit`), and picking a category clears
@@ -127,6 +133,8 @@ enum SettingsSelection: Hashable {
     case all
     case category(SettingsCategory)
 
+    static let initial: SettingsSelection = .category(.general)
+
     /// Should the section for `category` render?
     func shows(_ category: SettingsCategory) -> Bool {
         switch self {
@@ -135,12 +143,17 @@ enum SettingsSelection: Hashable {
         }
     }
 
-    /// The selection after the search field changed. A non-blank query means the
-    /// user is searching across everything, so snap back to All. A blank query
-    /// changes nothing — clearing the field must not undo the category the user
-    /// just picked (picking one is what cleared the field).
+    /// Search spans every category. Clearing search returns to General unless
+    /// choosing a category was what cleared the field.
     static func afterQueryEdit(query: String, current: SettingsSelection) -> SettingsSelection {
-        SettingsSearch.tokens(query).isEmpty ? current : .all
+        guard SettingsSearch.tokens(query).isEmpty else { return .all }
+        return current == .all ? .initial : current
+    }
+
+    /// Ordinary reopening keeps the current pane; recovery actions name their destination.
+    static func afterOpen(requested: SettingsCategory?, current: SettingsSelection,
+                          visible: [SettingsCategory]) -> SettingsSelection {
+        reconciled(requested.map(SettingsSelection.category) ?? current, visible: visible)
     }
 
     /// Drop a selection whose category is no longer on offer — e.g. "MLX
@@ -151,7 +164,7 @@ enum SettingsSelection: Hashable {
         case .all:
             return .all
         case .category(let c):
-            return visible.contains(c) ? selection : .all
+            return visible.contains(c) ? selection : .initial
         }
     }
 }

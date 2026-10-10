@@ -6,30 +6,36 @@ struct GenerationDefaultsRows: View {
     var fields = GenerationField.allCases
     var allowsForce = true
     var inherited = GenerationDefaults()
+    @Environment(\.settingsSearchQuery) private var query
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("All parameters").font(.app(.body))
-                    Text(L10n.format("Off: %@ · On: custom value", L10n.text(inheritance))
-                         + (allowsForce ? L10n.text(" · Force: ignore client override") : ""))
-                        .font(.app(.caption2)).foregroundStyle(.secondary)
+        let search = GenerationDefaultsSearch(query: query, fields: fields, inheritance: inheritance)
+        if search.hasContent {
+            VStack(alignment: .leading, spacing: 12) {
+                if search.showsBulkControls {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("All parameters").font(.app(.body))
+                            Text(L10n.format("Off: %@ · On: custom value", L10n.text(inheritance))
+                                 + (allowsForce ? L10n.text(" · Force: ignore client override") : ""))
+                                .font(.app(.caption2)).foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        GenerationModeSwitch(value: profile.mode(fields: fields), allowsForce: allowsForce,
+                                             inheritance: inheritance, title: "All parameters") {
+                            profile.setMode($0, fields: fields, inherited: inherited)
+                        }
+                    }
+                    Divider()
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                GenerationModeSwitch(value: profile.mode(fields: fields), allowsForce: allowsForce,
-                                     inheritance: inheritance, title: "All parameters") {
-                    profile.setMode($0, fields: fields, inherited: inherited)
-                }
-            }
-            Divider()
-            ForEach(fields) { field in
-                SearchableRow(searchText: [field.title, field.parameterName, field.help, inheritance, "Force", "Ignore client override"]) {
-                    GenerationParameterRow(field: field, mode: profile.mode(field),
-                        value: value(field), hasInheritedValue: inherited.rules[field.rawValue] != nil,
-                        inheritance: inheritance, allowsForce: allowsForce,
-                        setMode: { profile.setMode($0, field: field, inherited: inherited.rules[field.rawValue]?.value) },
-                        setValue: { set($0, field) })
+                ForEach(search.fields) { field in
+                    SearchableRow(searchText: GenerationDefaultsSearch.text(for: field, inheritance: inheritance)) {
+                        GenerationParameterRow(field: field, mode: profile.mode(field),
+                            value: value(field), hasInheritedValue: inherited.rules[field.rawValue] != nil,
+                            inheritance: inheritance, allowsForce: allowsForce,
+                            setMode: { profile.setMode($0, field: field, inherited: inherited.rules[field.rawValue]?.value) },
+                            setValue: { set($0, field) })
+                    }
                 }
             }
         }
@@ -227,22 +233,32 @@ struct GenerationModeSwitch: View {
 
 struct GlobalGenerationDefaultsView: View {
     @EnvironmentObject var appState: AppState
+    @Environment(\.settingsSearchQuery) private var query
     @State private var profile = GenerationDefaults()
     @State private var loaded = false
     @State private var error: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Defaults for app chats and external API clients. Model rules override global rules. Applies to the next request.")
-                .font(.app(.caption)).foregroundStyle(.secondary)
-            GenerationDefaultsRows(profile: $profile, inheritance: "Model default")
-                .disabled(!loaded)
-            if let error {
-                Text(verbatim: error).font(.app(.caption)).foregroundStyle(.red)
-                Button("Reload settings") { load() }.font(.app(.body))
+        let search = GenerationDefaultsSearch(query: query, inheritance: "Model default")
+        Group {
+            if search.hasContent {
+                VStack(alignment: .leading, spacing: 8) {
+                    if search.showsBulkControls {
+                        Text("Defaults for app chats and external API clients. Model rules override global rules. Applies to the next request.")
+                            .font(.app(.caption)).foregroundStyle(.secondary)
+                    }
+                    GenerationDefaultsRows(profile: $profile, inheritance: "Model default")
+                        .disabled(!loaded)
+                    if let error {
+                        Text(verbatim: error).font(.app(.caption)).foregroundStyle(.red)
+                        Button("Reload settings") { load() }.font(.app(.body))
+                    }
+                }
             }
         }
-        .onAppear(perform: load)
+        .onAppear {
+            if !loaded && error == nil { load() }
+        }
         .onReceive(NotificationCenter.default.publisher(for: GenerationDefaultsFile.changed)) { _ in
             guard let saved = try? GenerationDefaultsFile.load(), saved != profile else { return }
             profile = saved

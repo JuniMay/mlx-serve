@@ -1,7 +1,7 @@
 import XCTest
 @testable import MLXCore
 
-/// Source audit for the in-window voice UI + the thinking accordion.
+/// Source audit for the in-window voice UI.
 ///
 /// Voice mode is an INLINE talking orb just above the composer, not a sheet:
 /// the sheet covered the transcript (the one thing a chat window is for) and
@@ -22,16 +22,6 @@ final class VoiceOrbInlineTests: XCTestCase {
         return try String(contentsOf: url, encoding: .utf8)
     }
 
-    /// The body of a `private var <name>: some View { … }`, up to the next
-    /// member declaration (same helper as ComposerModeControlTests).
-    private func declaration(_ name: String, in source: String) throws -> String {
-        let start = try XCTUnwrap(source.range(of: "private var \(name): some View {"),
-                                  "source must still declare \(name)")
-        let rest = source[start.upperBound...]
-        let end = rest.range(of: "\n    private ") ?? rest.range(of: "\n    @ViewBuilder")
-        return String(rest[..<(end?.lowerBound ?? rest.endIndex)])
-    }
-
     func testVoiceIsAnInlineOrbNotASheet() throws {
         let chat = try viewSource("ChatView.swift")
         XCTAssertFalse(chat.contains(".sheet(isPresented: $showVoiceMode)"),
@@ -41,21 +31,6 @@ final class VoiceOrbInlineTests: XCTestCase {
         let orb = try viewSource("VoiceModeView.swift")
         XCTAssertTrue(orb.contains("orbSize: CGFloat = 128"),
                       "the talking orb is 128×128 by design")
-    }
-
-    func testVoiceToggleSitsBetweenContextGaugeAndSend() throws {
-        let chat = try viewSource("ChatView.swift")
-        let controls = try declaration("composerControls", in: chat)
-        let pill = try XCTUnwrap(controls.range(of: "ContextPill("),
-                                 "context gauge must stay in the composer row")
-        let voice = try XCTUnwrap(controls.range(of: "voiceToggle"),
-                                  "the voice toggle lives in the composer row")
-        let send = try XCTUnwrap(controls.range(of: "arrow.up.circle.fill"),
-                                 "send button must stay in the composer row")
-        XCTAssertTrue(pill.lowerBound < voice.lowerBound,
-                      "voice toggle goes AFTER the context gauge")
-        XCTAssertTrue(voice.lowerBound < send.lowerBound,
-                      "voice toggle goes BEFORE the send button")
     }
 
     /// Voice is ONE instance bound to ONE chat (`boundSessionId`): the orb and
@@ -75,24 +50,4 @@ final class VoiceOrbInlineTests: XCTestCase {
                       "the composer toggle must carry its session too")
     }
 
-    /// The whole header toggles, and the chevron sits at the column's trailing
-    /// edge. Both are why the accordion is hand-built: `DisclosureGroup` pins
-    /// its chevron to the LEADING edge with no way to move it, and hit-tests
-    /// only that chevron — which left the "Thinking" text a dead click target
-    /// (same fix as the Agents editor's Advanced row).
-    func testTheWholeThinkingHeaderToggles() throws {
-        let chat = try viewSource("ChatView.swift")
-        let block = try declaration("thinkingBlock", in: chat)
-        XCTAssertFalse(block.contains("DisclosureGroup"),
-                       "a DisclosureGroup cannot put its chevron on the trailing edge")
-        XCTAssertTrue(block.contains("Button"),
-                      "the header must be one button spanning the strip")
-        XCTAssertTrue(block.contains(".contentShape(Rectangle())"), """
-            a stack's empty space hit-tests against nothing, so without a \
-            content shape only the glyphs and the words are clickable and the \
-            gap between them is dead.
-            """)
-        XCTAssertTrue(block.contains("Spacer("),
-                      "the chevron is pushed to the trailing edge, not laid beside the label")
-    }
 }

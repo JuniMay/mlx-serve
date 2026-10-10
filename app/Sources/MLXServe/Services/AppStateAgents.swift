@@ -36,7 +36,8 @@ extension AppState {
                                workingDirectory: String? = nil,
                                modelPath: String? = nil,
                                disabledTools: Set<AgentToolKind> = [],
-                               reasoningEffort: ReasoningEffort = .low) -> ResolvedAgentSettings {
+                               reasoningEffort: ReasoningEffort = .low,
+                               plainChat: Bool = false) -> ResolvedAgentSettings {
         let defaults = AppDefaultsSnapshot(
             toolsEnabled: toolsEnabled,
             mcpEnabled: mcpEnabled,
@@ -57,8 +58,24 @@ extension AppState {
             reasoningEffort: reasoningEffort,
             // Read here, not passed by each surface: a turn answered on-device
             // is clamped whoever asked for it.
-            appleModel: useAppleModel)
+            appleModel: useAppleModel,
+            plainChat: plainChat)
         return AgentResolution.resolve(agent: agents.agent(id: agentId), defaults: defaults)
+    }
+
+    func resolvedChatSettings(for session: ChatSession, autoApprove: Bool = false,
+                              thinkingEnabled: Bool? = nil) -> ResolvedAgentSettings {
+        let tools = session.effectiveToolPreferences(defaults: chatToolDefaults)
+        return resolvedAgentSettings(
+            agentId: session.agentId,
+            toolsEnabled: tools.toolsEnabled,
+            mcpEnabled: tools.mcpEnabled,
+            thinkingEnabled: thinkingEnabled ?? session.enableThinking,
+            autoApprove: autoApprove,
+            workingDirectory: session.workingDirectory,
+            disabledTools: ChatSession.disabledToolKinds(tools.disabledTools),
+            reasoningEffort: session.reasoningEffort,
+            plainChat: session.isPlainChat)
     }
 
     /// The agent a chat tab is talking to (nil = none).

@@ -95,26 +95,6 @@ struct AgentListPane: View {
 
     var body: some View {
         list
-            // Title and control in the toolbar, the same shape the Tasks column
-            // takes — both are static, so neither is the runtime-variable
-            // content NSToolbar cannot re-measure.
-            .toolbar {
-                // Same shape as the Tasks column (`PaneTitleBar`), except the
-                // control is a MENU — the + offers the agent types.
-                if #available(macOS 26.0, *) {
-                    ToolbarItem(placement: .navigation) { paneTitleOnly }
-                        .sharedBackgroundVisibility(.hidden)
-                } else {
-                    ToolbarItem(placement: .navigation) { paneTitleOnly }
-                }
-            }
-    }
-
-    private var paneTitleOnly: some View {
-        Text("Agents")
-            .font(.app(.headline))
-            .foregroundStyle(.primary)
-            .padding(.leading, 4)
     }
 
     /// `+` offers the TYPES, not a blank row.
@@ -138,25 +118,25 @@ struct AgentListPane: View {
     }
 
     private var list: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 2) {
-                if let kept = store.undecodableIndexURL {
-                    unreadableIndexNotice(kept)
-                }
-                sectionLabel("Your agents")
+        List(selection: $model.selectedId) {
+            if let kept = store.undecodableIndexURL {
+                unreadableIndexNotice(kept)
+                    .selectionDisabled()
+            }
+            Section("Your agents") {
                 createRow
+                    .selectionDisabled()
                 ForEach(store.sortedAgents) { agent in
                     agentRow(agent)
                 }
-                sectionLabel("Starters")
-                    .padding(.top, 10)
+            }
+            Section("Starters") {
                 ForEach(Agent.starters) { agent in
                     agentRow(agent)
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.bottom, 12)
         }
+        .listStyle(.sidebar)
     }
 
     /// An empty column has two very different causes; this one names the file the
@@ -174,43 +154,17 @@ struct AgentListPane: View {
         .padding(.vertical, 6)
     }
 
-    private func sectionLabel(_ title: String) -> some View {
-        Text(L10n.text(title).uppercased())
-            .font(.app(.caption2).weight(.semibold))
-            .foregroundStyle(.secondary)
-            .kerning(0.5)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 8)
-            .padding(.top, 8)
-            .padding(.bottom, 4)
-    }
-
-    /// The one way to make an agent, and it offers the TYPES — a dashed row
-    /// rather than a filled one, because it creates rather than navigates.
+    /// Creation offers starter types without changing the current selection.
     private var createRow: some View {
         Menu {
             newAgentMenuItems
         } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "plus")
-                    .font(.app(.callout, weight: .semibold))
-                    .frame(width: 18)
-                Text("Create New Agent")
-                    .font(.app(.subheadline))
-                Spacer(minLength: 0)
-            }
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 8)
-            .frame(height: 34)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                    .foregroundStyle(.quaternary))
-            .contentShape(Rectangle())
+            Label("Create New Agent", systemImage: "plus")
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
         }
         .menuStyle(.button)
-        .buttonStyle(.plain)
+        .buttonStyle(.borderless)
         .menuIndicator(.hidden)
         .help("New agent — start from a type, or blank")
     }
@@ -218,12 +172,11 @@ struct AgentListPane: View {
     private func agentRow(_ agent: Agent) -> some View {
         AgentListRow(agent: agent,
                      decision: appState.agentModelDecision(for: agent),
-                     selected: model.selectedId == agent.id,
-                     select: { model.selectedId = agent.id },
                      startChat: {
                          appState.showConversation()
                          appState.startChat(withAgent: agent.id)
                      })
+            .tag(agent.id)
     }
 
     /// A new agent, optionally seeded from a starter.
@@ -369,77 +322,50 @@ struct AgentDetailPane: View {
 private struct AgentListRow: View {
     let agent: Agent
     let decision: AgentModelSwitch.Decision
-    let selected: Bool
-    let select: () -> Void
     let startChat: () -> Void
-
-    @State private var hovering = false
 
     private var selectable: Bool { AgentModelSwitch.isSelectable(decision) }
 
     var body: some View {
-        // A real Button for the row, and the start-chat control as a sibling
-        // laid OVER its trailing edge — never a tap gesture wrapped around
-        // both, which on macOS swallows the child's clicks silently.
-        Button(action: select) {
-            HStack(spacing: 8) {
-                Image(systemName: agent.symbol)
-                    .font(.app(.callout))
-                    .frame(width: 18)
-                    .foregroundStyle(selectable ? Color.accentColor : .secondary)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(agent.isBuiltIn ? L10n.text(agent.name) : agent.name)
-                        .font(.app(.subheadline))
-                        .foregroundStyle(selected ? Color.accentColor : .primary)
-                        .lineLimit(1)
-                    if let sub = subtitle {
-                        Text(agent.isBuiltIn ? L10n.text(sub) : sub)
-                            .font(.app(.caption2)).foregroundStyle(.secondary).lineLimit(1)
-                    }
+        HStack(spacing: AppLayout.compactSpacing) {
+            Image(systemName: agent.symbol)
+                .font(.app(.callout))
+                .frame(width: 18)
+                .foregroundStyle(selectable ? Color.accentColor : .secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(agent.isBuiltIn ? L10n.text(agent.name) : agent.name)
+                    .font(.app(.subheadline))
+                    .lineLimit(1)
+                if let sub = subtitle {
+                    Text(agent.isBuiltIn ? L10n.text(sub) : sub)
+                        .font(.app(.caption2)).foregroundStyle(.secondary).lineLimit(1)
                 }
-                Spacer(minLength: 0)
-                // Reserved at all times, so the name doesn't reflow under the
-                // pointer as the trailing control appears.
-                Color.clear.frame(width: 20, height: 1)
             }
-            .padding(.horizontal, 8)
-            .frame(minHeight: 34)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(SidebarRowStyle.fill(selected: selected, hovering: hovering)))
-            .contentShape(Rectangle())
+            Spacer(minLength: 0)
+            if agent.isBuiltIn {
+                Image(systemName: "lock")
+                    .font(.app(.caption2))
+                    .foregroundStyle(.secondary)
+                    .help("Built-in — duplicate it to make changes")
+            }
+            trailingControl
         }
-        .buttonStyle(.plain)
-        .opacity(selectable ? 1 : 0.55)
-        .overlay(alignment: .trailing) { trailingControl }
-        .onHover { hovering = $0 }
+        .padding(.vertical, 3)
     }
 
-    /// A built-in says so; anything else offers the one thing you do WITH an
-    /// agent rather than to it. Only on the row you are pointing at or on —
-    /// a control on every row is a column of buttons, not a list of agents.
-    @ViewBuilder
+    /// Keep this action available to keyboard users as well as the pointer.
     private var trailingControl: some View {
-        if hovering || selected {
-            Button(action: startChat) {
-                Image(systemName: "bubble.left.and.bubble.right")
-                    .font(.app(.subheadline, weight: .medium))
-                    .foregroundStyle(selected ? Color.accentColor : .secondary)
-                    .frame(width: 22, height: 22)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(!selectable)
-            .help(L10n.format("Start a chat with %@", agent.isBuiltIn ? L10n.text(agent.name) : agent.name))
-            .padding(.trailing, 6)
-        } else if agent.isBuiltIn {
-            Image(systemName: "lock")
-                .font(.app(.caption2))
-                .foregroundStyle(.tertiary)
-                .padding(.trailing, 10)
-                .help("Built-in — duplicate it to make changes")
+        Button(action: startChat) {
+            Image(systemName: "bubble.left.and.bubble.right")
+                .font(.app(.subheadline, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
         }
+        .buttonStyle(.borderless)
+        .disabled(!selectable)
+        .help(L10n.format("Start a chat with %@", agent.isBuiltIn ? L10n.text(agent.name) : agent.name))
+        .accessibilityLabel(Text(L10n.format("Start a chat with %@", agent.isBuiltIn ? L10n.text(agent.name) : agent.name)))
     }
 
     private var subtitle: String? {
@@ -495,7 +421,6 @@ private struct AgentEditor: View {
     private var readOnly: Bool { agent.isBuiltIn }
 
     var body: some View {
-        // A ScrollView of hand-built cards, not a `Form(.formStyle(.grouped))`.
         ScrollView {
             editorColumn
                 .frame(maxWidth: AgentEditorMetrics.contentMaxWidth, alignment: .leading)
@@ -543,7 +468,6 @@ private struct AgentEditor: View {
             // behind it (`AgentAdvancedSummary`) so a collapsed non-default is
             // still discoverable.
             moreOptionsSection
-            advancedSections
             startChatButton
         }
     }
@@ -560,20 +484,17 @@ private struct AgentEditor: View {
 
     // MARK: Name & description
 
-    /// Who this agent IS: the symbol on its own card, the name beside it.
+    /// The symbol stays beside the name without a second enclosing card.
     private var identityHeader: some View {
-        HStack(alignment: .bottom, spacing: AgentEditorMetrics.labelSpacing) {
+        HStack(alignment: .bottom, spacing: AppLayout.rowSpacing) {
             symbolPicker
-                .padding(AgentEditorMetrics.avatarPadding)
-                .agentSurface(radius: AgentEditorMetrics.wellRadius)
             AgentLabeledField("Name") { nameField }
         }
     }
 
     private var nameField: some View {
         TextField("Name", text: $agent.name)
-            .textFieldStyle(.plain)
-            .font(.app(.title3).weight(.medium))
+            .font(.app(.body))
             .disabled(readOnly)
     }
 
@@ -587,7 +508,7 @@ private struct AgentEditor: View {
     private var readOnlyNotice: some View {
         if readOnly {
             AgentCard {
-                HStack(spacing: 8) {
+                HStack(spacing: AppLayout.compactSpacing) {
                     Image(systemName: "lock.fill").foregroundStyle(.secondary)
                     Text("This is one of the built-in agents. Duplicate it to make it yours.")
                         .font(.app(.callout))
@@ -606,7 +527,6 @@ private struct AgentEditor: View {
         TextField("", text: $agent.brief,
                   prompt: Text("e.g. a blunt Swift code reviewer that never comments on style"),
                   axis: .vertical)
-            .textFieldStyle(.plain)
             .lineLimit(1...3)
             .disabled(readOnly).font(.app(.body))
     }
@@ -618,15 +538,17 @@ private struct AgentEditor: View {
     private var agentActions: some ToolbarContent {
         ToolbarItem {
             Button(action: onDuplicate) {
-                Image(systemName: "plus.square.on.square")
+                Label("Duplicate this agent", systemImage: "plus.square.on.square")
             }
+            .labelStyle(.iconOnly)
             .help("Duplicate this agent")
         }
         if !readOnly {
             ToolbarItem {
                 Button(action: onDelete) {
-                    Image(systemName: "trash")
+                    Label("Delete this agent", systemImage: "trash")
                 }
+                .labelStyle(.iconOnly)
                 .help("Delete this agent")
             }
         }
@@ -641,10 +563,9 @@ private struct AgentEditor: View {
     private var startChatButton: some View {
         Button(action: onStartChat) {
             Label("Start Chat with this Agent", systemImage: "bubble.left.and.bubble.right").font(.app(.body))
-                .frame(maxWidth: AgentEditorMetrics.primaryMaxWidth)
         }
         .buttonStyle(.borderedProminent)
-        .controlSize(.large)
+        .controlSize(.regular)
     }
 
     /// The symbol IS its own picker — click the glyph.
@@ -659,10 +580,11 @@ private struct AgentEditor: View {
             symbolBadge
         }
         .menuStyle(.button)
-        .buttonStyle(.plain)
+        .buttonStyle(.borderless)
         .menuIndicator(.hidden)
         .disabled(readOnly)
         .help("Change the symbol")
+        .accessibilityLabel(Text("Change the symbol"))
     }
 
     private var symbolBadge: some View {
@@ -707,10 +629,11 @@ private struct AgentEditor: View {
             TextField("", text: Binding(get: { agent.wakePhrase ?? "" },
                                         set: { agent.wakePhrase = $0.isEmpty ? nil : $0 }),
                       prompt: Text(appPhraseDisplay))
-                .textFieldStyle(.plain)
+                .textFieldStyle(.roundedBorder)
                 .multilineTextAlignment(.trailing)
                 .frame(maxWidth: 220)
                 .disabled(readOnly).font(.app(.body))
+                .accessibilityLabel(Text("Wake phrase"))
         }
     }
 
@@ -726,32 +649,29 @@ private struct AgentEditor: View {
 
     /// The disclosure row for the collapsed sections.
     private var moreOptionsSection: some View {
-        Button {
-            withAnimation(.easeInOut(duration: 0.15)) { showMoreOptions.toggle() }
+        DisclosureGroup(isExpanded: $showMoreOptions) {
+            VStack(alignment: .leading, spacing: AgentEditorMetrics.sectionSpacing) {
+                advancedSections
+            }
+            .padding(.top, AppLayout.rowSpacing)
         } label: {
-            HStack(spacing: 8) {
-                Image(systemName: showMoreOptions ? "chevron.down" : "chevron.right")
-                    .font(.app(.caption).weight(.semibold))
-                    .foregroundStyle(.secondary)
+            HStack(spacing: AppLayout.compactSpacing) {
                 Text("More options").font(.app(.headline))
                 Spacer(minLength: 8)
                 // What's set behind the row while it's shut, so a collapsed
                 // non-default isn't a setting nobody can find again.
                 if !showMoreOptions, let summary = AgentAdvancedSummary.text(for: agent) {
                     Text(L10n.text(summary))
-                        .font(.app(.subheadline))
+                        .font(.app(.caption))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
             }
-            .padding(.horizontal, AgentEditorMetrics.cardPadding)
-            .padding(.vertical, AgentEditorMetrics.cardPadding - 4)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .agentSurface()
             .contentShape(Rectangle())
+            .onTapGesture { showMoreOptions.toggle() }
         }
-        .buttonStyle(.plain)
         .help("Capabilities, model, workspace and sampling. Most agents need none of these.")
     }
 
@@ -775,10 +695,11 @@ private struct AgentEditor: View {
             .padding(AgentEditorMetrics.wellPadding)
             .agentWell()
             .disabled(readOnly)
+            .accessibilityLabel(Text("Prompt"))
     }
 
     private var promptActions: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: AppLayout.rowSpacing) {
             AgentPillButton(title: isWriting ? "Writing…" : "Write it for me",
                             systemImage: "sparkles",
                             isBusy: isWriting,
@@ -790,13 +711,14 @@ private struct AgentEditor: View {
             // with two fields on one screen, which is confusing even when (as
             // here, sharing a binding) they cannot disagree.
             Text("Written from the description under the name.")
-                .font(.app(.subheadline)).foregroundStyle(.secondary)
+                .font(.app(.caption)).foregroundStyle(.secondary)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
             Text("\(agent.systemPrompt.count)/\(AgentWriter.maxPromptCharacters)")
-                .font(.app(.subheadline)).foregroundStyle(.tertiary)
+                .font(.app(.caption)).foregroundStyle(.secondary)
                 .monospacedDigit()
+                .fixedSize()
         }
     }
 
@@ -804,7 +726,7 @@ private struct AgentEditor: View {
 
     private var capabilitiesSection: some View {
         AgentSection("Capabilities") {
-            AgentCard(spacing: 12) {
+            AgentCard(spacing: AppLayout.rowSpacing) {
                 capabilityToggles
                 Divider()
                 advancedToolsDisclosure
@@ -820,7 +742,7 @@ private struct AgentEditor: View {
     @ViewBuilder
     private var capabilityToggles: some View {
         AgentEditorRow("Tools") {
-            Toggle("", isOn: Binding(get: { agent.capabilities.tools },
+            Toggle("Tools", isOn: Binding(get: { agent.capabilities.tools },
                                      set: { agent.capabilities.tools = $0 }))
                 .labelsHidden()
                 .toggleStyle(.switch)
@@ -828,7 +750,7 @@ private struct AgentEditor: View {
                 .help("The tool-calling loop: shell, files, search, tasks, media generation.").font(.app(.body))
         }
         AgentEditorRow("MCP") {
-            Toggle("", isOn: Binding(get: { agent.capabilities.mcp },
+            Toggle("MCP", isOn: Binding(get: { agent.capabilities.mcp },
                                      set: { agent.capabilities.mcp = $0 }))
                 .labelsHidden()
                 .toggleStyle(.switch)
@@ -836,7 +758,7 @@ private struct AgentEditor: View {
                 .help("Add the tools from every enabled Model Context Protocol server.").font(.app(.body))
         }
         AgentEditorRow("Web") {
-            Toggle("", isOn: Binding(get: { agent.capabilities.web },
+            Toggle("Web", isOn: Binding(get: { agent.capabilities.web },
                                      set: { agent.capabilities.web = $0 }))
                 .labelsHidden()
                 .toggleStyle(.switch)
@@ -844,7 +766,7 @@ private struct AgentEditor: View {
                 .help("Browse pages and search the web (browse + webSearch).").font(.app(.body))
         }
         AgentEditorRow("Thinking") {
-            Picker("", selection: tristate($agent.enableThinking)) {
+            Picker("Thinking", selection: tristate($agent.enableThinking)) {
                 Text("App default").font(.app(.body)).tag(TriChoice.appDefault)
                 Text("On").font(.app(.body)).tag(TriChoice.on)
                 Text("Off").font(.app(.body)).tag(TriChoice.off)
@@ -854,7 +776,7 @@ private struct AgentEditor: View {
             .disabled(readOnly).font(.app(.body))
         }
         AgentEditorRow("Approve tools") {
-            Picker("", selection: tristate($agent.autoApproveTools)) {
+            Picker("Approve tools", selection: tristate($agent.autoApproveTools)) {
                 Text("App default").font(.app(.body)).tag(TriChoice.appDefault)
                 Text("Automatically").font(.app(.body)).tag(TriChoice.on)
                 Text("Ask every time").font(.app(.body)).tag(TriChoice.off)
@@ -873,7 +795,7 @@ private struct AgentEditor: View {
 
     private var advancedToolsDisclosure: some View {
         DisclosureGroup(isExpanded: $showAdvancedTools) {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: AppLayout.rowSpacing) {
                     Text("Pick exactly which tools this agent may call. Turning this on freezes the coarse switches above.")
                         .font(.app(.caption2)).foregroundStyle(.secondary)
                     // The chat's Tools menu's own groups (`AgentToolGroup`) —
@@ -882,9 +804,9 @@ private struct AgentEditor: View {
                     // flat 19-row centered column was a list nobody could scan.
                     LazyVGrid(columns: [GridItem(.flexible(), alignment: .topLeading),
                                         GridItem(.flexible(), alignment: .topLeading)],
-                              alignment: .leading, spacing: 16) {
+                              alignment: .leading, spacing: AppLayout.contentInset) {
                         ForEach(AgentToolGroup.allCases, id: \.self) { group in
-                            VStack(alignment: .leading, spacing: 6) {
+                            VStack(alignment: .leading, spacing: AppLayout.labelSpacing) {
                                 Text(L10n.text(group.title).uppercased())
                                     .font(.app(.caption2).weight(.semibold))
                                     .foregroundStyle(.secondary)
@@ -941,7 +863,7 @@ private struct AgentEditor: View {
 
     private var modelSection: some View {
         AgentSection("Model") {
-            AgentCard(spacing: 12) {
+            AgentCard(spacing: AppLayout.rowSpacing) {
                 modelPicker
                 modelState
             }
@@ -950,7 +872,7 @@ private struct AgentEditor: View {
 
     private var modelPicker: some View {
         AgentEditorRow("Model") {
-            Picker("", selection: Binding(get: { agent.modelPath ?? "" },
+            Picker("Model", selection: Binding(get: { agent.modelPath ?? "" },
                                           set: { agent.modelPath = $0.isEmpty ? nil : $0 })) {
                 Text("Current").font(.app(.body)).tag("")
                 ForEach(appState.localModels.filter(\.isChatPickable), id: \.path) { model in
@@ -995,7 +917,7 @@ private struct AgentEditor: View {
 
     private var workspaceSection: some View {
         AgentSection("Workspace") {
-            AgentCard(spacing: 12) {
+            AgentCard(spacing: AppLayout.rowSpacing) {
                 AgentEditorRow("Folder",
                                caption: "Where this agent's file and shell tools run. Several agents may share a folder.") {
                     Text(L10n.text(agent.workingDirectory ?? "App default"))
@@ -1009,7 +931,7 @@ private struct AgentEditor: View {
     }
 
     private var workspaceActions: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: AppLayout.compactSpacing) {
             Button {
                 guard let picked = WorkspacePicker.pickDirectory() else { return }
                 agent.workingDirectory = picked
@@ -1066,7 +988,7 @@ private struct AgentEditor: View {
     }
 
     private var voiceActions: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: AppLayout.compactSpacing) {
             Button { previewVoice() } label: { Text("Preview")
                 .font(.app(.body)) }
                 .disabled(previewer.active != nil || agent.voice == nil)
@@ -1124,7 +1046,7 @@ private struct AgentEditor: View {
 
     private var samplingSection: some View {
         AgentSection("Sampling") {
-            AgentCard(spacing: 12) {
+            AgentCard(spacing: AppLayout.rowSpacing) {
                 GenerationDefaultsRows(profile: samplingProfile, inheritance: "Server default",
                                        fields: GenerationField.agentFields, allowsForce: false,
                                        inherited: inheritedSampling)
@@ -1227,7 +1149,11 @@ private struct AgentVoiceMenu: View {
             } label: {
                 Text(L10n.text(label))
             }
-            .fixedSize()
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .frame(maxWidth: 260, alignment: .trailing)
+            .accessibilityLabel(Text("Voice"))
+            .accessibilityValue(Text(L10n.text(label)))
     }
 
     /// One tickable row — a real Button so the whole row is the hit target.

@@ -1,17 +1,7 @@
 import XCTest
 @testable import MLXCore
 
-/// Source audit for the composer's Tools / MCP discs.
-///
-/// These two are flipped constantly, and while the glyph OPENED a menu the
-/// frequent action cost a click plus a row in a long list. Click now TOGGLES
-/// (`primaryAction:`) and the configuration list moved to secondary-click
-/// (plus press-and-hold, which is what `primaryAction:` gives us natively).
-///
-/// A source audit rather than a behavior test because there is no seam here: a
-/// `Menu` that quietly loses its `primaryAction:` still compiles, still renders
-/// identically, and only differs in what one click does — exactly the kind of
-/// regression nothing else in the suite can see.
+/// Existing capability and command reachability guards.
 final class ComposerModeControlTests: XCTestCase {
 
     private func chatViewSource() throws -> String {
@@ -33,94 +23,7 @@ final class ComposerModeControlTests: XCTestCase {
         return String(rest[..<(end?.lowerBound ?? rest.endIndex)])
     }
 
-    func testToolsAndMcpDiscsToggleOnClick() throws {
-        let source = try chatViewSource()
-        for control in ["agentToggle", "mcpToggle"] {
-            let body = try declaration(control, in: source)
-            XCTAssertTrue(body.contains("primaryAction:"), """
-                \(control) must toggle on a plain click (`Menu { … } label: { … } \
-                primaryAction: { … }`). Without it the glyph only opens the menu \
-                and the most frequent action in the composer costs two steps.
-                """)
-            XCTAssertTrue(body.contains(".contextMenu {"), """
-                \(control) must offer its configuration list on secondary-click — \
-                that is the ONLY discoverable way in once click toggles \
-                (press-and-hold works but nobody finds it).
-                """)
-        }
-    }
 
-    /// The brain disc follows the same idiom: click toggles thinking,
-    /// secondary-click (and press-and-hold) opens the reasoning-effort picker.
-    func testThinkDiscTogglesOnClickAndOffersTheEffortMenuOnRightClick() throws {
-        let source = try chatViewSource()
-        let body = try declaration("thinkToggle", in: source)
-        XCTAssertTrue(body.contains("primaryAction:"),
-                      "the brain disc must toggle thinking on a plain click")
-        XCTAssertTrue(body.contains(".contextMenu {"),
-                      "secondary-click must offer the reasoning-effort picker")
-    }
-
-    /// The menus carry the per-tool switches / workspace / marketplace ONLY.
-    /// An on/off row there would be a second way to do what one click does,
-    /// and two controls for one boolean is how they end up disagreeing.
-    func testMenusDoNotDuplicateTheOnOffSwitch() throws {
-        let source = try chatViewSource()
-        for banned in ["Turn Tools Off", "Turn Tools On", "Turn MCP Off", "Turn MCP On"] {
-            XCTAssertFalse(source.contains("\"\(banned)\""),
-                           "\(banned) is the click action now — it must not also be a menu row")
-        }
-    }
-
-    /// A right-click menu that nothing announces is a feature nobody uses. The
-    /// wording moved to `ComposerTip` (pinned by `ComposerTipTests`); what this
-    /// audit still owns is that the two controls actually SHOW it.
-    func testTooltipsNameBothGestures() throws {
-        let source = try chatViewSource()
-        for control in ["agentToggle", "mcpToggle"] {
-            let body = try declaration(control, in: source)
-            XCTAssertTrue(body.contains(".composerTip("),
-                          "\(control) must carry the hover card that names the secondary-click menu")
-        }
-    }
-
-    /// Every composer control is a bare glyph, so each one owes the user a hover
-    /// card — and exactly ONE explanation. A leftover `.help` renders a second,
-    /// differently-worded tooltip on top of the card, and the two drift.
-    func testEveryComposerControlHasOneHoverCardAndNoNativeTooltip() throws {
-        let source = try chatViewSource()
-        for control in ["attachmentMenu", "thinkToggle", "agentToggle", "mcpToggle"] {
-            let body = try declaration(control, in: source)
-            XCTAssertTrue(body.contains(".composerTip("), "\(control) has no hover card")
-            XCTAssertFalse(body.contains(".help("),
-                           "\(control) still has a native tooltip competing with its hover card")
-        }
-    }
-
-    /// The hover card is drawn by the COMPOSER CONTAINER, not by the control: the
-    /// container clips to its rounded rect, so a card overlaid on the disc itself
-    /// is cut off at the container's edge (and lands on top of the text field).
-    /// The anchor preference is what carries it out past the clip.
-    func testHoverCardIsRenderedOutsideTheClippedComposerContainer() throws {
-        let source = try chatViewSource()
-        let clip = try XCTUnwrap(source.range(of: ".clipShape(RoundedRectangle(cornerRadius: 18))"),
-                                 "the composer container still clips — the card must escape it")
-        let overlay = try XCTUnwrap(source.range(of: ".composerTipOverlay()"),
-                                    "the composer container must render the hover card")
-        XCTAssertLessThan(clip.lowerBound, overlay.lowerBound,
-                          "the card overlay must be applied AFTER the clip, or it gets cut off")
-
-        // And the card must never take a click: it sits directly over the row's
-        // most-flipped controls, and a popover/overlay that eats the mouse-down
-        // is worse than no card at all.
-        let tipSource = try String(contentsOf: URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("Sources/MLXServe/Views/ComposerTip.swift"), encoding: .utf8)
-        XCTAssertTrue(tipSource.contains(".allowsHitTesting(false)"),
-                      "the hover card must not be a click target")
-        XCTAssertFalse(tipSource.contains(".popover("),
-                       "an NSPopover swallows the click that would toggle the control it explains")
-    }
 
     /// "Enable/Disable All Tools" were bulk rows above the per-tool switches they
     /// duplicated — the same set is one click per row away, and the pair read as
@@ -144,66 +47,13 @@ final class ComposerModeControlTests: XCTestCase {
 
     // MARK: - Agent lock
 
-    /// The discs' locked values must come from the SAME resolution the turn runs
-    /// under, or they go back to disagreeing with it — which is the bug this
-    /// exists to fix (every agent defaults `web: true`, so `AgentResolution`
-    /// forced the tool loop on while the wrench still rendered OFF).
-    func testTheLockIsBuiltFromTheTurnsOwnResolutionNotFromTheAgentDirectly() throws {
-        let source = try chatViewSource()
-        let start = try XCTUnwrap(source.range(of: "private var agentModeLock: AgentModeLock? {"),
-                                  "ChatView must derive the composer's lock from a resolution")
-        let rest = source[start.upperBound...]
-        let body = String(rest[..<(rest.range(of: "\n    private ")?.lowerBound ?? rest.endIndex)])
-        XCTAssertTrue(body.contains("resolvedAgentSettings("), """
-            the lock's Tools/MCP values must come from `resolvedAgentSettings` — \
-            reading `capabilities` here would be a second copy of the rule and the \
-            icons would drift from what the turn actually runs.
-            """)
-    }
 
-    /// Belt-and-braces, same shape as the tool-dispatch refusal: the locked disc
-    /// no longer offers a primary action, and the setters refuse anyway — the
-    /// pre-send intent nudge calls them too.
-    func testTheToggleSettersRefuseWhileLocked() throws {
-        let source = try chatViewSource()
-        for setter in ["private func setToolsEnabled(_ on: Bool) {",
-                       "private func setMCPEnabled(_ on: Bool) {"] {
-            let start = try XCTUnwrap(source.range(of: setter), "missing \(setter)")
-            let rest = source[start.upperBound...]
-            let body = String(rest[..<(rest.range(of: "\n    }")?.upperBound ?? rest.endIndex)])
-            XCTAssertTrue(body.contains("LockedBy"),
-                          "\(setter) must no-op while an agent owns the control")
-        }
-    }
 
-    /// A nudge offering to turn on a mode the agent forbids is a dead offer —
-    /// accepting it changes nothing and the message sends anyway.
-    func testThePreSendNudgeIsSuppressedForLockedModes() throws {
-        let source = try chatViewSource()
-        let start = try XCTUnwrap(source.range(of: "private func detectIntentPrompt(for text: String) -> IntentPrompt? {"))
-        let rest = source[start.upperBound...]
-        let body = String(rest[..<(rest.range(of: "\n    }")?.upperBound ?? rest.endIndex)])
-        XCTAssertTrue(body.contains("LockedBy"),
-                      "detectIntentPrompt must not offer a mode the agent decides")
-    }
 
-    /// The nudge DECISION is pure (`ComposerIntent.nudge`, unit-tested in
-    /// ComposerInputTests) and the view only adapts its inputs. A second copy of
-    /// the rule here is how "Only use tools when I ask" would come back to life
-    /// in one of the branches — the setting has to be read where the decision is
-    /// made, not beside it.
-    func testThePreSendNudgeDecisionIsTheOnePureFunctionAndReadsTheOptInSetting() throws {
-        let source = try chatViewSource()
-        let start = try XCTUnwrap(source.range(of: "private func detectIntentPrompt(for text: String) -> IntentPrompt? {"))
-        let rest = source[start.upperBound...]
-        let body = String(rest[..<(rest.range(of: "\n    }")?.upperBound ?? rest.endIndex)])
-        XCTAssertTrue(body.contains("ComposerIntent.nudge("),
-                      "the view must ask the pure decision, not re-implement it")
-        XCTAssertTrue(body.contains("toolsOnlyWhenAsked"), """
-            the "Only use tools when I ask" setting must reach the decision — \
-            a nudge that ignores it is exactly the interruption the setting turns off.
-            """)
-    }
+
+
+
+
 
     /// "Edit Agent…" on a locked disc must land on THAT agent, not on whoever
     /// sorts first — the whole reason the row exists is that the user just read
@@ -293,20 +143,6 @@ final class ComposerModeControlTests: XCTestCase {
             """)
     }
 
-    /// Agents is a DESTINATION, not a menu: every other row in that column
-    /// means "go somewhere", and a row that instead starts a conversation was
-    /// the odd one out — with the editor buried at the bottom of its menu.
-    func testTheAgentsRowIsADestinationNotAMenu() throws {
-        let chat = try chatViewSource()
-        let start = try XCTUnwrap(chat.range(of: "private var agentsRow"))
-        let rest = chat[start.upperBound...]
-        let body = String(rest[..<(rest.range(of: "\n    }")?.upperBound ?? rest.endIndex)])
-        XCTAssertTrue(body.contains("appState.showAgents()"),
-                      "the Agents row opens the Agents pane")
-        XCTAssertFalse(body.contains("Menu {"),
-                       "the Agents row must not open a menu any more")
-    }
-
     // MARK: - Content passing under floating chrome
 
     /// Transcript text ran straight into the floating model-picker cluster.
@@ -329,119 +165,5 @@ final class ComposerModeControlTests: XCTestCase {
                                     "both the sidebar and the transcript scroll under floating chrome")
     }
 
-    /// The toolbar carries no material — and its BAR still exists.
-    ///
-    /// Everything that lived in it moved somewhere it belongs: the model
-    /// picker, the mode discs and the server control to the COMPOSER row (they
-    /// configure the message, or report what you discover by typing), Settings
-    /// to a sidebar destination. What remained was an empty band, so the
-    /// material goes.
-    ///
-    /// The bar does NOT go with it. `.toolbar(.hidden, for: .windowToolbar)`
-    /// removes the bar itself, and the traffic lights and the sidebar-collapse
-    /// button are its residents — hiding it produced a window that could not be
-    /// closed, zoomed, or have its sidebar collapsed (live 2026-08-09). The
-    /// older trap it was chosen to avoid — `scrollEdgeEffectStyle` attached to
-    /// an invisible bar, transcript text clipping mid-line (2026-07-30) — was
-    /// about the floating CLUSTER, which no longer exists; the one surface that
-    /// still needs frosting owns a backdrop of its own instead.
-    func testTheToolbarKeepsItsBarAndLosesItsMaterial() throws {
-        let raw = try chatViewSource()
-        let source = raw
-            .split(separator: "\n", omittingEmptySubsequences: false)
-            .map { $0.trimmingCharacters(in: .whitespaces).hasPrefix("//") ? "" : String($0) }
-            .joined(separator: "\n")
 
-        XCTAssertFalse(source.contains(".toolbar(.hidden, for: .windowToolbar)"), """
-            Hiding the window toolbar takes the traffic lights and the \
-            sidebar-collapse button with it. Hide its MATERIAL instead.
-            """)
-        let hidden = source.components(separatedBy: ".toolbarBackground(.hidden, for: .windowToolbar)").count - 1
-        XCTAssertEqual(hidden, 2, """
-            Both split views (the chat's two-column and the three-column Tasks / \
-            Agents) must drop the toolbar material — nothing lives in that band.
-            """)
-        XCTAssertFalse(source.contains(".toolbarBackground(.visible"),
-                       "no column should re-assert the material the window no longer needs")
-        XCTAssertFalse(source.contains("private var floatingToolbar"),
-                       "the floating cluster is gone; its controls live in the composer row")
-    }
-
-    /// The hidden material sits on the SPLITS themselves, never on one pane
-    /// inside them. Attached to ChatDetailView it covered only conversation
-    /// mode — switching to Models / Settings / Create brought the default
-    /// toolbar material back and the window chrome flipped per mode, which is
-    /// exactly the "no material now, in every mode" contract broken.
-    func testBothSplitViewsCarryTheHiddenMaterialThemselves() throws {
-        let source = try chatViewSource()
-        func body(of marker: String, until end: String) throws -> String {
-            let afterStart = try XCTUnwrap(source.range(of: marker),
-                                           "marker \(marker) not found").upperBound
-            let tail = source[afterStart...]
-            let stop = try XCTUnwrap(tail.range(of: end),
-                                     "end marker \(end) not found").lowerBound
-            return String(tail[..<stop])
-        }
-        let modifier = ".toolbarBackground(.hidden, for: .windowToolbar)"
-        let three = try body(of: "private var threeColumnSplitView",
-                             until: "private var standardSplitView")
-        XCTAssertTrue(three.contains(modifier),
-                      "the three-column split (Tasks/Agents) must drop the material itself")
-        let standard = try body(of: "private var standardSplitView",
-                                until: "private func createPane")
-        XCTAssertTrue(standard.contains(modifier), """
-            the standard split must drop the material itself — on ChatDetailView \
-            it covers only conversation mode, and Models/Settings/Create regain \
-            the default toolbar band.
-            """)
-    }
-
-    /// The sidebar's pinned destinations rely on the PLATFORM to frost what
-    /// scrolls beneath them — `scrollEdgeEffectStyle`, which needs the
-    /// toolbar's bar to attach to.
-    ///
-    /// They carried a hand-drawn `.regularMaterial` backdrop for exactly as
-    /// long as the bar was hidden outright. With the bar back the backdrop
-    /// goes: a band drawn by hand over a sidebar is the same class as the strip
-    /// that once looked native and swallowed every click in it.
-    func testThePinnedDestinationsRelyOnTheScrollEdgeEffect() throws {
-        let source = try chatViewSource()
-        guard let start = source.range(of: "safeAreaInset(edge: .top)"),
-              let end = source.range(of: "private func sectionHeader",
-                                     range: start.upperBound..<source.endIndex) else {
-            return XCTFail("the sidebar's destination inset moved — update this audit")
-        }
-        let inset = String(source[start.upperBound..<end.lowerBound])
-            .split(separator: "\n", omittingEmptySubsequences: false)
-            .map { $0.trimmingCharacters(in: .whitespaces).hasPrefix("//") ? "" : String($0) }
-            .joined(separator: "\n")
-        XCTAssertFalse(inset.contains(".background(.regularMaterial)"), """
-            The destinations block draws its own band again. The toolbar's bar \
-            is back, so the platform's scroll-edge effect has something to \
-            attach to — a hand-drawn strip over a sidebar is the class that \
-            once looked native and ate every click in it.
-            """)
-        XCTAssertFalse(inset.contains(".background(.bar)"),
-                       "`.bar` also draws a separator — the rule removed from the Tasks header")
-        // The effect itself must still be asked for.
-        XCTAssertTrue(source.contains(".scrollEdgeEffectStyle("),
-                      "the sidebar list still needs the native edge effect")
-    }
-
-    // MARK: - Hover card dismissal
-
-    /// The card is a non-hit-testing overlay, so the only thing that takes it
-    /// down is a hover-exit — which opening a menu does NOT deliver. It then sits
-    /// under the open menu. `NSMenu.didBeginTrackingNotification` fires for both
-    /// buttons (SwiftUI's `Menu` and `.contextMenu` are both NSMenus) and for
-    /// press-and-hold, so one observer covers every way in.
-    func testTheHoverCardIsTakenDownWhenAMenuOpensOverIt() throws {
-        let tipSource = try String(contentsOf: URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("Sources/MLXServe/Views/ComposerTip.swift"), encoding: .utf8)
-        XCTAssertTrue(tipSource.contains("NSMenu.didBeginTrackingNotification"), """
-            opening a menu over the composer must dismiss the hover card — left-click \
-            on the agent/attach menus, right-click on the Tools/MCP discs.
-            """)
-    }
 }

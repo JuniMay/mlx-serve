@@ -5,11 +5,7 @@ import ModelIO
 import SceneKit.ModelIO
 import UniformTypeIdentifiers
 
-/// 3D generation window — single photo → textured mesh, run natively by the
-/// embedded mlx-serve server (Hunyuan3D 2.1 shape stage). Same shell as
-/// ImageGen/VideoGen/AudioGen: a model picker, a photo well, an Advanced
-/// disclosure (steps / guidance / mesh resolution), and a SceneKit preview of
-/// the result with a turntable "Animate" toggle.
+/// A photo produces a mesh preview; quality and texture controls live in the inspector.
 struct Model3DGenView: View {
     @EnvironmentObject var service: Model3DGenService
     @EnvironmentObject var server: ServerManager
@@ -29,7 +25,6 @@ struct Model3DGenView: View {
     @State private var keepResident: Bool = false
     @State private var turntable: Bool = true
     @State private var texture: Bool = false
-    @State private var showAdvanced: Bool = false
 
     @State private var showRAMWarning: Bool = false
     @State private var ramWarningMessage: String = ""
@@ -42,8 +37,6 @@ struct Model3DGenView: View {
     @State private var isDropTargeted: Bool = false
 
     var body: some View {
-        // No window-sized floor — see ImageGenView: pages shrink their
-        // preview side, they don't overflow the detail column.
         readyView
         .onAppear {
             if !didHydrate {
@@ -56,39 +49,34 @@ struct Model3DGenView: View {
             // the picker (discovery lands seconds after the server boots).
             if server.status == .running { Task { await server.refreshModels() } }
         }
-        // ONE observation of the whole blob (the Music pane's mechanism):
-        // anything in `stickySnapshot` is sticky by construction.
+        .onChange(of: appState.mediaModelSelection) { _, request in
+            guard let request, let selection = request.applying(to: stickySnapshot) else { return }
+            model = selection.resolvedModel(models: server.allModels)
+            lanModel = LanPick.lanId(selection.modelId)
+        }
         .onChange(of: stickySnapshot) { _, _ in guard !hydrating else { return }; persist() }
     }
 
     private var readyView: some View {
-        HSplitView {
-            ScrollView {
-                // The model decides whether the weights are on this Mac at
-                // all, so it is read before the photo it acts on.
-                VStack(alignment: .leading, spacing: 14) {
-                    modelSection
-                    photoSection
-                    advancedSection
-                    // Generate stands apart from the settings it acts on.
-                    actionRow.padding(.top, 14)
-                }
-                // Full-width, leading-aligned frame OUTSIDE the padding — see
-                // AudioGenView.
-                .padding(16)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .frame(minWidth: 340, idealWidth: 380)
-
-            VStack(spacing: 12) {
+        GenerationWorkspace(
+            title: "3D", modelName: lanModel ?? model.name,
+            notice: generationBlockReason,
+            prompt: {
+                photoSection
+            }, model: {
+                modelSection
+            }, attachments: {
+                EmptyView()
+            }, parameters: {
+                keepResidentToggle
+                parameterControls
+            }, actions: {
+                actionRow
+            }, result: {
                 previewArea
                 historyShelf
                 outputFolderLink
-            }
-            .padding(16)
-            // The preview gives way in a small window.
-            .frame(minWidth: 280)
-        }
+            })
         .alert("Model exceeds your Mac's RAM", isPresented: $showRAMWarning) {
             Button(role: .cancel) { pendingRequest = nil } label: { Text("Cancel")
                 .font(.app(.body)) }
@@ -104,11 +92,6 @@ struct Model3DGenView: View {
 
     // MARK: - Sections
 
-    /// Best-per-capability up front, everything else behind "Other Models", and
-    /// the Download button ON the model — see `MediaModelChooser`. The transfer
-    /// bar (or the conversion hint for weights with no download) and residency
-    /// belong to the model, not to the output, so they sit with it rather than
-    /// beside Generate.
     private var modelSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             modelChooser
@@ -118,19 +101,13 @@ struct Model3DGenView: View {
         }
     }
 
-    /// Residency rides the switcher's row: it is a property of the model, and
-    /// the only thing about it the pane still has to say once it is picked.
-    private var keepResidentToggle: AnyView {
-        AnyView(
-            Toggle(isOn: $keepResident) {
-                Text("Keep model loaded after generating")
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
-                .font(.app(.caption))
-                .controlSize(.small)
-                .help("On: the model stays resident so the next generation is instant. Off (default): it's unloaded to free GPU memory.")
-        )
+    private var keepResidentToggle: some View {
+        Toggle(isOn: $keepResident) {
+            Text("Keep model loaded after generating")
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .font(.app(.body))
+        .help("On: the model stays resident so the next generation is instant. Off (default): it's unloaded to free GPU memory.")
     }
 
     private var modelChooser: some View {
@@ -146,8 +123,7 @@ struct Model3DGenView: View {
             bundleOf: { $0.bundle },
             downloads: downloads,
             onDownloadFinished: { appState.refreshModels() },
-            persist: persist,
-            accessory: keepResidentToggle)
+            persist: persist)
     }
 
     private var photoSection: some View {
@@ -187,27 +163,24 @@ struct Model3DGenView: View {
         }
     }
 
-    private var advancedSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            FoldingSectionHeader(title: "Advanced options", isExpanded: $showAdvanced)
-            if showAdvanced {
-                intSliderRow("Steps", value: $steps, range: 10...50)
-                sliderRow("Guidance", value: $guidance, range: 1...10, step: 0.5)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Mesh resolution").font(.app(.rowTitle))
-                    Picker("", selection: $resolution) {
-                        Text("128 (fast)").tag(128)
-                        Text("256 (balanced)").tag(256)
-                        Text("384 (fine)").tag(384)
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.segmented)
-                    Text("Higher = finer mesh, more memory and time.").font(.app(.caption2)).foregroundStyle(.secondary)
+    private var parameterControls: some View {
+        VStack(alignment: .leading, spacing: AppLayout.sectionSpacing) {
+            intSliderRow("Steps", value: $steps, range: 10...50)
+            sliderRow("Guidance", value: $guidance, range: 1...10, step: 0.5)
+            VStack(alignment: .leading, spacing: AppLayout.labelSpacing) {
+                Text("Mesh resolution").font(.app(.rowTitle))
+                Picker("Mesh resolution", selection: $resolution) {
+                    Text("128 (fast)").tag(128)
+                    Text("256 (balanced)").tag(256)
+                    Text("384 (fine)").tag(384)
                 }
-                Toggle("Texture (PBR)", isOn: $texture)
-                    .font(.app(.caption))
-                    .help("After the shape stage, paint a full PBR texture (albedo + metallic-roughness) onto the mesh from the same photo. Needs the converted paint weights (~4.6 GB).")
+                .labelsHidden()
+                .pickerStyle(.menu)
+                Text("Higher = finer mesh, more memory and time.").font(.app(.caption2)).foregroundStyle(.secondary)
             }
+            Toggle("Texture (PBR)", isOn: $texture)
+                .font(.app(.body))
+                .help("Paint physically based rendering (PBR) textures from the same photo. Requires the converted paint weights (about 4.6 GB).")
         }
     }
 
@@ -253,22 +226,33 @@ struct Model3DGenView: View {
     /// glued to the caption above; 3pt, the Video pane's value.
     private static let steppedSliderTrackDrop: CGFloat = 3
 
+    private var generationBlockReason: String? {
+        guard !service.isRunning else { return nil }
+        if lanModel == nil && !downloads.bundleReady(model.bundle) {
+            return model.isLocalOnly
+                ? "Install the selected model to generate a mesh."
+                : "Download the selected model to generate a mesh."
+        }
+        return photoURL == nil ? "Choose a photo to generate a mesh." : nil
+    }
+
     private var actionRow: some View {
         HStack {
             if service.isRunning {
                 Button(role: .destructive) { service.cancel() } label: {
-                    Label("Cancel", systemImage: "stop.circle").font(.app(.body)).frame(maxWidth: .infinity)
+                    Label("Cancel", systemImage: "stop.circle").font(.app(.body))
                 }
                 .buttonStyle(.bordered)
             } else {
                 Button { tryGenerate() } label: {
-                    Label("Generate", systemImage: "cube.transparent").font(.app(.body)).frame(maxWidth: .infinity)
+                    Label("Generate", systemImage: "cube.transparent").font(.app(.body))
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.return, modifiers: [.command])
-                .disabled(photoURL == nil || (lanModel == nil && !downloads.bundleReady(model.bundle)))
+                .disabled(generationBlockReason != nil)
             }
         }
+        .controlSize(.large)
     }
 
     private var convertHint: some View {
@@ -284,7 +268,8 @@ struct Model3DGenView: View {
 
     private var previewArea: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.15))
+            RoundedRectangle(cornerRadius: AppLayout.surfaceRadius, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor))
             Group {
                 switch service.phase {
                 case .idle:
@@ -317,7 +302,7 @@ struct Model3DGenView: View {
         VStack(spacing: 8) {
             Model3DSceneView(url: URL(fileURLWithPath: path), animate: turntable)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .clipShape(RoundedRectangle(cornerRadius: AppLayout.surfaceRadius, style: .continuous))
             HStack(spacing: 10) {
                 Toggle("Animate", isOn: $turntable)
                     .toggleStyle(.switch).font(.app(.caption))
@@ -332,7 +317,7 @@ struct Model3DGenView: View {
                 .buttonStyle(.borderless).help("Reveal in Finder")
             }
         }
-        .padding(16)
+        .padding(AppLayout.contentInset)
     }
 
     private var outputFolderLink: some View {
@@ -396,7 +381,6 @@ struct Model3DGenView: View {
         keepResident = s.keepResident
         turntable = s.turntable
         texture = s.texture
-        showAdvanced = s.showAdvanced
         // A photo that has gone since is dropped, as the other panes do.
         photoURL = s.photoPath.flatMap { FileManager.default.fileExists(atPath: $0) ? URL(fileURLWithPath: $0) : nil }
     }
@@ -413,7 +397,6 @@ struct Model3DGenView: View {
         s.turntable = turntable
         s.texture = texture
         s.photoPath = photoURL?.path
-        s.showAdvanced = showAdvanced
         return s
     }
 

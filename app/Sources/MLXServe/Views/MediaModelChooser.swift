@@ -30,35 +30,25 @@ struct MediaModelChooser<P: MediaModelSizing>: View {
     /// switcher: live residency, where a pane has it. Reads as part of the
     /// sentence the row makes, which is why it is not in the trailing slot.
     var status: AnyView? = nil
-    /// Anything the PANE wants on the switcher's row, trailing edge. What
-    /// belongs there is the pane's own business (residency, for the ones that
-    /// unload after generating), so it is handed in rather than built here.
-    var accessory: AnyView? = nil
 
     @EnvironmentObject var server: ServerManager
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: AppLayout.labelSpacing) {
             Text("Model").font(.app(.headline).weight(.semibold))
 
             // ONE row: the model that will run. A stack of radio rows read as
             // a multi-select and grew with the catalogue; what the pane has to
             // SAY is the current pick — changing it is the menu's job.
-            currentRow
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.primary.opacity(0.04))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
-                )
+            GroupBox {
+                currentRow
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
 
-            HStack(spacing: 8) {
+            HStack(spacing: AppLayout.compactSpacing) {
                 switcherMenu
                 status
-                Spacer(minLength: 8)
-                accessory
+                Spacer(minLength: AppLayout.compactSpacing)
             }
         }
     }
@@ -109,7 +99,8 @@ struct MediaModelChooser<P: MediaModelSizing>: View {
                 Text(cur.name)
                     .font(.app(.subheadline).weight(.semibold))
                     .foregroundStyle(.primary)
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .help(cur.name)
                 if !cur.detail.isEmpty || cur.ram != nil {
                     HStack(spacing: 4) {
                         if !cur.detail.isEmpty {
@@ -155,8 +146,6 @@ struct MediaModelChooser<P: MediaModelSizing>: View {
                 }
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
     }
 
     /// The one switcher: everything pickable, grouped, current pick ticked.
@@ -235,8 +224,7 @@ extension MediaModelChooser {
                      downloads: DownloadManager,
                      onDownloadFinished: @escaping () -> Void,
                      persist: @escaping () -> Void,
-                     status: AnyView? = nil,
-                     accessory: AnyView? = nil) -> MediaModelChooser<P> {
+                     status: AnyView? = nil) -> MediaModelChooser<P> {
         let featured = MediaModelPicks.featured(
             all,
             physicalMemoryBytes: ProcessInfo.processInfo.physicalMemory,
@@ -268,7 +256,6 @@ extension MediaModelChooser {
             },
             lanCapability: capability,
             status: status,
-            accessory: accessory,
             onSelectLan: { id in
                 lanModel.wrappedValue = id
                 // Adopt the preset the request will be SHAPED by: catalogue

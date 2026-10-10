@@ -53,11 +53,11 @@ Sampling defaults for request fields the client OMITS resolve as: request body >
 
 | Path | Role |
 |------|------|
-| `MLXServeApp.swift` | App entry, menu bar + Chat/Browser windows |
-| `AppState.swift` | Global state, chat session persistence |
+| `MLXServeApp.swift` | App entry, menu bar + Chat/Browser/Settings windows |
+| `AppState.swift` | Global state, chat session persistence and `ChatToolDefaults` |
 | `Models/{ChatModels,AgentModels}.swift` | `ChatMessage`, `ChatImage`, `SerializedToolCall`, `AgentPlan` |
 | `Services/APIClient.swift` | HTTP + SSE streaming client |
-| `Services/AgentPrompt.swift` | System prompt, 10 tools, `SkillManager` |
+| `Services/AgentPrompt.swift` | System prompt, built-in tool definitions, `SkillManager` |
 | `Services/AgentBudget.swift` | `AgentBudget.forServerContext` + `AgentConfigs` — derives the context/output budget written into third-party agent CLI configs (pi `models.json`, opencode provider, Claude Code `CLAUDE_CODE_MAX_OUTPUT_TOKENS` + `CLAUDE_CODE_MAX_CONTEXT_TOKENS`) from the server's advertised `meta.context_length`. Never hardcode these. |
 | `Services/AgentEngine.swift` | Shared agent logic: history, tool exec, repetition tracking, overflow |
 | `Services/ToolExecutor.swift` | Tool handlers (shell, file, search, browse, webSearch, saveMemory) |
@@ -65,8 +65,76 @@ Sampling defaults for request fields the client OMITS resolve as: request body >
 | `Services/{AgentSandbox,VzGuest,OCIClient,SandboxSmoke}.swift` | Agent Sandbox: shell tool routed into an isolated Linux guest on Apple Virtualization.framework. `AgentSandbox` (manager: settings, lazy boot, transcript, provisioning) → `VzGuest` (VZVirtualMachine boot + persistent dash shell driven via `ShellSentinel` over a dedicated hvc1 console port) + `OCIClient` (anonymous Docker/OCI pull + gunzip). See "Agent Sandbox" gotcha. |
 | `Services/{ImagePreprocessor,BrowserManager,ServerManager,TestServer,AgentMemory}.swift` | Image prep, WKWebView, server lifecycle, embedded test server (port 8090), agent context |
 | `Services/ClonedVoiceSynthesizer.swift` | Voice-clone speech for voice mode: a global "Voice clone clip" recorded/picked in Settings ▸ Voice (`ServerOptions.voiceClonePath`, normalized via `AudioReference` and persisted to `~/.mlx-serve/voice-clips/` — `VoiceCloneClipStore`) makes the hands-free assistant answer in the cloned voice. `ClonedVoiceSynthesizer` wraps `SystemSpeechSynthesizer` behind the same `SpeechSynthesizing` protocol (wired in `VoiceModeController(server:)`): per utterance it re-reads the clip path; clip set → pipelined FIFO synth+play via Qwen3-TTS `/v1/audio/speech` + `ref_audio` (`VoiceCloneTTS` keeps the model resident across sentences; sentence N plays while N+1 synthesizes); clip empty OR a synthesis fails → THAT utterance falls back to the system voice at its turn — never dead air, never reordered. `stop()` (barge-in) clears both pipelines but keeps the model warm; `SpeechSynthesizing.shutdown()` (default = stop; called by `VoiceModeController.end()`) additionally unloads it. **Pre-warm** (docs/qwentts-cache.md): `SpeechSynthesizing.prewarm()` (default no-op) fires on voice-mode activation — the clone arm loads the TTS model and POSTs `{"warm_only":true,"ref_audio":…}` (`VoiceCloneTTS.warmBody`, pure/tested) so the FIRST sentence starts from a warm speaker-embedding cache; server replies `{"warmed":true,"cache":"hit"|"miss"}`, misuse is a named 400 (missing ref, non-cloning checkpoint, Kokoro). Routing pinned by `ClonedVoiceSynthesizerTests`. |
-| `Services/QuickLauncher.swift` + `Views/QuickLauncherView.swift` | ⌃Space quick launcher (tray toggle under Voice): Carbon `RegisterEventHotKey` (no TCC prompt/entitlement) + non-activating borderless floating `NSPanel`. Plain-chat turns through the shared `ChatTurnEngine` into a NORMAL sidebar session (follow-ups keep context; ⌘↩ opens that session in the chat window via `AppState.quickLauncherChatOpenTick`, observed by the always-installed menu-bar label — the SwiftUI-`openWindow`-from-AppKit bridge). Decisions/geometry are pure in `QuickLauncherLogic` (`QuickLauncherTests`); submit must respect the engine's one-turn-at-a-time rule (`stopThenSubmit` own turn / `blocked` someone else's — `runTurn` silently no-ops while `isGenerating`). macOS may consume ⌃Space for input-source switching (multiple input sources enabled) — registration still succeeds, the keystroke just never arrives. |
-| `Views/{ChatView,StatusMenuView,BrowserView}.swift` | Chat UI + `runAgentLoop()`, menu bar, browser |
+| `Services/QuickLauncher.swift` + `Views/QuickLauncherView.swift` | ⌃Space launcher: Carbon hotkey + non-activating floating `NSPanel`. Uses `ChatTurnEngine` to create a normal sidebar session explicitly in Plain Chat; submitting again supersedes only its own active turn. ⌘↩ opens the session through `AppState.quickLauncherChatOpenTick`. Pure decisions/geometry: `QuickLauncherLogic`. macOS input-source switching can consume ⌃Space even when hotkey registration succeeds. |
+| `Views/{ChatView,StatusMenuView,BrowserView}.swift` | Chat UI and scoped tool approvals, menu bar, browser |
+| `Models/ChatToolPreferences.swift` + `Services/{AppStateAgents,AgentResolution}.swift` | Global defaults, per-chat inheritance and Plain Chat; `resolvedChatSettings(for:)` combines them with the agent, thinking, effort and workspace |
+| `Services/ChatTurnEngine.swift` + `Models/ToolApprovalScope.swift` | Concurrent per-session turns, token ownership, tool revocation and approval scope |
+| `Views/ChatModelPill.swift` | Composer model/thinking control with separate settings and model-list pages |
+| `Models/SettingsHelpText.swift` + `Views/SettingsView.swift` | Settings captions, complete help and search vocabulary |
+
+#### Conversation controls and tool access
+
+Models, Tasks, Agents and media generation are destinations in one interaction window. `WorkspaceSplitView` keeps the main sidebar mounted while its detail switches workspaces; Agents and Tasks add a secondary list inside that detail. Settings opens in a separate window. The composer contains attachment, Chat Mode, model/thinking and send controls. The model/thinking popover starts with thinking controls and the selected model; selecting the model opens a separate list with Back, arrow-key navigation and type-ahead. `ModelPickerScrollView` measures the list's content and gives it a 72–300 point viewport; Back and Manage Models remain outside that scroll area. Model-only surfaces open that list directly. Thinking values supplied by saved agents or bridges show their effective state and owner. `ModelPickerScrollViewTests` and `app/Tests/ComposerWindowChecks.md` cover sizing and page transitions.
+
+Settings ▸ Tools & MCP owns `ChatToolDefaults`: built-in tools, MCP access and per-tool exclusions. New chats store `ChatToolPreferences(followsDefaults: true)` and read current defaults for each turn. Chats with no preferences retain their saved `mode`, `useMCP` and `disabledTools` until the user chooses **Use Settings Defaults** in Chat Mode. Toggling Plain Chat on such a chat records `followsDefaults: false`, preserving those choices. With no stored global defaults, built-in tools start off and MCP inherits the existing global `mcpMode` preference. Changing tool access does not grant tool approval.
+
+`AppState.resolvedChatSettings(for:)` is the conversation resolution entry point. A saved agent owns its capabilities and MCP choice independently of the global master switches; per-tool exclusions still subtract for chats following Settings defaults. Thinking, persona, model and workspace keep their existing owners. **Plain Chat** applies after agent and Apple-model resolution and removes built-in tools, MCP and attached-folder search. Turning it off resumes the chat's saved choices or current defaults. Voice resolves the bound conversation through the same path; Quick Launcher explicitly uses Plain Chat, while Telegram and scheduled tasks retain their separate configuration.
+
+`ChatTurnEngine` owns one active turn per session. Tool definitions are filtered without reordering their JSON, and `AgentEngine` checks dispatch access before built-ins, meta-tools or connected MCP tools can execute. Plain Chat revokes all tool access for the running turn, including document search; dispatch re-reads that restriction after approval waits and steering resumes. Turning Plain Chat off does not restore access within that turn or undo actions already performed. Approval requests capture the originating session and turn token; cancellation, token ownership and Plain Chat are checked after the wait, and an “Allow all” grant belongs only to the still-current origin. Outside Plain Chat, an attached folder can enable document search independently of the built-in Tools switch.
+
+#### Shared interface layout
+
+`AppLayout` defines page insets, section/row spacing and shared content corners.
+Native lists, group boxes and controls use their platform geometry. Glass is
+reserved for navigation and floating controls; reading content uses semantic
+backgrounds.
+
+`GenerationWorkspace` gives Image, Video, Voice, Music, Sound and 3D a result
+canvas above a bounded input dock. Model and reference controls live in measured,
+height-capped popovers. Generation parameters occupy a native trailing inspector,
+closed initially. The primary action and missing-input/model notices stay in the
+dock. Each modality retains its capability gates, request builders, progress,
+output handling and saved defaults. Recording Stop remains visible when the
+reference popover closes. Hosted `GenerationWorkspaceTests` cover canvas width,
+control visibility and long-input growth and shrinkage.
+
+`ModelInteractionRoute` maps available local models to chat, a media modality,
+or the decision interface. The global `ModelPalette` searches their names and
+capabilities. Media picks use `AppState.selectMediaModel`, persist the selected
+preset and publish `MediaModelSelectionRequest` for an already-mounted workspace.
+They do not enter the chat loader or start generation. The conversation's
+model/thinking picker remains scoped to chat. Remote media selection stays in
+each media model picker. Unresolved custom media presets remain in the model
+browser until discovery can identify their controls.
+
+`ChatWindowPresentation` resolves conversation titles and completed branch
+boundaries. The main window uses a unified native toolbar. `chatColumn(width:)`
+aligns the transcript, composer and empty state; `ChatMetrics.proseWidth` reserves
+the outer gutters at narrow widths. Thinking and tool disclosure headers use
+secondary gray text that darkens on hover or press, with a chevron beside the
+label. Headers stay outside the expanded details frame. `TranscriptDetailViewport`
+caps inline thinking, tool results and plans at 240 points, while short content
+uses its natural height. Detail prose and Reader content follow the conversation's
+Text Size setting; code and tool identifiers can retain a monospaced face.
+`TranscriptReaderButton` opens the complete content in a sheet sized within the
+originating window, with Copy and Close. Reader and process Stop controls are
+siblings of the disclosure button, so their actions do not toggle expansion.
+Plan approval actions remain outside the scrolling content.
+
+Markdown keeps prose, lists and tables in selectable attributed text. Each list
+run reserves one marker column per nesting level. Tables draw horizontal row
+dividers and cache cells by theme and text size. Inline emphasis preserves bold
+and italic font traits, including inside headings. Display math omits whitespace-only
+prose between equations and uses the same block spacing as fenced code.
+Behavior tests cover column geometry, viewport growth/shrinkage, list boundaries,
+table fonts and title/action resolution. Retained native checks live in
+`app/Tests/{ChatWindow,TranscriptWindow,AgentsTasksWindow,GenerationWindow}Checks.md`.
+
+#### Settings help
+
+`SettingsHelpText` separates a concise, curated summary from the complete explanation. A nonempty summary distinct from the explanation becomes the row caption; **More Information**, beside the option name, opens the unchanged explanation as selectable text in a popover. Missing, blank or equivalent summaries leave the full explanation inline without a redundant help control. Native `LabeledContent` aligns controls in a shared trailing column. Picker frames preserve that alignment, and segmented controls use their ideal width. Settings search indexes both the summary and the complete explanation, including localized text.
+
+Settings search keeps a section-scoped `SettingsVisibleRows` snapshot at the form root. Section headers observe that snapshot and the query directly. `SettingsFormSections` resolves native sections and omits containers with no content, so hidden results leave no section spacing. `GenerationDefaultsSearch` shares the parameter search text between row filtering and container visibility; filtered parameter results omit the bulk action. Query changes preserve each section's local edit and operation state; `SettingsSectionResolutionTests` checks disappearance, recovery and state retention in a hosting view. Native window checks live in `app/Tests/SettingsWindowChecks.md`.
 
 ## Supported Architectures
 

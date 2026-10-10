@@ -61,9 +61,9 @@ final class SettingsCategoryTests: XCTestCase {
     /// Sidebar order must match the order the sections render in, or clicking
     /// down the list scrolls the form around at random.
     func testSidebarOrderMatchesRenderOrder() {
-        XCTAssertEqual(SettingsCategory.visible(engine: .mlx, selfUpdate: true), [
-            .modelFolders, .server, .lanSharing, .providers, .specDecode, .memory, .performance,
-            .neuralEngine, .engines, .requestDefaults, .interface, .voice, .sandbox, .messaging, .updates, .about,
+        XCTAssertEqual(SettingsCategory.visible(engine: .mlx, selfUpdate: true).map(\.rawValue), [
+            "general", "modelFolders", "server", "lanSharing", "providers", "specDecode", "memory", "performance",
+            "neuralEngine", "engines", "requestDefaults", "interface", "voice", "tools", "sandbox", "messaging", "updates", "about",
         ])
     }
 
@@ -79,6 +79,37 @@ final class SettingsCategoryTests: XCTestCase {
     func testClearingTheSearchLeavesTheSelectionAlone() {
         XCTAssertEqual(SettingsSelection.afterQueryEdit(query: "", current: .category(.server)), .category(.server))
         XCTAssertEqual(SettingsSelection.afterQueryEdit(query: "   ", current: .category(.server)), .category(.server))
+    }
+
+    func testClearingGlobalSearchReturnsToGeneral() {
+        let selection = SettingsSelection.afterQueryEdit(query: "", current: .all)
+        guard case .category(let category) = selection else {
+            return XCTFail("Clearing search must return to a category, not the complete settings form")
+        }
+        XCTAssertEqual(category.rawValue, "general")
+    }
+
+    func testOrdinaryWindowReopenPreservesTheCategoryAndSearch() {
+        let visible = SettingsCategory.visible(engine: .mlx, selfUpdate: true)
+        XCTAssertEqual(SettingsSelection.afterOpen(requested: nil, current: .category(.voice), visible: visible),
+                       .category(.voice))
+        XCTAssertEqual(SettingsSelection.afterOpen(requested: nil, current: .all, visible: visible), .all)
+    }
+
+    func testContextRecoveryOpensServerEvenDuringGlobalSearch() {
+        let visible = SettingsCategory.visible(engine: .mlx, selfUpdate: true)
+        XCTAssertEqual(SettingsSelection.afterOpen(requested: .server, current: .all, visible: visible),
+                       .category(.server))
+        XCTAssertEqual(SettingsSelection.afterOpen(requested: .server, current: .category(.general), visible: visible),
+                       .category(.server))
+    }
+
+    func testUnavailableDeepLinkFallsBackToGeneral() {
+        let visible = SettingsCategory.visible(engine: .llama, selfUpdate: false)
+        XCTAssertEqual(SettingsSelection.afterOpen(requested: .specDecode, current: .category(.server), visible: visible),
+                       .category(.general))
+        XCTAssertEqual(SettingsSelection.afterOpen(requested: .updates, current: .category(.server), visible: visible),
+                       .category(.general))
     }
 
     // MARK: - What a selection shows
@@ -101,9 +132,14 @@ final class SettingsCategoryTests: XCTestCase {
     /// Load a GGUF model while "Speculative Decoding" is selected and that
     /// category vanishes from the sidebar — the pane must not be left showing a
     /// section that no longer exists (or, worse, nothing at all).
-    func testSelectionFallsBackToAllWhenItsCategoryDisappears() {
+    func testSelectionFallsBackToGeneralWhenItsCategoryDisappears() {
         let visible = SettingsCategory.visible(engine: .llama, selfUpdate: true)
-        XCTAssertEqual(SettingsSelection.reconciled(.category(.specDecode), visible: visible), .all)
+        let fallback = SettingsSelection.reconciled(.category(.specDecode), visible: visible)
+        if case .category(let category) = fallback {
+            XCTAssertEqual(category.rawValue, "general")
+        } else {
+            XCTFail("A retired category must fall back to General")
+        }
         XCTAssertEqual(SettingsSelection.reconciled(.category(.server), visible: visible), .category(.server),
                        "a still-visible category survives an engine switch")
         XCTAssertEqual(SettingsSelection.reconciled(.all, visible: visible), .all)

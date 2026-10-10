@@ -9,9 +9,10 @@ struct BrowserView: View {
         VStack(spacing: 0) {
             // URL bar
             HStack(spacing: 8) {
-                navButton("chevron.left", enabled: browser.canGoBack) { browser.webView.goBack() }
-                navButton("chevron.right", enabled: browser.canGoForward) { browser.webView.goForward() }
-                navButton(browser.isLoading ? "xmark" : "arrow.clockwise", enabled: true) {
+                navButton("chevron.left", label: "Back", enabled: browser.canGoBack) { browser.webView.goBack() }
+                navButton("chevron.right", label: "Forward", enabled: browser.canGoForward) { browser.webView.goForward() }
+                navButton(browser.isLoading ? "xmark" : "arrow.clockwise",
+                          label: browser.isLoading ? "Stop loading" : "Reload", enabled: true) {
                     if browser.isLoading { browser.webView.stopLoading() } else { browser.webView.reload() }
                 }
 
@@ -40,15 +41,19 @@ struct BrowserView: View {
         }
     }
 
-    private func navButton(_ symbol: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+    private func navButton(_ symbol: String, label: String, enabled: Bool,
+                           action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.app(.title3))
                 .frame(width: 28, height: 28)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.borderless)
+        .controlSize(.small)
         .disabled(!enabled)
+        .accessibilityLabel(L10n.text(label))
+        .help(L10n.text(label))
     }
 
     private func navigateToURL() {

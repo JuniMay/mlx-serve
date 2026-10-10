@@ -10,7 +10,7 @@ struct PlanCardView: View {
     let onReject: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: AppLayout.compactSpacing) {
             HStack {
                 Image(systemName: "list.bullet.clipboard")
                     .foregroundStyle(.blue)
@@ -18,24 +18,15 @@ struct PlanCardView: View {
                     .font(.app(.subheadline).weight(.semibold))
                 Spacer()
                 statusBadge
+                TranscriptReaderButton(title: "Plan", textToCopy: planText) {
+                    steps
+                }
             }
 
             Divider()
 
-            ForEach(Array(plan.steps.enumerated()), id: \.element.id) { index, step in
-                HStack(alignment: .top, spacing: 8) {
-                    stepIndicator(for: index)
-                    Image(systemName: step.tool.icon)
-                        .frame(width: 16)
-                        .foregroundStyle(.secondary)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(L10n.text(step.description))
-                            .font(.app(.caption))
-                        Text(L10n.text(step.tool.displayName))
-                            .font(.app(.caption2))
-                            .foregroundStyle(.tertiary)
-                    }
-                }
+            TranscriptDetailViewport {
+                steps
             }
 
             if plan.status == .pending {
@@ -57,13 +48,40 @@ struct PlanCardView: View {
                 .padding(.top, 4)
             }
         }
-        .padding(12)
+        .padding(AppLayout.contentInset)
         .background(Color(.controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: AppLayout.surfaceRadius, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: AppLayout.surfaceRadius, style: .continuous)
                 .stroke(borderColor, lineWidth: 1)
         )
+    }
+
+    private var steps: some View {
+        VStack(alignment: .leading, spacing: AppLayout.compactSpacing) {
+            ForEach(Array(plan.steps.enumerated()), id: \.element.id) { index, step in
+                HStack(alignment: .top, spacing: AppLayout.compactSpacing) {
+                    stepIndicator(for: index)
+                    Image(systemName: step.tool.icon)
+                        .frame(width: 16)
+                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(verbatim: step.description)
+                            .font(.app(.caption))
+                        Text(L10n.text(step.tool.displayName))
+                            .font(.app(.caption2))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+        }
+        .textSelection(.enabled)
+    }
+
+    private var planText: String {
+        plan.steps.enumerated().map { index, step in
+            "\(index + 1). \(step.description) (\(step.tool.displayName))"
+        }.joined(separator: "\n")
     }
 
     private var borderColor: Color {
@@ -133,49 +151,51 @@ struct ToolResultBlockView: View {
     @State private var isExpanded = false
 
     var body: some View {
-        DisclosureGroup(isExpanded: $isExpanded) {
-            ScrollView {
-                Text(L10n.text(truncatedOutput))
-                    .font(.app(.caption, design: .monospaced))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .frame(maxHeight: 300)
-
-            if let error = result.error, !error.isEmpty {
-                Text(error)
-                    .font(.app(.caption))
-                    .foregroundStyle(.red)
-            }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: step.tool.icon)
-                    .foregroundStyle(.secondary)
-                Text(L10n.text(step.description))
-                    .font(.app(.caption))
-                    .lineLimit(1)
-                Spacer()
-                if result.durationMs > 0 {
-                    Text("\(result.durationMs)ms")
-                        .font(.app(.caption2))
-                        .foregroundStyle(.tertiary)
+        VStack(alignment: .leading, spacing: AppLayout.compactSpacing) {
+            HStack(spacing: AppLayout.compactSpacing) {
+                TranscriptDisclosureButton(isExpanded: isExpanded) {
+                    withAnimation(.easeInOut(duration: 0.15)) { isExpanded.toggle() }
+                } label: {
+                    Image(systemName: step.tool.icon)
+                    Text(verbatim: step.description).lineLimit(1)
+                    if result.durationMs > 0 {
+                        Text("\(result.durationMs)ms")
+                    }
                 }
                 Image(systemName: result.status == .success ? "checkmark.circle.fill" : "xmark.circle.fill")
                     .foregroundStyle(result.status == .success ? .green : .red)
                     .font(.app(.caption))
+                if isExpanded {
+                    TranscriptReaderButton(title: "Tool result", textToCopy: resultText) {
+                        resultContent
+                    }
+                }
+            }
+            if isExpanded {
+                TranscriptDetailSurface {
+                    TranscriptDetailViewport { resultContent }
+                }
             }
         }
-        .padding(8)
-        .background(Color(.controlBackgroundColor).opacity(0.5))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
-    private var truncatedOutput: String {
-        let lines = result.output.components(separatedBy: "\n")
-        if lines.count > 50 {
-            return lines.prefix(50).joined(separator: "\n") + "\n... (\(lines.count - 50) more lines)"
+    private var resultContent: some View {
+        VStack(alignment: .leading, spacing: AppLayout.compactSpacing) {
+            Text(verbatim: result.output)
+                .transcriptDetailText(monospaced: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if let error = result.error, !error.isEmpty {
+                Text(verbatim: error)
+                    .transcriptDetailText()
+                    .foregroundStyle(.red)
+            }
         }
-        return result.output
+        .textSelection(.enabled)
+    }
+
+    private var resultText: String {
+        [result.output, result.error].compactMap { $0 }.filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
     }
 }
 

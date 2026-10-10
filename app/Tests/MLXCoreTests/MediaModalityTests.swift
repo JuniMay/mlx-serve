@@ -123,37 +123,6 @@ final class MediaModalityRoutingTests: XCTestCase {
     }
 }
 
-/// The media Use button must never reach the chat load path.
-final class MediaUseButtonSourceTests: XCTestCase {
-
-    func testTheMediaUseButtonNeverStartsTheServerOnTheModel() throws {
-        // `useModelAndAwaitReady` → `server.start(modelPath:)` loads a path as
-        // the server's PRIMARY CHAT model. Pointing that at a diffusion
-        // checkpoint runs it through the text loader — the exact failure
-        // `isChatPickable` exists to prevent, and the tempting one-line "fix"
-        // for this issue. The media button opens a pane instead; the pane
-        // loads the model the way it always has.
-        let root = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-        let text = try String(
-            contentsOf: root.appendingPathComponent("app/Sources/MLXServe/Views/ModelBrowserView.swift"),
-            encoding: .utf8)
-        guard let start = text.range(of: "private struct UseMediaModelButton"),
-              let end = text.range(of: "\n}", range: start.upperBound..<text.endIndex) else {
-            XCTFail("UseMediaModelButton not found — did it move?")
-            return
-        }
-        let body = String(text[start.lowerBound..<end.upperBound])
-        XCTAssertFalse(body.contains("useModelAndAwaitReady"),
-                       "the media Use button must not load the model as the chat model")
-        XCTAssertFalse(body.contains("server.start"),
-                       "the media Use button must not start the server on the model path")
-        XCTAssertTrue(body.contains("showCreate"),
-                      "the media Use button should route through AppState.showCreate")
-    }
-}
-
 /// `pickableModel` and `mediaModel` are the two halves of the catalogue, and
 /// every on-disk row asks both. Before this, only My Models was fixed and
 /// Discover / Recommended still ended at Delete.

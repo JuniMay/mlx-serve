@@ -14,10 +14,13 @@ struct ModelBrowserPane: View {
 
     @State private var localFilter = ""
 
-    /// Downloading *or* failed — both belong in the queue and both earn a badge.
-    private var activeDownloads: [(repoId: String, state: DownloadManager.DownloadState)] {
+    private var downloadSummary: ModelDownloadSummary {
+        ModelDownloadSummary(states: Array(downloads.downloads.values))
+    }
+
+    private var downloadItems: [(repoId: String, state: DownloadManager.DownloadState)] {
         downloads.downloads
-            .filter { $0.value.status == .downloading || $0.value.status == .failed }
+            .filter { $0.value.status != .idle }
             .sorted { $0.key < $1.key }
             .map { (repoId: $0.key, state: $0.value) }
     }
@@ -34,16 +37,17 @@ struct ModelBrowserPane: View {
             + readyCount(MusicModelPreset.all)
             + readyCount(SoundModelPreset.all)
         return .live(localModelCount: appState.localModels.count,
-                     activeDownloadCount: activeDownloads.count,
+                     activeDownloadCount: downloadSummary.pending,
                      mediaReadyCount: media)
     }
 
     var body: some View {
         VStack(spacing: 0) {
             ModelBrowserSectionBar(section: $section, badges: badges,
-                                   isDownloading: !activeDownloads.isEmpty)
-            Divider()
+                                   isDownloading: downloadSummary.running > 0)
+            // Empty states must fill the remainder so navigation stays at the top.
             detail
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         // The floor the browser's table needs, asserted from INSIDE the chat
         // window's detail column: below it the action cell clips off the right
@@ -51,6 +55,7 @@ struct ModelBrowserPane: View {
         // it only applies while the browser is up — a chat transcript is happy
         // much narrower.
         .frame(minWidth: ModelBrowserMetrics.minDetailWidth)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .task {
             if searchService.models.isEmpty {
                 await searchService.search()
@@ -65,9 +70,9 @@ struct ModelBrowserPane: View {
         // changes or the active-download set changes, which cancels +
         // re-evaluates the guard — so it self-terminates once everything
         // finishes.
-        .task(id: "\(section.rawValue)-\(activeDownloads.count)") {
+        .task(id: "\(section.rawValue)-\(downloadSummary.running)") {
             guard ModelBrowserSection.shouldLivePoll(section: section,
-                                                     hasActiveDownloads: !activeDownloads.isEmpty) else { return }
+                                                     hasActiveDownloads: downloadSummary.running > 0) else { return }
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 if Task.isCancelled { break }
@@ -82,7 +87,7 @@ struct ModelBrowserPane: View {
         case .recommended: RecommendedPane()
         case .discover:     DiscoverPane()
         case .myModels:     MyModelsPane(filter: $localFilter)
-        case .downloads:    DownloadsPane(items: activeDownloads)
+        case .downloads:    DownloadsPane(items: downloadItems) { section = .myModels }
         case .media:        MediaPane()
         }
     }
@@ -95,52 +100,106 @@ private struct ModelBrowserSectionBar: View {
     @Binding var section: ModelBrowserSection
     let badges: ModelBrowserBadgeCounts
     let isDownloading: Bool
+    @Environment(\.layoutDirection) private var layoutDirection
+    @FocusState private var focusedSection: ModelBrowserSection?
 
     var body: some View {
-        HStack(spacing: 6) {
-            ForEach(ModelBrowserSection.allCases) { item in
-                chip(item)
+        GlassEffectContainer {
+            ViewThatFits(in: .horizontal) {
+                sectionTabs
+                    .fixedSize(horizontal: true, vertical: false)
+                sectionMenu
             }
-            Spacer(minLength: 8)
         }
+        .frame(maxWidth: .infinity, alignment: .center)
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.vertical, 10)
     }
 
-    private func chip(_ item: ModelBrowserSection) -> some View {
-        let isSelected = section == item
-        return Button {
+    private var sectionTabs: some View {
+        HStack(spacing: 2) {
+            ForEach(ModelBrowserSection.allCases) { item in
+                sectionButton(item)
+            }
+        }
+        .padding(4)
+        .glassEffect(.regular, in: .capsule)
+        .onKeyPress(.leftArrow) { moveSelection(movingRight: false) }
+        .onKeyPress(.rightArrow) { moveSelection(movingRight: true) }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Models section")
+    }
+
+    private func sectionButton(_ item: ModelBrowserSection) -> some View {
+        Button {
             section = item
+            focusedSection = item
         } label: {
-            HStack(spacing: 5) {
-                Image(systemName: item.systemImage)
-                    .font(.app(.subheadline, weight: .medium))
-                Text(L10n.text(item.title)).font(.app(.callout)).lineLimit(1)
+            HStack(spacing: 6) {
+                Text(verbatim: title(for: item))
+                    .font(.app(.body))
                 if item == .downloads, isDownloading {
-                    ProgressView()
-                        .controlSize(.small)
-                        .scaleEffect(0.55)
-                        .frame(width: 10)
-                }
-                if let badge = badges.badge(for: item) {
-                    Text(L10n.text(badge))
-                        .font(.app(.caption2).monospacedDigit())
-                        .foregroundStyle(isSelected ? .primary : .secondary)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(.quaternary, in: Capsule())
+                    downloadActivity
                 }
             }
-            .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
-            .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(isSelected ? Color.accentColor.opacity(0.14) : Color.clear)
-            )
-            .contentShape(Rectangle())
+            .foregroundStyle(section == item ? Color.accentColor : Color.primary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .contentShape(.capsule)
+            .background {
+                if section == item {
+                    Capsule().fill(Color.accentColor.opacity(0.18))
+                        .overlay(Capsule().strokeBorder(Color.accentColor.opacity(0.45), lineWidth: 1))
+                }
+            }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.borderless)
+        .buttonBorderShape(.capsule)
+        .focused($focusedSection, equals: item)
+        .accessibilityAddTraits(section == item ? .isSelected : [])
+    }
+
+    private var sectionMenu: some View {
+        Menu {
+            Picker("Models section", selection: $section) {
+                ForEach(ModelBrowserSection.allCases) { item in
+                    Text(verbatim: title(for: item)).tag(item)
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text(verbatim: title(for: section))
+                    .font(.app(.body))
+                if isDownloading { downloadActivity }
+            }
+            .foregroundStyle(.primary)
+        }
+        .buttonStyle(.glass)
+        .buttonBorderShape(.capsule)
+        .controlSize(.large)
+        .fixedSize(horizontal: true, vertical: false)
+        .accessibilityLabel("Models section")
+        .accessibilityValue(Text(verbatim: title(for: section)))
+    }
+
+    private var downloadActivity: some View {
+        ProgressView()
+            .controlSize(.mini)
+            .accessibilityLabel("Models are downloading")
+    }
+
+    private func title(for item: ModelBrowserSection) -> String {
+        let title = L10n.text(item.title)
+        return badges.badge(for: item).map { "\(title) (\($0))" } ?? title
+    }
+
+    private func moveSelection(movingRight: Bool) -> KeyPress.Result {
+        let destination = ModelBrowserSectionNavigation.destination(
+            from: focusedSection ?? section, movingRight: movingRight,
+            rightToLeft: layoutDirection == .rightToLeft)
+        section = destination
+        focusedSection = destination
+        return .handled
     }
 }
 
@@ -152,226 +211,133 @@ private struct ModelBrowserSectionBar: View {
 /// (with its 1M+ repos, quant/pull-count columns, and RAM-fitness dots)
 /// assumes you already know roughly what you're looking for.
 private struct RecommendedPane: View {
-    /// Everything below the one recommendation. Collapsed by default: picking a
-    /// model used to mean choosing a vendor taxonomy before you could chat, and
-    /// the answer for someone who has downloaded nothing is one model, not
-    /// fourteen across four sections.
     private var memory: SystemMemoryInfo { SystemMemoryInfo.current() }
     private var starter: RecommendedModelPick {
         RecommendedModelPick.starterPick(physicalMemoryBytes: memory.totalBytes)
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                MemorySummaryCard(memory: memory, recommended: starter)
-                RecommendedModelTable(memory: memory, recommendedId: starter.id)
-            }
-            .padding(16)
+        VStack(spacing: 0) {
+            RecommendedSystemSummary(memory: memory, recommended: starter)
+            Divider()
+            RecommendedModelList(memory: memory, recommendedId: starter.id)
         }
         .navigationTitle("Recommended")
     }
 }
 
-/// The "what does this Mac have, and how much can a model use?" summary at the
-/// top of the Recommended pane: total RAM, the usable-for-models budget (the
-/// Metal working-set ceiling), a capacity bar, and the one recommended pick.
-private struct MemorySummaryCard: View {
+private struct RecommendedSystemSummary: View {
     let memory: SystemMemoryInfo
     let recommended: RecommendedModelPick
-    @EnvironmentObject var server: ServerManager
+    @State private var showsRatingInfo = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 12) {
-                Image(systemName: "memorychip")
-                    .font(.app(.title2))
-                    .foregroundStyle(.tint)
-                    .frame(width: 26)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Your Mac")
-                        .font(.app(.headline))
-                    Text("\(memory.totalLabel) of memory · about \(memory.usableLabel) usable for models")
-                        .font(.app(.subheadline))
-                        .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 0)
-            }
-
-            // The same GPU + Available RAM meter the menu bar shows.
-            MemoryMeter.live(server: server.memoryInfo)
-
-            HStack(spacing: 6) {
-                Image(systemName: "sparkles")
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Label(L10n.format("%@ memory · about %@ usable for models", memory.totalLabel, memory.usableLabel),
+                      systemImage: "memorychip")
+                    .font(.app(.body))
+                Text(verbatim: L10n.format("Recommended for your Mac: %@", recommended.name))
                     .font(.app(.caption))
-                    .foregroundStyle(.tint)
-                Text("Recommended for your Mac:")
                     .foregroundStyle(.secondary)
-                Text(recommended.name)
-                    .fontWeight(.semibold)
-                Spacer(minLength: 0)
             }
-            .font(.app(.callout))
+            Spacer(minLength: 0)
+            Button("About ratings", systemImage: "info.circle") {
+                showsRatingInfo = true
+            }
+            .labelStyle(.iconOnly)
+            .buttonStyle(.borderless)
+            .help("About model ratings and memory estimates")
+            .popover(isPresented: $showsRatingInfo) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("About these estimates").font(.app(.headline))
+                    Text("Intelligence is the Artificial Analysis Intelligence Index, rescaled to 100 from a reference of 60. It describes the original weights; entries without a published score are marked as our estimate.")
+                    Text("Speed is our relative Apple Silicon estimate on a 0–100 scale, informed by benchmarks. It is not tokens per second. Scores that include a built-in draft head say so.")
+                    Text("Download size and memory needed are approximate. Maximum context is the model’s published limit; the usable context depends on your Mac and settings.")
+                    Link("Artificial Analysis · index reference: July 30, 2026",
+                         destination: URL(string: "https://artificialanalysis.ai/models/open-source")!)
+                }
+                .font(.app(.body))
+                .padding(16)
+                .frame(width: 350, alignment: .leading)
+            }
         }
-        .padding(16)
-        .background(RoundedRectangle(cornerRadius: 12).fill(.quaternary.opacity(0.22)))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
     }
 }
 
-/// Column widths shared by the table header and every row so they stay
-/// aligned. The Model column flexes; the rest are fixed.
-private enum RecTableMetrics {
-    static let capability: CGFloat = 92
-    static let size: CGFloat = 62
-    static let memory: CGFloat = 140
-    static let action: CGFloat = 116
-    static let spacing: CGFloat = 10
-    static let hPad: CGFloat = 12
-}
-
-/// The Recommended pane's model table: a column header, then every curated pick
-/// grouped by family. Each row shows its capability, download size, and — the
-/// point of this pane — exactly how its memory requirement fits THIS Mac. Every
-/// model is visible (no "requires more RAM" disclosure): the fit badge is what
-/// makes the comparison scannable at a glance.
-private struct RecommendedModelTable: View {
+private struct RecommendedModelList: View {
     let memory: SystemMemoryInfo
     let recommendedId: String
 
     private struct Family: Identifiable {
         let id: String
         let title: String
-        let systemImage: String
-        let tint: Color
         let picks: [RecommendedModelPick]
     }
 
     private var families: [Family] {
         [
-            Family(id: "gemma", title: "Gemma 4", systemImage: "g.circle", tint: .blue,
+            Family(id: "gemma", title: "Gemma 4",
                    picks: RecommendedModelPick.gemmaCatalog),
-            Family(id: "qwen", title: "Qwen", systemImage: "q.circle", tint: .teal,
+            Family(id: "qwen", title: "Qwen",
                    picks: RecommendedModelPick.qwenCatalog),
-            Family(id: "largest", title: "Largest models", systemImage: "memorychip", tint: .red,
+            Family(id: "largest", title: "Largest models",
                    picks: RecommendedModelPick.largestCatalog),
         ]
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            RecommendedTableHeader()
-            Divider()
+        List {
             ForEach(families) { family in
-                familyHeader(family)
-                ForEach(family.picks) { pick in
-                    Divider().padding(.leading, RecTableMetrics.hPad)
-                    RecommendedModelTableRow(
-                        pick: pick,
-                        memory: memory,
-                        isRecommended: pick.id == recommendedId
-                    )
+                Section(L10n.text(family.title)) {
+                    ForEach(family.picks) { pick in
+                        RecommendedModelRow(
+                            pick: pick,
+                            memory: memory,
+                            isRecommended: pick.id == recommendedId
+                        )
+                    }
                 }
             }
         }
-        .background(RoundedRectangle(cornerRadius: 10).fill(.quaternary.opacity(0.15)))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.quaternary.opacity(0.4)))
-    }
-
-    private func familyHeader(_ family: Family) -> some View {
-        HStack(spacing: 7) {
-            Image(systemName: family.systemImage)
-                .font(.app(.caption))
-                .foregroundStyle(family.tint)
-            Text(L10n.text(family.title))
-                .font(.app(.caption).weight(.semibold))
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, RecTableMetrics.hPad)
-        .padding(.vertical, 7)
-        .background(.quaternary.opacity(0.12))
+        .listStyle(.inset)
     }
 }
 
-/// The column titles, aligned to the row columns via `RecTableMetrics`.
-private struct RecommendedTableHeader: View {
-    var body: some View {
-        HStack(spacing: RecTableMetrics.spacing) {
-            Text("Model")
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Text("Capability")
-                .frame(width: RecTableMetrics.capability, alignment: .leading)
-            Text("Size")
-                .frame(width: RecTableMetrics.size, alignment: .trailing)
-            Text("Memory needed")
-                .frame(width: RecTableMetrics.memory, alignment: .leading)
-            Color.clear
-                .frame(width: RecTableMetrics.action, height: 1)
-        }
-        .font(.app(.caption2).weight(.semibold))
-        .foregroundStyle(.secondary)
-        .textCase(.uppercase)
-        .padding(.horizontal, RecTableMetrics.hPad)
-        .padding(.vertical, 8)
-    }
-}
-
-/// Two thin comparative bars — intelligence (blue) over speed (green) — the
-/// compact, table-cell form of the retired `CapabilityBars`. No number is
-/// drawn in the cell: the scores are a hand-maintained comparison between
-/// these picks (see `RecommendedModels.swift`'s header). Hovering floats a
-/// card that names each bar and prints its score — the bars alone cannot say
-/// which is which.
-private struct MiniCapability: View {
+private struct RecommendedModelRatings: View {
     let pick: RecommendedModelPick
-    @State private var hovering = false
+    var inline = false
+
+    private var description: String {
+        CapabilityTip.lines(for: pick).map(L10n.text).joined(separator: "\n")
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            bar(pick.intelligenceBar, .blue)
-            bar(pick.speedBar, .green)
-        }
-        .contentShape(Rectangle())
-        .onHover { hovering = $0 }
-        .overlay(alignment: .bottomLeading) {
-            if hovering {
-                tip.offset(y: -18).fixedSize()
+        Group {
+            if inline {
+                HStack(spacing: 16) { ratings }
+            } else {
+                VStack(alignment: .leading, spacing: 3) { ratings }
             }
         }
-        .zIndex(hovering ? 1 : 0)
+        .font(.app(.caption))
+        .foregroundStyle(.secondary)
+        .help(description)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(description)
     }
 
-    private var tip: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            ForEach(CapabilityTip.lines(for: pick), id: \.self) { line in
-                Text(L10n.text(line)).font(.app(.caption))
-            }
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
-        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.quaternary))
-        .shadow(radius: 4, y: 2)
-        .allowsHitTesting(false)
-    }
-
-    private func bar(_ fill: Double, _ tint: Color) -> some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Capsule().fill(.quaternary)
-                Capsule().fill(tint.opacity(0.8))
-                    .frame(width: max(2, geo.size.width * fill))
-            }
-        }
-        .frame(height: 4)
+    @ViewBuilder
+    private var ratings: some View {
+        Text(verbatim: L10n.format("Intelligence: %lld/100", Int64(pick.intelligence))
+             + (pick.intelligenceIsEstimated ? " " + L10n.text("est.") : ""))
+        Text(verbatim: L10n.format("Speed: %lld/100 est.", Int64(pick.speed)))
     }
 }
 
-/// One table row for a chat-model recommendation: name + tagline, compact
-/// capability bars, download size, the memory-fit cell (the pane's whole
-/// point), and the Download/Use action. The full plain-English blurb moves to
-/// the row's hover tooltip so the table stays scannable.
-private struct RecommendedModelTableRow: View {
+private struct RecommendedModelRow: View {
     let pick: RecommendedModelPick
     let memory: SystemMemoryInfo
     let isRecommended: Bool
@@ -417,89 +383,73 @@ private struct RecommendedModelTableRow: View {
     }
 
     var body: some View {
-        HStack(spacing: RecTableMetrics.spacing) {
-            // Model — name + tagline; the full blurb is on hover.
-            Button { card = ModelCardRequest(repoId: pick.repoId, title: pick.name) } label: {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(pick.name)
-                            .font(.app(.callout).weight(.medium))
-                        if isRecommended {
-                            Text("Recommended")
-                                .font(.app(.caption2).weight(.semibold))
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 1)
-                                .background(Capsule().fill(Color.accentColor.opacity(0.18)))
-                                .foregroundStyle(.tint)
-                        }
+        VStack(alignment: .leading, spacing: 4) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 16) {
+                    modelIdentity
+                    RecommendedModelRatings(pick: pick)
+                        .fixedSize(horizontal: true, vertical: false)
+                    actions
+                }
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(alignment: .top, spacing: 12) {
+                        modelIdentity
+                        actions
                     }
-                    Text(L10n.text(pick.tagline))
-                        .font(.app(.caption))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .help(L10n.text(pick.blurb))
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            // Capability — intelligence over speed.
-            MiniCapability(pick: pick)
-                .frame(width: RecTableMetrics.capability, alignment: .leading)
-
-            // Download size (on disk) and the quant it buys.
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(SystemMemoryInfo.preciseGB(pick.sizeGB))
-                    .font(.app(.caption).monospacedDigit())
-                    .foregroundStyle(.secondary)
-                if let quant = pick.quantLabel {
-                    Text(L10n.text(quant))
-                        .font(.app(.caption2))
-                        .foregroundStyle(.tertiary)
+                    RecommendedModelRatings(pick: pick, inline: true)
                 }
             }
-            .frame(width: RecTableMetrics.size, alignment: .trailing)
-
-            // Memory needed + fit against this Mac's usable budget.
-            memoryCell
-                .frame(width: RecTableMetrics.memory, alignment: .leading)
-
-            // Download / Use / progress.
-            actionControl
-                .frame(width: RecTableMetrics.action, alignment: .trailing)
+            modelFacts
         }
-        .padding(.horizontal, RecTableMetrics.hPad)
-        .padding(.vertical, 9)
-        .background(isRecommended ? Color.accentColor.opacity(0.07) : Color.clear)
+        .padding(.vertical, 6)
         .sheet(item: $card) { ModelDetailSheet(request: $0) }
     }
 
-    /// The memory column: how much RAM the model needs, and a colored badge for
-    /// how that fits what this Mac can give a model.
-    private var memoryCell: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(SystemMemoryInfo.preciseGB(pick.approxRAMNeededGB))
-                .font(.app(.caption).monospacedDigit().weight(.medium))
-            HStack(spacing: 3) {
-                Image(systemName: fitIcon)
-                    .font(.app(.caption2))
-                Text(L10n.text(fit.label))
-                    .font(.app(.caption2))
+    private var modelIdentity: some View {
+        Button { card = ModelCardRequest(repoId: pick.repoId, title: pick.name) } label: {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(verbatim: pick.name)
+                    .font(.app(.body).weight(.medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                HStack(spacing: 6) {
+                    if isRecommended {
+                        Label("Recommended", systemImage: "checkmark")
+                            .foregroundStyle(.tint)
+                    }
+                    Text(L10n.text(pick.tagline))
+                        .foregroundStyle(.secondary)
+                }
+                .font(.app(.caption))
             }
-            .foregroundStyle(fitColor)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .help(L10n.text(pick.blurb))
+            .contentShape(Rectangle())
         }
-        .help(L10n.format("Needs about %@ — your Mac can use about %@ for a model.",
-                          SystemMemoryInfo.preciseGB(pick.approxRAMNeededGB), memory.usableLabel))
+        .buttonStyle(.borderless)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityHint("Open model details")
     }
 
-    private var fitIcon: String {
-        switch fit {
-        case .comfortable: return "checkmark.circle.fill"
-        case .tight:       return "exclamationmark.circle.fill"
-        case .exceeds:     return "xmark.circle.fill"
-        }
+    private var actions: some View {
+        actionControl
+            .buttonStyle(.bordered)
+            .frame(width: 120, alignment: .trailing)
+    }
+
+    private var modelFacts: some View {
+        (Text(verbatim: L10n.format("Download: %@%@ · RAM: ~%@ · ",
+                                   SystemMemoryInfo.preciseGB(pick.sizeGB),
+                                   pick.quantLabel.map { " · \($0)" } ?? "",
+                                   SystemMemoryInfo.preciseGB(pick.approxRAMNeededGB)))
+            .foregroundColor(.secondary)
+         + Text(L10n.text(fit.label)).foregroundColor(fitColor)
+         + Text(verbatim: L10n.format(" · Max context: %@ tokens", pick.contextTokens.formatted()))
+            .foregroundColor(.secondary))
+        .font(.app(.caption))
+        .fixedSize(horizontal: false, vertical: true)
+        .help(L10n.format("Needs about %@ — your Mac can use about %@ for a model.",
+                          SystemMemoryInfo.preciseGB(pick.approxRAMNeededGB), memory.usableLabel))
     }
 
     private var fitColor: Color {
@@ -525,7 +475,7 @@ private struct RecommendedModelTableRow: View {
                         ModelUseBadge(state: use)
                     }
                 } else if let media = usableMedia {
-                    UseMediaModelButton(modality: media.modality, name: media.model.name)
+                    UseMediaModelButton(modality: media.modality, name: media.model.name, path: media.model.path)
                 } else {
                     Text("✓ On disk")
                         .font(.app(.caption).weight(.medium))
@@ -536,8 +486,12 @@ private struct RecommendedModelTableRow: View {
                 } label: {
                     Image(systemName: "trash")
                         .foregroundStyle(.red.opacity(0.7))
+                        .frame(minWidth: 22, minHeight: 22)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+                .accessibilityLabel("Delete model")
                 .help("Delete model")
                 .alert("Delete Model", isPresented: $confirmDelete) {
                     Button(role: .cancel) {} label: { Text("Cancel")
@@ -567,8 +521,12 @@ private struct RecommendedModelTableRow: View {
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.secondary)
+                        .frame(minWidth: 22, minHeight: 22)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+                .accessibilityLabel("Cancel download")
                 .help("Cancel download")
             }
         } else if let state, state.status == .failed {
@@ -899,34 +857,51 @@ private struct MyModelsPane: View {
 /// download is reachable (and badged) from anywhere in the browser.
 private struct DownloadsPane: View {
     let items: [(repoId: String, state: DownloadManager.DownloadState)]
+    let showModels: () -> Void
+    @EnvironmentObject var downloads: DownloadManager
 
     var body: some View {
         VStack(spacing: 0) {
             if items.isEmpty {
-                Spacer()
-                VStack(spacing: 8) {
-                    Image(systemName: "arrow.down.circle")
-                        .font(.app(.largeTitle))
-                        .foregroundStyle(.secondary)
-                    Text(L10n.text("No downloads in progress"))
-                        .foregroundStyle(.secondary)
-                    Text(L10n.text("Start one from Recommended or Discover."))
-                        .font(.app(.caption))
-                        .foregroundStyle(.tertiary)
+                ContentUnavailableView {
+                    Label("No Downloads", systemImage: "arrow.down.circle")
+                } description: {
+                    Text("Downloads you start from Recommended, Discover, or Media appear here.")
                 }
-                Spacer()
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(items, id: \.repoId) { item in
-                            ActiveDownloadRow(repoId: item.repoId, state: item.state)
-                            Divider().padding(.horizontal, 12)
+                List {
+                    rows(status: .downloading, title: "Downloading")
+                    rows(status: .failed, title: "Needs Attention")
+                    rows(status: .completed, title: "Completed")
+                }
+                .listStyle(.inset)
+                if items.contains(where: { $0.state.status == .completed }) {
+                    HStack {
+                        Spacer()
+                        Button("Clear Completed") {
+                            for item in items where item.state.status == .completed {
+                                downloads.dismissDownload(repoId: item.repoId)
+                            }
                         }
+                        .help("Remove completed downloads from this list. Model files stay on disk.")
                     }
+                    .padding(12)
                 }
             }
         }
         .navigationTitle("Downloads")
+    }
+
+    @ViewBuilder
+    private func rows(status: DownloadManager.DownloadState.Status, title: String) -> some View {
+        let matching = items.filter { $0.state.status == status }
+        if !matching.isEmpty {
+            Section(L10n.text(title)) {
+                ForEach(matching, id: \.repoId) { item in
+                    ActiveDownloadRow(repoId: item.repoId, state: item.state, showModels: showModels)
+                }
+            }
+        }
     }
 }
 
@@ -1110,14 +1085,18 @@ private struct MediaModelRow<Preset: MediaModelPreset>: View {
     private var actionControl: some View {
         if isReady {
             HStack(spacing: 6) {
-                UseMediaModelButton(modality: modality, name: preset.name)
+                UseMediaModelButton(modality: modality, name: preset.name, presetID: preset.id)
                 Button {
                     confirmDelete = true
                 } label: {
                     Image(systemName: "trash")
                         .foregroundStyle(.red.opacity(0.7))
+                        .frame(minWidth: 22, minHeight: 22)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+                .accessibilityLabel("Delete model")
                 .help("Delete model")
                 .alert("Delete Model", isPresented: $confirmDelete) {
                     Button(role: .cancel) {} label: { Text("Cancel")
@@ -1146,8 +1125,12 @@ private struct MediaModelRow<Preset: MediaModelPreset>: View {
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.secondary)
+                        .frame(minWidth: 22, minHeight: 22)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+                .accessibilityLabel("Cancel download")
                 .help("Cancel download")
             }
         } else if active?.state.status == .failed {
@@ -1179,7 +1162,6 @@ private struct UseModelButton: View {
     let path: String
     let name: String
     @EnvironmentObject var appState: AppState
-    @Environment(\.openWindow) private var openWindow
     @State private var isLoading = false
 
     var body: some View {
@@ -1188,9 +1170,7 @@ private struct UseModelButton: View {
                 isLoading = true
                 let ready = await appState.useModelAndAwaitReady(atPath: path)
                 isLoading = false
-                if ready {
-                    AppActivation.openWindow(id: "chat", using: openWindow)
-                }
+                if ready { appState.showChat() }
             }
         } label: {
             if isLoading {
@@ -1209,26 +1189,30 @@ private struct UseModelButton: View {
 
 /// "Use" for a media checkpoint: open the pane that owns it.
 ///
-/// `AppState.showCreate` is documented as the one way into a create page.
-/// Music needs a second step because it has no `GenExperiment` case of its own
-/// — it is a tab inside the Audio pane — and that tab is `@AppStorage`, so
-/// writing it here is what makes the pane come up on Music instead of Voice.
+/// Model selection and workspace routing share the global chooser's path.
 private struct UseMediaModelButton: View {
     let modality: MediaModality
     let name: String
+    var path: String = ""
+    var presetID: String? = nil
     @EnvironmentObject var appState: AppState
-    @Environment(\.openWindow) private var openWindow
-    @AppStorage("audioGenTab") private var audioTab: AudioGenView.Tab = .voice
+
+    private var selectedID: String? {
+        presetID ?? ModelBrowserUse.mediaPresetID(modality: modality, name: name, path: path,
+                                                  models: appState.server.allModels)
+    }
 
     var body: some View {
         Button {
-            if let tab = modality.audioTab { audioTab = tab }
-            appState.showCreate(modality.experiment)
-            AppActivation.openWindow(id: "chat", using: openWindow)
-        } label: { Text("Use")
-            .font(.app(.body)) }
+            appState.selectMediaModel(modality: modality, name: name, path: path, presetID: selectedID)
+        } label: {
+            Text(L10n.text(selectedID == nil ? "Open" : "Use"))
+                .font(.app(.body))
+        }
         .controlSize(.small)
-        .help("Open \(name) in \(modality.paneName)")
+        .help(selectedID == nil
+              ? L10n.format("Open %@ to choose a model", L10n.text(modality.paneName))
+              : L10n.format("Use %@ in %@", name, L10n.text(modality.paneName)))
     }
 }
 
@@ -1597,7 +1581,7 @@ private struct ModelBrowserRow: View {
                             ModelUseBadge(state: use)
                         }
                     } else if let media = usableMedia {
-                        UseMediaModelButton(modality: media.modality, name: media.model.name)
+                        UseMediaModelButton(modality: media.modality, name: media.model.name, path: media.model.path)
                     } else {
                         Text("✓ On disk")
                             .font(.app(.caption).weight(.medium))
@@ -1645,8 +1629,12 @@ private struct ModelBrowserRow: View {
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .foregroundStyle(.secondary)
+                    .frame(minWidth: 22, minHeight: 22)
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.borderless)
+            .controlSize(.small)
+            .accessibilityLabel("Cancel download")
             .help("Cancel download")
         }
     }
@@ -1657,9 +1645,13 @@ private struct ModelBrowserRow: View {
         } label: {
             Image(systemName: "trash")
                 .foregroundStyle(.red.opacity(0.7))
+                .frame(minWidth: 22, minHeight: 22)
+                .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.borderless)
+        .controlSize(.small)
         .font(.app(.callout))
+        .accessibilityLabel("Delete model")
         .help("Delete model")
         .alert("Delete Model", isPresented: $confirmDelete) {
             Button(role: .cancel) {} label: { Text("Cancel")
@@ -2097,7 +2089,7 @@ private struct LocalModelRow: View {
                     // for a diffusion checkpoint means the text loader. It
                     // opens the pane that owns the model instead, and lets the
                     // pane load it the way it always has.
-                    UseMediaModelButton(modality: modality, name: model.name)
+                    UseMediaModelButton(modality: modality, name: model.name, path: model.path)
                 }
                 if let check = updateCheck, case .update(let update) = check.result {
                     Button {
@@ -2105,19 +2097,27 @@ private struct LocalModelRow: View {
                     } label: {
                         Image(systemName: "arrow.down.circle")
                             .foregroundStyle(.tint)
+                            .frame(minWidth: 22, minHeight: 22)
+                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
                     .font(.app(.callout))
                     .disabled(downloads.downloads[check.repo]?.status == .downloading)
+                    .accessibilityLabel("Update model")
                     .help("Update from \(check.repo): \(update.files) file\(update.files == 1 ? "" : "s"), \(ByteCountFormatter.string(fromByteCount: update.bytes, countStyle: .file))")
                 }
                 if model.isChatPickable {
                     Button { settings = settingsRequest } label: {
                         Image(systemName: "slider.horizontal.3")
                             .foregroundStyle(hasOverrides ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                            .frame(minWidth: 22, minHeight: 22)
+                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
                     .font(.app(.callout))
+                    .accessibilityLabel("Model settings")
                     .help(hasOverrides ? "Model settings (this model has its own context / KV settings)" : "Model settings")
                 }
                 if model.isDownloading {
@@ -2134,9 +2134,13 @@ private struct LocalModelRow: View {
                         Button { downloads.cancel(live.repoId) } label: {
                             Image(systemName: "xmark.circle.fill")
                                 .foregroundStyle(.secondary)
+                                .frame(minWidth: 22, minHeight: 22)
+                                .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
                         .font(.app(.callout))
+                        .accessibilityLabel("Cancel download")
                         .help("Cancel download")
                     } else {
                         ProgressView().controlSize(.small)
@@ -2151,9 +2155,13 @@ private struct LocalModelRow: View {
                     Button { unlocked = true } label: {
                         Image(systemName: "lock")
                             .foregroundStyle(.secondary)
+                            .frame(minWidth: 22, minHeight: 22)
+                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
                     .font(.app(.callout))
+                    .accessibilityLabel("Unlock deletion")
                     .help(ModelRowActions.lockHelp(model))
                 } else {
                     Button {
@@ -2161,9 +2169,15 @@ private struct LocalModelRow: View {
                     } label: {
                         Image(systemName: "trash")
                             .foregroundStyle(.red.opacity(0.7))
+                            .frame(minWidth: 22, minHeight: 22)
+                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
                     .font(.app(.callout))
+                    .accessibilityLabel(L10n.text(model.defect != nil
+                                        ? "Delete this broken folder"
+                                        : (model.quantFile != nil ? "Delete this quant" : "Delete model")))
                     .help(model.defect != nil
                           ? "Delete this broken folder"
                           : (model.quantFile != nil ? "Delete this quant" : "Delete model"))
@@ -2176,9 +2190,13 @@ private struct LocalModelRow: View {
                 Button(action: revealInFinder) {
                     Image(systemName: "folder")
                         .foregroundStyle(.secondary)
+                        .frame(minWidth: 22, minHeight: 22)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.borderless)
+                .controlSize(.small)
                 .font(.app(.callout))
+                .accessibilityLabel("Reveal in Finder")
                 .help(ModelRowActions.revealHelp(model))
             }
             .frame(width: 172, alignment: .trailing)
@@ -2268,6 +2286,7 @@ private struct GemIcon: View {
 private struct ActiveDownloadRow: View {
     let repoId: String
     let state: DownloadManager.DownloadState
+    let showModels: () -> Void
     @EnvironmentObject var downloads: DownloadManager
     @EnvironmentObject var appState: AppState
 
@@ -2276,58 +2295,72 @@ private struct ActiveDownloadRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(L10n.text(modelName))
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(verbatim: modelName)
                     .font(.app(.callout).weight(.medium))
-                    .lineLimit(1)
-
+                    .textSelection(.enabled)
+                Text(verbatim: repoId)
+                    .font(.app(.caption))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
                 if state.status == .downloading, !state.statusText.isEmpty {
-                    Text("[\(state.fileIndex)/\(state.fileCount)] \(state.statusText)")
+                    Text(verbatim: state.statusText)
                         .font(.app(.caption))
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                } else if state.status == .failed, let error = state.error {
-                    Text(error)
+                        .lineLimit(2)
+                        .help(state.statusText)
+                } else if state.status == .failed {
+                    Text(verbatim: state.error ?? L10n.text("Download failed"))
                         .font(.app(.caption))
                         .foregroundStyle(.red)
-                        .lineLimit(1)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
             if state.status == .downloading {
-                HStack(spacing: 4) {
-                    VStack(alignment: .trailing, spacing: 1) {
-                        ProgressView(value: state.progress)
-                            .frame(width: 80)
-                        Text("\(state.percentFormatted) \(state.speedFormatted)")
-                            .font(.app(.caption2).monospacedDigit())
-                            .foregroundStyle(.secondary)
-                    }
-                    Button {
+                VStack(alignment: .trailing, spacing: 5) {
+                    ProgressView(value: state.progress)
+                        .frame(width: 120)
+                        .accessibilityLabel(L10n.format("Download %@", modelName))
+                    Text("\(state.percentFormatted) \(state.speedFormatted)")
+                        .font(.app(.caption).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    Button("Cancel") {
                         downloads.cancel(repoId)
                         appState.refreshModels()
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .controlSize(.small)
+                    .accessibilityLabel(L10n.format("Cancel download of %@", modelName))
+                }
+            } else {
+                VStack(alignment: .trailing, spacing: 6) {
+                    if state.status == .completed {
+                        Label("Downloaded", systemImage: "checkmark.circle")
+                            .font(.app(.caption))
+                            .foregroundStyle(.secondary)
+                        Button("Show in My Models", action: showModels)
+                    } else if downloads.canRetry(repoId: repoId) {
+                        Button("Retry") {
+                            downloads.retry(repoId: repoId) {
+                                appState.refreshModels()
+                                appState.server.rescanModels()
+                            }
+                        }
+                        .help("Retry this download, keeping files already downloaded.")
+                    } else {
+                        Text("Retry from the model catalog.")
+                            .font(.app(.caption))
                             .foregroundStyle(.secondary)
                     }
-                    .buttonStyle(.plain)
-                    .help("Cancel download")
+                    Button("Dismiss") { downloads.dismissDownload(repoId: repoId) }
+                        .help("Remove this entry from the list. Downloaded files stay on disk.")
                 }
-                .frame(width: 116, alignment: .trailing)
-            } else if state.status == .failed {
-                Button {
-                    downloads.start(repoId: repoId) { appState.refreshModels() }
-                } label: { Text(L10n.text(downloads.hasPartialDownload(repoId) ? "Resume" : "Retry"))
-                    .font(.app(.body)) }
-                .font(.app(.callout))
                 .controlSize(.small)
-                .frame(width: 90, alignment: .trailing)
             }
         }
-        .padding(.horizontal, 12)
         .padding(.vertical, 6)
     }
 }

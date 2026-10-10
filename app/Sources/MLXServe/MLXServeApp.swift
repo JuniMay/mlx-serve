@@ -140,7 +140,7 @@ struct MLXCoreApp: App {
                 .environmentObject(appState.musicGen)
                 .environmentObject(appState.soundGen)
                 .environmentObject(appState.model3dGen)
-                // Settings, Tasks and Agents render here as modes too, so their
+                // Tasks and Agents render here as modes too, so their
                 // objects ride this scene (`ChatWorkspace`).
                 .environmentObject(appState.taskScheduler)
                 .environmentObject(appState.terminals)
@@ -152,20 +152,30 @@ struct MLXCoreApp: App {
                 .environmentObject(appState.chatEngine)
                 .environmentObject(appState.voice)
                 .environmentObject(appState.processRegistry)
-                // 1070: this window hosts Models/Settings/Create panes and the
-                // composer row carries the model pill now — smaller floors
-                // clipped them.
-                .frame(minWidth: 1070, minHeight: 500)
+                .frame(minWidth: 860, minHeight: 560)
                 .modifier(WelcomePresenter(appState: appState))
                 .onDisappear {
                     Task { await appState.mcpManager.stopAll() }
                 }
                 .appAppearance()
+                .focusedSceneValue(\.chatWindowCommandsEnabled, true)
         }
         // Roomier than the old 900x650: this window is three things now
         // (transcript, model browser, media generators) and the two it gained
         // were 960pt-wide windows in their own right.
         .defaultSize(width: 1160, height: 780)
+        .windowToolbarStyle(.unified)
+
+        Window("Settings", id: "settings") {
+            SettingsView()
+                .environmentObject(appState)
+                .environmentObject(appState.server)
+                .environmentObject(appState.downloads)
+                .frame(minWidth: 760, minHeight: 520)
+                .appAppearance()
+        }
+        .defaultSize(width: 900, height: 700)
+        .windowResizability(.contentMinSize)
 
         Window("Browser", id: "browser") {
             BrowserView()
@@ -242,6 +252,10 @@ struct MLXCoreApp: App {
         .defaultSize(width: 900, height: 640)
 
         .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") { appState.showSettings() }
+                    .keyboardShortcut(",", modifiers: [.command])
+            }
             CommandGroup(replacing: .newItem) {
                     Button {
                         openAndFocus("chat")
@@ -273,10 +287,6 @@ struct MLXCoreApp: App {
                 Button { openAndFocus("benchmarks") } label: { Text("Benchmarks…")
                     .font(.app(.body)) }
                     .keyboardShortcut("k", modifiers: [.command, .shift])
-
-                Button { appState.showSettings() } label: { Text("Settings…")
-                    .font(.app(.body)) }
-                    .keyboardShortcut(",", modifiers: [.command])
 
                 Button {
                     AgentPrompt.openSystemPromptInEditor()
@@ -317,11 +327,6 @@ struct MLXCoreApp: App {
                     .font(.app(.body)) }
             }
 
-            // Menu-bar twin of the chat's empty-state discovery chips
-            // (ChatEmptyState): every feature that otherwise lives only in
-            // the tray popover, reachable from the menu bar and Help-menu
-            // search. The media section iterates the SAME catalog as the
-            // chips so the two lists cannot drift.
             // View ▸ Interface: the same `@AppStorage` keys the Settings rows
             // write. `CommandGroup`, not `CommandMenu("View")`, which would
             // build a second View menu beside the system one.
@@ -350,10 +355,7 @@ struct MLXCoreApp: App {
             }
 
             CommandMenu("Tools") {
-                // ⌘L: the model switcher, over the same rows the composer's
-                // pill offers. A menu key equivalent so it works from every
-                // window, and it goes through AppState's door — which raises
-                // the picker AND brings the chat window forward.
+                // ⌘L opens the global model chooser and brings the main window forward.
                 Button { appState.showModelPalette() } label: { Text("Switch Model…")
                     .font(.app(.body)) }
                     .keyboardShortcut("l", modifiers: [.command])
@@ -368,14 +370,9 @@ struct MLXCoreApp: App {
 
                 Divider()
 
-                // The four generators are PAGES of the chat window now
-                // (`.create(...)` actions, windowId nil) — dispatch through the
-                // one door, `AppState.showCreate`.
-                ForEach(ChatEmptyState.mediaItems) { item in
-                    if case .create(let experiment) = item.action {
-                        Button { appState.showCreate(experiment) } label: { Text("\(item.title)…")
-                            .font(.app(.body)) }
-                    }
+                ForEach(GenExperiment.allCases) { experiment in
+                    Button { appState.showCreate(experiment) } label: { Text("\(experiment.menuTitle)…")
+                        .font(.app(.body)) }
                 }
 
                 Divider()
@@ -430,10 +427,14 @@ private struct MenuBarLabel: View {
             .onChange(of: appState.pendingChatOpenTick) { _, _ in
                 open("chat")
             }
+            .onChange(of: appState.pendingSettingsOpenTick) { _, _ in
+                open("settings")
+            }
             // The launch plan can bump the tick before this label mounts (a fast
             // library scan), and onChange never sees a change from before it.
             .onAppear {
                 if appState.pendingChatOpenTick > 0 { open("chat") }
+                if appState.pendingSettingsOpenTick > 0 { open("settings") }
             }
             // browse{show} bumps this on the manager and the scene opens the window.
             .onChange(of: browser.showRequestTick) { _, _ in
@@ -476,13 +477,28 @@ private struct ModelSettingsWindowRoot: View {
     }
 }
 
+private struct ChatWindowCommandsKey: FocusedValueKey {
+    typealias Value = Bool
+}
+
+private extension FocusedValues {
+    var chatWindowCommandsEnabled: Bool? {
+        get { self[ChatWindowCommandsKey.self] }
+        set { self[ChatWindowCommandsKey.self] = newValue }
+    }
+}
+
 private struct DeleteChatCommand: View {
     @ObservedObject var appState: AppState
+    @FocusedValue(\.chatWindowCommandsEnabled) private var chatWindowCommandsEnabled
 
     var body: some View {
-        Button { appState.requestChatDeletionFromMenu() } label: { Text("Delete Chat")
+        Button {
+            guard chatWindowCommandsEnabled == true else { return }
+            appState.requestChatDeletionFromMenu()
+        } label: { Text("Delete Chat")
             .font(.app(.body)) }
             .keyboardShortcut(.delete, modifiers: [.command])
-            .disabled(appState.chatDeletionTarget == nil)
+            .disabled(chatWindowCommandsEnabled != true || appState.chatDeletionTarget == nil)
     }
 }

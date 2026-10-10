@@ -169,6 +169,13 @@ enum QuickLauncherLogic {
         return config
     }
 
+    static func prepareSession(_ session: ChatSession) -> ChatSession {
+        var prepared = session
+        prepared.toolPreferences = ChatToolPreferences(
+            followsDefaults: session.toolPreferences?.followsDefaults ?? false, plainChat: true)
+        return prepared
+    }
+
     // MARK: Geometry
 
     static let panelWidth: CGFloat = 680
@@ -409,6 +416,10 @@ final class QuickLauncherController: NSObject, ObservableObject, NSWindowDelegat
             sessionId = sid
         } else {
             sid = sessionId! // needsNewSession(false) implies non-nil
+        }
+        if let index = appState.chatSessions.firstIndex(where: { $0.id == sid }) {
+            appState.chatSessions[index] = QuickLauncherLogic.prepareSession(appState.chatSessions[index])
+            appState.saveChatHistory()
         }
         let resolved = appState.resolvedAgentSettings(agentId: appState.defaultAgentId)
         appState.chatEngine.runTurn(sessionId: sid, userText: text, images: nil, videos: nil, audio: nil,

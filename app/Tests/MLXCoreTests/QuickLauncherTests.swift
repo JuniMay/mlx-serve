@@ -27,6 +27,17 @@ final class QuickLauncherTests: XCTestCase {
         XCTAssertNil(config.telegramChatId)
     }
 
+    func testOpeningLauncherConversationInChatKeepsPlainChatVisible() {
+        var session = ChatSession()
+        session.mode = .agent
+        session.useMCP = true
+        let prepared = QuickLauncherLogic.prepareSession(session)
+        XCTAssertEqual(prepared.id, session.id)
+        XCTAssertTrue(prepared.isPlainChat)
+        XCTAssertEqual(prepared.mode, session.mode)
+        XCTAssertEqual(prepared.useMCP, session.useMCP)
+    }
+
     // MARK: Submit decision
 
     func testEmptyTextIsIgnored() {

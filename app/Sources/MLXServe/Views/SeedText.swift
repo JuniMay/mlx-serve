@@ -112,12 +112,11 @@ struct SeedField: View {
                 Button {
                     roll()
                 } label: {
-                    // The dice earns the room the square gives it.
                     Image(systemName: "die.face.5")
                         .font(.app(.body))
-                        .modifier(PaneChip(square: true))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
                 .help("Roll a new seed")
                 .accessibilityLabel("Roll a new seed")
             }

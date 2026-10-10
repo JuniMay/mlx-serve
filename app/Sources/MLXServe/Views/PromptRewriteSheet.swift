@@ -1,23 +1,17 @@
 import SwiftUI
 
-/// The wand chip beside a prompt field's Templates menu. Disabled until there
-/// is something to rewrite.
+/// The rewrite action beside a prompt field's Templates menu.
 struct PromptEnhanceButton: View {
     let disabled: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 5) {
-                Image(systemName: "wand.and.sparkles")
-                Text("Enhance…").font(.app(.body))
-            }
-            .modifier(PaneChip())
+            Label("Enhance…", systemImage: "wand.and.sparkles")
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bordered)
+        .controlSize(.small)
         .disabled(disabled)
-        // A `.plain` button over our own background does not dim itself.
-        .opacity(disabled ? 0.4 : 1)
         .help("Rewrite with the chat model")
     }
 }

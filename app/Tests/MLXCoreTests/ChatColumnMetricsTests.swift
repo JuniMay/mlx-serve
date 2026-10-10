@@ -1,4 +1,6 @@
 import XCTest
+import AppKit
+import SwiftUI
 @testable import MLXCore
 
 /// Reading measure for the chat column.
@@ -29,22 +31,37 @@ final class ChatColumnMetricsTests: XCTestCase {
         XCTAssertLessThanOrEqual(ChatMetrics.contentFallbackWidth, 820)
     }
 
-    // MARK: - Source audit
-
-    /// One measure, applied by all three. A transcript capped without the
-    /// composer (or the other way round) is exactly the misalignment this
-    /// replaced.
-    func testTranscriptComposerAndGreetingAllUseTheSharedMeasure() throws {
-        let url = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("Sources/MLXServe/Views/ChatView.swift")
-        let source = try String(contentsOf: url, encoding: .utf8)
-        let uses = source.components(separatedBy: "maxWidth: contentWidth").count - 1
-        XCTAssertGreaterThanOrEqual(uses, 3, """
-            The reading measure must be applied to the transcript, the composer \
-            AND the empty state's greeting block — found \(uses) use(s).
-            """)
+    @MainActor
+    func testSharedColumnCentersContentWithTheSameEdges() async throws {
+        for panelWidth: CGFloat in [320, 900, 1600] {
+            let probe = ColumnFrameProbe()
+            let width = min(740, panelWidth - 2 * ChatMetrics.gutter)
+            let content = VStack {
+                Color.clear.frame(height: 20)
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { probe.first = $0 }
+                    .chatColumn(width: width)
+                Text("Composer").frame(maxWidth: .infinity)
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { probe.second = $0 }
+                    .chatColumn(width: width)
+            }
+            let hosting = NSHostingView(rootView: content)
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: panelWidth, height: 100),
+                                  styleMask: [.borderless], backing: .buffered, defer: false)
+            window.contentView = hosting
+            defer { window.contentView = nil }
+            for _ in 0..<10 {
+                hosting.layoutSubtreeIfNeeded()
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertEqual(probe.first.width, width, accuracy: 1)
+            XCTAssertEqual(probe.first.minX, probe.second.minX, accuracy: 1)
+            XCTAssertEqual(probe.first.maxX, probe.second.maxX, accuracy: 1)
+            XCTAssertEqual(probe.first.midX, panelWidth / 2, accuracy: 1)
+        }
     }
+}
+
+private final class ColumnFrameProbe {
+    var first = CGRect.zero
+    var second = CGRect.zero
 }

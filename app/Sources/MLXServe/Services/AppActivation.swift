@@ -68,6 +68,7 @@ enum AppActivation {
         case "benchmarks":    return "Benchmarks"
         case "decisions": return "Decisions"
         case "modelSettings": return "Model Settings"
+        case "settings":      return "Settings"
         case "agents":        return "Agents"
         default:              return nil
         }
@@ -76,7 +77,10 @@ enum AppActivation {
     /// Is this NSWindow the one scene `id` opens?
     static func windowMatches(id: String, title: String, identifier: String?) -> Bool {
         if let expectedTitle = windowTitle(for: id), !title.isEmpty, title == expectedTitle { return true }
-        if let identifier, identifier.localizedCaseInsensitiveContains(id) { return true }
+        // Match a complete scene component: "settings" also occurs inside
+        // "modelSettings", but those windows must never raise one another.
+        if let identifier, identifier.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+            .contains(where: { String($0).caseInsensitiveCompare(id) == .orderedSame }) { return true }
         return false
     }
 

@@ -40,6 +40,7 @@ struct AppDefaultsSnapshot: Sendable, Equatable {
     /// The turn is answered by Apple's on-device model, which has no thinking
     /// mode and a window the full tool set cannot fit.
     var appleModel: Bool = false
+    var plainChat: Bool = false
 }
 
 /// Every field decided — no optionals left except the ones that are genuinely
@@ -85,6 +86,7 @@ struct ResolvedAgentSettings: Sendable, Equatable {
     var voiceOverride: AgentVoice?
     var wakePhrase: String = WakeWord.defaultPhrase
     var reasoningEffort: ReasoningEffort = .low
+    var plainChat: Bool = false
 }
 
 enum AgentResolution {
@@ -112,8 +114,15 @@ enum AgentResolution {
     }
 
     nonisolated static func resolve(agent: Agent?, defaults: AppDefaultsSnapshot) -> ResolvedAgentSettings {
-        let settings = resolveUnclamped(agent: agent, defaults: defaults)
-        return defaults.appleModel ? clampedForApple(settings) : settings
+        var settings = resolveUnclamped(agent: agent, defaults: defaults)
+        if defaults.appleModel { settings = clampedForApple(settings) }
+        if defaults.plainChat {
+            settings.plainChat = true
+            settings.tools = []
+            settings.toolsEnabled = false
+            settings.mcpEnabled = false
+        }
+        return settings
     }
 
     /// Apple's on-device model, clamped at the ONE place a turn's capabilities

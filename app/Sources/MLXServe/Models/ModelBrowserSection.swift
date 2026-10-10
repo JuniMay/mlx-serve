@@ -11,7 +11,7 @@ enum ModelBrowserSection: String, CaseIterable, Identifiable, Hashable {
     case discover
     /// Everything on this Mac that the tray picker can offer, grouped by source.
     case myModels
-    /// The transfer queue: in-flight and failed downloads.
+    /// Transfer progress, failures, and completed downloads.
     case downloads
     /// Media-gen model catalog (image/audio/video/music), grouped by modality.
     case media
@@ -183,6 +183,26 @@ struct LocalModelGroup: Identifiable {
 /// the browser.
 enum ModelBrowserUse {
 
+    static func mediaPresetID(modality: MediaModality, name: String, path: String,
+                              models: [ModelInfo] = []) -> String? {
+        func match<P: MediaModelPreset>(_ presets: [P]) -> String? {
+            presets.first {
+                $0.bundle.primaryRepo == name || normalize(path).hasSuffix("/" + $0.bundle.primaryRepo)
+            }?.id
+        }
+        switch modality {
+        case .image: return match(ImageModelPreset.all + CustomMediaModels.imagePresets(from: models))
+        case .voice: return match(AudioModelPreset.allIncludingVoiceOnly + CustomMediaModels.audioPresets(from: models))
+        case .music: return match(MusicModelPreset.all + CustomMediaModels.musicPresets(from: models))
+        case .sound: return match(SoundModelPreset.all + CustomMediaModels.soundPresets(from: models))
+        case .video: return match(VideoModelPreset.all + CustomMediaModels.videoPresets(from: models))
+        case .mesh:
+            return (Model3DModelPreset.all + CustomMediaModels.meshPresets(from: models)).first {
+                $0.bundle.primaryRepo == name || normalize(path).hasSuffix("/" + $0.bundle.primaryRepo)
+            }?.id
+        }
+    }
+
     /// The local model at `path`, if it's something the server can load as its
     /// chat model. Drafters, encoders, and media checkpoints resolve to nil —
     /// they're real files worth listing and deleting, but "Use" would load a
@@ -254,5 +274,19 @@ enum ModelBrowserUse {
             out.append(LocalModelGroup(source: first.source, models: broken, isDefectGroup: true))
         }
         return out
+    }
+}
+
+/// A failed transfer needs attention, but must never keep an activity indicator or disk poll alive.
+struct ModelDownloadSummary: Equatable {
+    let running: Int
+    let failed: Int
+    let completed: Int
+    var pending: Int { running + failed }
+
+    init(states: [DownloadManager.DownloadState]) {
+        running = states.filter { $0.status == .downloading }.count
+        failed = states.filter { $0.status == .failed }.count
+        completed = states.filter { $0.status == .completed }.count
     }
 }

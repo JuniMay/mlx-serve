@@ -15,6 +15,48 @@ import AppKit
 /// node.
 final class CodeBlockTextTests: XCTestCase {
 
+    func testHeaderUsesReadableLanguageNamesAndAliases() {
+        let cases = ["bash": "Bash", "py": "Python", "python3": "Python",
+                     " SWIFT ": "Swift", "js": "JavaScript", "ts": "TypeScript",
+                     "cpp": "C++", "objc": "Objective-C", "cs": "C#",
+                     "json": "JSON", "yaml": "YAML", "md": "Markdown",
+                     "sh": "Shell", "rs": "Rust", "golang": "Go", "text": "Plain text"]
+        for (fence, label) in cases {
+            XCTAssertEqual(CodeBlockLanguage.label(for: fence), label, fence)
+        }
+    }
+
+    func testHeaderPreservesLanguagesThatShareALexer() {
+        let cases = ["tsx": "TypeScript (TSX)", "jsx": "JavaScript (JSX)",
+                     "java": "Java", "kotlin": "Kotlin", "svg": "SVG",
+                     "vue": "Vue", "svelte": "Svelte", "xml": "XML"]
+        for (fence, label) in cases {
+            XCTAssertEqual(CodeBlockLanguage.label(for: fence), label, fence)
+        }
+    }
+
+    func testHeaderPreservesUnknownFenceNamesAndHandlesAnEmptyFence() {
+        XCTAssertEqual(CodeBlockLanguage.label(for: " My-DSL "), "My-DSL")
+        XCTAssertEqual(CodeBlockLanguage.label(for: "language-example title=demo"),
+                       "language-example title=demo")
+        XCTAssertEqual(CodeBlockLanguage.label(for: ""), "Code")
+        XCTAssertEqual(CodeBlockLanguage.label(for: " \n\t"), "Code")
+    }
+
+    func testBlockFontTracksEveryTranscriptSizeChoice() {
+        for size in ChatTextSize.allCases {
+            XCTAssertEqual(CodeBlockLayout.fontSize(for: size), size.codeSize + 1)
+        }
+    }
+
+    func testChangingTheCodeFontReplacesTheAttributedText() {
+        let old = CodeBlockText.code("let x = 1", language: .swift)
+        let new = NSMutableAttributedString(attributedString: old)
+        new.addAttribute(.font, value: NSFont.monospacedSystemFont(ofSize: 23, weight: .regular),
+                         range: NSRange(location: 0, length: new.length))
+        XCTAssertEqual(CodeBlockText.changedSuffix(from: old, to: new) ?? 0, 0)
+    }
+
     private func kinds(in s: NSAttributedString) -> [(String, NSColor?)] {
         var out: [(String, NSColor?)] = []
         s.enumerateAttribute(.foregroundColor, in: NSRange(location: 0, length: s.length)) { v, r, _ in

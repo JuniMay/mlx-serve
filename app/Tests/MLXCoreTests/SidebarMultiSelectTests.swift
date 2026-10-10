@@ -223,6 +223,19 @@ final class SidebarDeleteConfirmTests: XCTestCase {
         XCTAssertNil(SidebarDeleteConfirm.target(selection: [], activeChatId: nil))
     }
 
+    func testOtherWorkspacesCannotDeleteHiddenConversations() {
+        let a = UUID(), b = UUID()
+        let workspaces: [ChatWorkspace] = [
+            .models(.myModels), .agents, .tasks, .terminal(UUID()), .create(.image), .settings
+        ]
+        for workspace in workspaces {
+            XCTAssertNil(SidebarDeleteConfirm.target(
+                selection: [a, b], activeChatId: a, workspace: workspace))
+            XCTAssertNil(SidebarDeleteConfirm.target(
+                selection: [], activeChatId: a, workspace: workspace))
+        }
+    }
+
     /// The selection WINS over the active chat: cmd-clicking three rows and
     /// hitting ⌘⌫ must not quietly delete only the one you were reading.
     func testTheSelectionOutranksTheActiveChat() {

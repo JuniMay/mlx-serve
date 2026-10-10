@@ -4,60 +4,41 @@ import SwiftUI
 /// agree across independently-written sections.
 enum AgentEditorMetrics {
     /// Column edge → content.
-    static let contentPadding: CGFloat = 24
+    static let contentPadding = AppLayout.pageInset
 
     /// The reading measure (cf. `ChatMetrics.contentMaxWidth`).
     static let contentMaxWidth: CGFloat = 760
 
     /// Between one section and the next.
-    static let sectionSpacing: CGFloat = 24
+    static let sectionSpacing = AppLayout.sectionSpacing
     /// Label → the thing it names. Strictly less than `sectionSpacing`.
-    static let labelSpacing: CGFloat = 12
+    static let labelSpacing = AppLayout.labelSpacing
 
-    /// Every card in the editor.
-    static let cardRadius: CGFloat = 16
-    static let cardPadding: CGFloat = 18
+    /// Additional inset inside the system group box.
+    static let cardPadding = AppLayout.labelSpacing
     /// Between rows inside one card.
-    static let cardSpacing: CGFloat = 16
+    static let cardSpacing = AppLayout.rowSpacing
 
-    /// A well is a surface sunk INTO a card — the prompt editor. Never rounder
-    /// than the card holding it, or its corners bulge out of the outer shape.
-    static let wellRadius: CGFloat = 12
-    static let wellPadding: CGFloat = 10
+    static let wellRadius = AppLayout.textEditorRadius
+    static let wellPadding = AppLayout.labelSpacing
 
     /// The prompt editor's floor — the one field you write paragraphs in.
     static let promptMinHeight: CGFloat = 132
 
-    /// The symbol, and the card beside the name.
-    static let avatarSize: CGFloat = 44
-    static let avatarPadding: CGFloat = 12
-
-    /// Sized, not stretched: a full-width button reads as a bar.
-    static let primaryMaxWidth: CGFloat = 260
+    static let avatarSize: CGFloat = 36
 }
 
 // MARK: - Surfaces
 
 extension View {
-    /// The editor's card surface: one fill, one hairline, one radius. Shared
-    /// with the rest of the app's hand-built cards (`NewTaskSheet`) so a card
-    /// here and a card there are the same object.
-    func agentSurface(radius: CGFloat = AgentEditorMetrics.cardRadius) -> some View {
-        background(RoundedRectangle(cornerRadius: radius, style: .continuous)
-            .fill(Color.primary.opacity(0.05)))
-            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1))
-    }
-
-    /// A surface sunk into a card — darker than what holds it, so the thing you
-    /// type into reads as a recess rather than a second card.
+    /// Text entry uses the system text background in either appearance.
     func agentWell() -> some View {
         background(RoundedRectangle(cornerRadius: AgentEditorMetrics.wellRadius,
                                     style: .continuous)
-            .fill(Color.primary.opacity(0.04)))
+            .fill(Color(.textBackgroundColor)))
             .overlay(RoundedRectangle(cornerRadius: AgentEditorMetrics.wellRadius,
                                       style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1))
+                .strokeBorder(Color(.separatorColor), lineWidth: 0.5))
     }
 }
 
@@ -76,7 +57,7 @@ struct AgentSection<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: AgentEditorMetrics.labelSpacing) {
             Text(L10n.text(title))
-                .font(.app(.title3).weight(.semibold))
+                .font(.app(.headline))
                 .foregroundStyle(.primary)
             content()
         }
@@ -96,16 +77,17 @@ struct AgentCard<Content: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: spacing) {
-            content()
+        GroupBox {
+            VStack(alignment: .leading, spacing: spacing) {
+                content()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(AgentEditorMetrics.cardPadding)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(AgentEditorMetrics.cardPadding)
-        .agentSurface()
     }
 }
 
-/// A labelled field: the label above, the field on its own card surface below.
+/// A labelled field with the system text-field treatment.
 struct AgentLabeledField<Content: View>: View {
     let label: String
     @ViewBuilder let content: () -> Content
@@ -119,12 +101,10 @@ struct AgentLabeledField<Content: View>: View {
         VStack(alignment: .leading, spacing: AgentEditorMetrics.labelSpacing) {
             Text(L10n.text(label))
                 .font(.app(.headline))
-                .foregroundStyle(.secondary)
             content()
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, AgentEditorMetrics.cardPadding)
-                .padding(.vertical, AgentEditorMetrics.wellPadding)
-                .agentSurface()
+                .textFieldStyle(.roundedBorder)
+                .accessibilityLabel(Text(L10n.text(label)))
         }
     }
 }
@@ -151,17 +131,17 @@ struct AgentEditorRow<Trailing: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: alignment, spacing: 12) {
+        VStack(alignment: .leading, spacing: AppLayout.labelSpacing) {
+            HStack(alignment: alignment, spacing: AppLayout.rowSpacing) {
                 Text(L10n.text(title))
-                    .font(.app(.headline))
+                    .font(.app(.body))
                     .foregroundStyle(.primary)
                 Spacer(minLength: 8)
                 trailing()
             }
             if let caption {
                 Text(L10n.text(caption))
-                    .font(.app(.subheadline))
+                    .font(.app(.caption))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -172,8 +152,7 @@ struct AgentEditorRow<Trailing: View>: View {
 
 // MARK: - Controls
 
-/// The editor's pill button — a secondary action that acts on the field beside
-/// it ("Write it for me"), rather than on the agent.
+/// A secondary action on the adjacent field, such as "Write it for me".
 struct AgentPillButton: View {
     let title: String
     let systemImage: String
@@ -182,21 +161,16 @@ struct AgentPillButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 6) {
+            HStack(spacing: AppLayout.labelSpacing) {
                 if isBusy {
                     ProgressView().controlSize(.small)
                 } else {
                     Image(systemName: systemImage)
-                        .font(.app(.subheadline, weight: .semibold))
                 }
-                Text(L10n.text(title)).font(.app(.callout))
+                Text(L10n.text(title))
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(Capsule().fill(Color.primary.opacity(0.09)))
-            .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08), lineWidth: 1))
-            .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bordered)
+        .controlSize(.small)
     }
 }

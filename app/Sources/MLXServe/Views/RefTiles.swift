@@ -11,14 +11,6 @@ enum RefTiles {
     static let side: CGFloat = 84
     static let spacing: CGFloat = 8
 
-    /// The pane's floating-bubble surface, in one place: the prompt's format
-    /// advice and a reference tile's filename are the same kind of thing said
-    /// over the pointer, and two copies would drift. Static, so the tile —
-    /// its own view — can draw it too.
-    static func hoverBubble(_ text: String) -> some View {
-        hoverBubble(text) { EmptyView() }
-    }
-
     /// A picture's size fitted into a square of `side`, never upscaled: a
     /// small reference shown larger than it is would only be blurry. nil for
     /// a size that is not a size.
@@ -28,11 +20,9 @@ enum RefTiles {
         return CGSize(width: size.width * scale, height: size.height * scale)
     }
 
-    /// The same bubble with something ABOVE the sentence — a reference tile
-    /// puts the whole picture there, uncropped, since the tile shows a square
-    /// cut from it.
-    static func hoverBubble<Above: View>(_ text: String,
-                                         @ViewBuilder above: () -> Above) -> some View {
+    /// Shows the uncropped image above its filename.
+    static func preview<Above: View>(_ text: String,
+                                    @ViewBuilder above: () -> Above) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             above()
             Text(text)
@@ -82,9 +72,7 @@ struct RefTileGrid: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        // Quantised to 8pt: only `minX` and `width` are read
-        // (`HoverReveal.clampedX`), and an exact rect changes on every
-        // frame of a drag.
+        // Only horizontal bounds constrain the preview; quantize resize updates.
         .onGeometryChange(for: CGRect.self) { proxy in
             let r = proxy.frame(in: .global)
             return CGRect(x: (r.minX / 8).rounded() * 8, y: 0,
@@ -132,6 +120,7 @@ struct RefTile: View {
                         .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(L10n.format("Insert reference %@", promptMarker))
                 Button(action: remove) {
                     // The glyph sits on a photograph, so it carries its own
                     // erased ring instead of trusting what is behind it.
@@ -143,8 +132,13 @@ struct RefTile: View {
                             .font(.system(size: 14))
                             .foregroundStyle(.secondary)
                     }
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+                .accessibilityLabel(L10n.format("Remove reference %@", promptMarker))
+                .help(L10n.format("Remove reference %@", promptMarker))
                 .padding(3)
             }
             Text(promptMarker)
@@ -153,8 +147,9 @@ struct RefTile: View {
                 .lineLimit(1)
         }
         .frame(width: RefTiles.side)
-        .hoverReveal(placement: .pointerClamped(width: bubbleWidth, container: container)) {
-            RefTiles.hoverBubble(url.lastPathComponent) {
+        .help(image == nil ? url.lastPathComponent : "")
+        .hoverPreview(width: bubbleWidth, container: container, enabled: image != nil) {
+            RefTiles.preview(url.lastPathComponent) {
                 // The whole picture, fitted. Sized from its own aspect:
                 // an overlay is proposed the tile's 84pt, so
                 // `maxWidth`/`maxHeight` would cap it there.

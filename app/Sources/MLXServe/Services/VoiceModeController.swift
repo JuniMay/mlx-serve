@@ -48,9 +48,8 @@ final class VoiceModeController: ObservableObject {
     /// card in the panel/orb and the turn waits until the user allows or denies.
     @Published var autoApproveTools = true
 
-    /// Voice-scoped Think / Agent / MCP toggles. Seeded from the chat session the
-    /// user launches voice mode in (`ChatView.startVoiceMode`), then independent of
-    /// the chat window's toolbar so talking and typing can run in different modes.
+    /// Voice-scoped thinking; tool flags are fallbacks for unbound test runners.
+    /// Production turns resolve tool access from their conversation each time.
     @Published var agentMode = false
     @Published var enableThinking = false
     @Published var mcpMode = false
@@ -128,7 +127,9 @@ final class VoiceModeController: ObservableObject {
     /// The settings the next turn runs under: the active agent's overrides folded
     /// into the app defaults (`AgentResolution`). nil in tests → the voice-scoped
     /// toggles below are used verbatim, which is the pre-agents behavior.
-    var resolveTurn: (() -> ResolvedAgentSettings)?
+    var resolveTurn: ((UUID) -> ResolvedAgentSettings)?
+    /// Current turn ownership and access; nil only for unbound test runners.
+    var approvalScopeForSession: ((UUID) -> ToolApprovalScope?)?
     /// Every agent's wake phrase, so hands-free listens for all of them at once.
     var agentPhrases: (() -> [(id: UUID, phrase: String)])?
     /// Make an agent active. Returns nil when the switch happened, or a sentence
@@ -225,25 +226,21 @@ final class VoiceModeController: ObservableObject {
             let wd = appState.chatSessions.first { $0.id == sid }?.workingDirectory
             return (sid, wd)
         }
-        // Agents: which one is answering, everyone who is listening, and what a
-        // spoken switch does. The voice-scoped toggles remain the DEFAULTS the
-        // active agent overrides — with no agent picked, nothing changes.
-        resolveTurn = { [weak appState, weak self] in
-            guard let appState, let self else { return ResolvedAgentSettings() }
-            // The voice CONVERSATION's session decides (its agent pick wins) —
-            // the active tab is only the fallback before a binding exists.
-            let sid = self.boundSessionId ?? appState.activeChatId
-            let session = appState.chatSessions.first { $0.id == sid }
-            // A chat tab's own pick wins for that conversation; otherwise the
-            // tray's agent answers.
-            let agentId = session?.agentId ?? appState.defaultAgentId
-            return appState.resolvedAgentSettings(
-                agentId: agentId,
-                toolsEnabled: self.agentMode,
-                mcpEnabled: self.mcpMode,
-                thinkingEnabled: self.enableThinking,
+        resolveTurn = { [weak appState, weak self] sessionId in
+            guard let appState, let self,
+                  let session = appState.chatSessions.first(where: { $0.id == sessionId })
+            else { return ResolvedAgentSettings() }
+            return appState.resolvedChatSettings(
+                for: session,
                 autoApprove: self.autoApproveTools,
-                workingDirectory: session?.workingDirectory)
+                thinkingEnabled: self.enableThinking)
+        }
+        approvalScopeForSession = { [weak appState] sessionId in
+            guard let appState,
+                  let session = appState.chatSessions.first(where: { $0.id == sessionId }),
+                  !session.isPlainChat,
+                  let token = appState.chatEngine.turnToken(sessionId: sessionId) else { return nil }
+            return ToolApprovalScope(sessionID: sessionId, turnID: token)
         }
         agentPhrases = { [weak appState] in
             guard let appState else { return [] }
@@ -308,8 +305,9 @@ final class VoiceModeController: ObservableObject {
             .sink { [weak self, weak appState] sessions, activeTurns in
                 guard let self, let appState else { return }
                 let sid = self.boundSessionId ?? appState.activeChatId
-                guard let session = sessions.first(where: { $0.id == sid }),
-                      let last = Self.messageToVoice(in: session.messages) else { return }
+                guard let session = sessions.first(where: { $0.id == sid }) else { return }
+                if session.isPlainChat { self.revokeToolApprovals(for: session.id) }
+                guard let last = Self.messageToVoice(in: session.messages) else { return }
                 self.observeAssistant(messageId: last.id, content: last.content,
                                       generating: activeTurns.contains(session.id))
             }
@@ -485,6 +483,7 @@ final class VoiceModeController: ObservableObject {
         } else {
             runner?.stop()
         }
+        if pendingApproval != nil { resolve(.deny) }
         synthesizer.stop()
         resetTurn()
         // Release the mic before reopening it. When barge-in fires from
@@ -510,8 +509,7 @@ final class VoiceModeController: ObservableObject {
     // MARK: Turn submission + approval
 
     /// Submit the finalized user transcript to the shared engine. Always uses a
-    /// `voiceStyle` config so spoken answers stay short and Markdown-free; agent
-    /// Agent, thinking, and MCP all come from the voice-scoped toggles.
+    /// `voiceStyle` config so spoken answers stay short and Markdown-free.
     private func submitTurn(_ text: String) {
         guard let runner, let ctx = turnContext?() else { return }
         boundSessionId = ctx.sessionId
@@ -519,10 +517,7 @@ final class VoiceModeController: ObservableObject {
         // engine publishes anything: the stale republish at turn start (turn
         // active, user message not yet appended) must not re-voice it.
         if let heard = alreadyHeardMessage?(ctx.sessionId) { heardMessageId = heard }
-        // One builder, like every other turn site: the active agent's persona,
-        // tools, sampling and workspace, with the voice-scoped toggles as the
-        // defaults it overrides.
-        let resolved = resolveTurn?() ?? ResolvedAgentSettings(
+        let resolved = resolveTurn?(ctx.sessionId) ?? ResolvedAgentSettings(
             agentId: nil,
             tools: Set(AgentToolKind.allCases),
             toolsEnabled: agentMode,
@@ -532,33 +527,50 @@ final class VoiceModeController: ObservableObject {
         let config = ChatTurnEngine.TurnConfig.from(resolved, voiceStyle: true)
         runner.runTurn(sessionId: ctx.sessionId, userText: text, images: nil, videos: nil, audio: nil,
                        config: config, approval: { [weak self] tc in
-            await self?.approvalDecision(for: tc) ?? false
+            await self?.approvalDecision(for: tc, sessionId: ctx.sessionId) ?? false
         })
     }
 
     /// The agent loop's approval gate. Auto-approves while `autoApproveTools` is
     /// on (hands-free); otherwise surfaces a `pendingApproval` and suspends until
     /// the panel/orb calls `resolve(_:)`.
-    func approvalDecision(for tc: APIClient.ToolCall) async -> Bool {
+    func approvalDecision(for tc: APIClient.ToolCall, sessionId: UUID? = nil) async -> Bool {
+        let scope = (sessionId ?? boundSessionId).flatMap { approvalScopeForSession?($0) }
+        guard isCurrentApproval(scope) else { return false }
         if autoApproveTools { return true }
         let choice: ToolApprovalChoice = await withCheckedContinuation { cont in
+            pendingApproval?.continuation.resume(returning: .deny)
             pendingApproval = ToolApprovalRequest(
                 toolName: tc.name,
                 arguments: tc.arguments,
                 rawArguments: tc.rawArguments,
-                continuation: cont
+                continuation: cont,
+                scope: scope
             )
         }
-        return choice == .allow
+        return choice == .allow && isCurrentApproval(scope)
+    }
+
+    private func isCurrentApproval(_ scope: ToolApprovalScope?) -> Bool {
+        guard let approvalScopeForSession else { return !isBound && scope == nil }
+        guard let scope, boundSessionId == scope.sessionID else { return false }
+        return approvalScopeForSession(scope.sessionID) == scope
     }
 
     /// Resume a pending approval with the user's choice. `allowAll` flips
     /// `autoApproveTools` so the rest of the hands-free turn doesn't block again.
-    func resolve(_ choice: ToolApprovalChoice, allowAll: Bool = false) {
-        guard let req = pendingApproval else { return }
-        if allowAll { autoApproveTools = true }
-        req.continuation.resume(returning: choice)
+    func resolve(_ choice: ToolApprovalChoice, allowAll: Bool = false, requestID: UUID? = nil) {
+        guard let req = pendingApproval, requestID == nil || requestID == req.id else { return }
+        let decision: ToolApprovalChoice = isCurrentApproval(req.scope) ? choice : .deny
+        if allowAll, decision == .allow { autoApproveTools = true }
         pendingApproval = nil
+        req.continuation.resume(returning: decision)
+    }
+
+    func revokeToolApprovals(for sessionId: UUID) {
+        guard boundSessionId == sessionId else { return }
+        autoApproveTools = false
+        if pendingApproval != nil { resolve(.deny) }
     }
 
     /// Fed via Combine whenever the active assistant message changes. `content`

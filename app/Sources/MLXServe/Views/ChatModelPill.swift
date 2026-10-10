@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// The chat window's model picker: which model this conversation is talking to,
-/// with a status dot, sitting at the LEADING edge of the toolbar.
+/// Model selection and reasoning settings for the next message.
 struct ChatModelPill: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var server: ServerManager
@@ -16,6 +15,23 @@ struct ChatModelPill: View {
     /// to send, not the window), and it carries the download affordances a
     /// toolbar pill had no room for.
     var compact: Bool = false
+    var reasoningLabel: String? = nil
+    var reasoningLocked: Bool = false
+    var thinkingHint: String? = nil
+    var thinkingHeader: AnyView? = nil
+    var thinkingControls: AnyView? = nil
+    var contextControl: AnyView? = nil
+    var startControl: ChatServerStartControl = .hidden
+    var onStart: (() -> Void)? = nil
+
+    @State private var isPresented = false
+    @State private var showingModels = false
+    @FocusState private var focusedModel: String?
+    @FocusState private var focusedNavigation: NavigationFocus?
+    @State private var typedPrefix = ""
+    @State private var lastTyped = Date.distantPast
+
+    private enum NavigationFocus: Hashable { case model, back, manage }
 
     @EnvironmentObject private var downloads: DownloadManager
 
@@ -126,29 +142,76 @@ struct ChatModelPill: View {
         server.lanChatModelId == nil && pickableModels.isEmpty && activeDownload == nil
     }
 
+    @ViewBuilder
     var body: some View {
+        if compact {
+            HStack(spacing: 0) {
+                if let contextControl {
+                    contextControl
+                    Divider().frame(height: 16)
+                }
+                modelButton
+                if startControl != .hidden, let onStart {
+                    Divider().frame(height: 16)
+                    Button(action: onStart) {
+                        HStack(spacing: 5) {
+                            if startControl == .starting {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Image(systemName: "play.fill")
+                                    .font(.app(.caption2, weight: .semibold))
+                            }
+                            Text(L10n.text(startControl.title))
+                                .font(.app(.callout, weight: .medium))
+                        }
+                        .padding(.horizontal, ComposerControlMetrics.horizontalPadding)
+                        .frame(minHeight: ComposerControlMetrics.height)
+                        .contentShape(Rectangle())
+                    }
+                    .disabled(!startControl.isEnabled)
+                    .accessibilityLabel(L10n.text(startControl.title))
+                    .help(startControl == .starting
+                          ? "Loading the model — this can take a while for a large one."
+                          : "The server isn't running, so nothing can answer. Click to start it.")
+                }
+            }
+            .buttonStyle(.borderless)
+            .composerCapsule()
+            .accessibilityElement(children: .contain)
+        } else {
+            modelButton
+                .buttonStyle(.plain)
+        }
+    }
+
+    private var modelButton: some View {
         let pill = self.pill
-        return Menu {
-            menuContent
+        return Button {
+            showingModels = thinkingControls == nil
+            typedPrefix = ""
+            isPresented.toggle()
         } label: {
             VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 5) {
-                    Image(systemName: "cpu")
-                        .font(.app(.callout, weight: .medium))
-                        .foregroundStyle(.secondary)
-                    // The READABLE name (`ModelDisplayName`). The repo id it is
-                    // built from stays the identity and is still what the menu
-                    // rows carry underneath — this is the label, not a rename.
+                HStack(spacing: 6) {
                     Text(ModelDisplayName.pretty(pill.name))
-                        .font(compact ? .app(.callout, weight: .semibold) : .app(.callout, weight: .medium))
+                        .font(.app(.body))
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .frame(maxWidth: compact ? Self.compactNameWidth : Self.maxNameWidth,
                                alignment: .leading)
                         .fixedSize(horizontal: false, vertical: true)
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.app(.caption2, weight: .semibold))
-                        .foregroundStyle(.secondary)
+                    if let reasoningLabel {
+                        Text(L10n.text(reasoningLabel))
+                            .font(.app(.body))
+                            .foregroundStyle(.secondary)
+                            .fixedSize()
+                    }
+                    if reasoningLocked {
+                        Image(systemName: "lock.fill")
+                            .font(.app(.caption2))
+                            .foregroundStyle(.secondary)
+                            .accessibilityHidden(true)
+                    }
                     if pill.isLoading {
                         // A switch in flight. The dot would say GREEN here —
                         // the server is running and a model is resident, just
@@ -165,11 +228,14 @@ struct ChatModelPill: View {
                         Image(systemName: "arrow.down.circle.fill")
                             .font(.app(.subheadline))
                             .foregroundStyle(Color.accentColor)
-                    } else {
+                    } else if startControl == .hidden {
                         Circle()
                             .fill(statusColor)
-                            .frame(width: 8, height: 8)
+                            .frame(width: 6, height: 6)
                     }
+                    Image(systemName: "chevron.down")
+                        .font(.app(.caption2, weight: .medium))
+                        .foregroundStyle(.secondary)
                 }
                 if let active = activeDownload {
                     // Deliberately wordless: a hairline that fills. The figures
@@ -182,25 +248,174 @@ struct ChatModelPill: View {
                         .frame(maxWidth: compact ? Self.compactNameWidth : Self.maxNameWidth)
                 }
             }
-            .padding(.horizontal, showsBackground ? 12 : 4)
-            .padding(.vertical, 4)
-            // The composer row's own control height, so the pill lines up with
-            // the discs and the send button rather than sitting a few points
-            // shy of them. A FLOOR, not a fixed height: a download adds the
-            // progress hairline under the name and the capsule grows to hold
-            // it, which is the shape in the mockup.
-            .frame(minHeight: compact ? ChatMetrics.composerIconSize : 0)
-            .background(showsBackground ? Color.secondary.opacity(0.12) : Color.clear)
-            .clipShape(RoundedRectangle(cornerRadius: compact ? 10 : 999, style: .continuous))
+            .padding(.horizontal, compact ? ComposerControlMetrics.horizontalPadding : showsBackground ? 12 : 4)
+            .padding(.vertical, compact ? 0 : 4)
+            .frame(minHeight: compact ? ComposerControlMetrics.height : nil)
+            .background(!compact && showsBackground ? Color.secondary.opacity(0.12) : Color.clear)
+            .clipShape(Capsule())
             .contentShape(Rectangle())
         }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
         .fixedSize()
+        .accessibilityLabel(thinkingControls == nil ? "Model" : "Model and thinking")
+        .accessibilityValue([ModelDisplayName.pretty(pill.name), reasoningLabel.map(L10n.text)]
+            .compactMap { $0 }.joined(separator: ", "))
+        .accessibilityHint(thinkingHint ?? "")
         .help(pill.isLoading
               ? L10n.format("Loading %@…", ModelDisplayName.pretty(pill.name))
-              : L10n.text("Chat model. Click to switch — models on this Mac and any shared by other Macs on your network."))
+              : L10n.text("Choose a model and configure thinking for this chat."))
+        .popover(isPresented: $isPresented, arrowEdge: .top) {
+            VStack(alignment: .leading, spacing: 12) {
+                if showingModels {
+                    modelPicker
+                } else {
+                    thinkingPage
+                }
+            }
+            .padding(14)
+            .frame(width: 320)
+            .onExitCommand { isPresented = false }
+        }
+    }
+
+    private var thinkingPage: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let thinkingHeader { thinkingHeader }
+            Button { showingModels = true } label: {
+                HStack(spacing: 5) {
+                    Text(verbatim: ModelDisplayName.pretty(pill.name))
+                        .font(.app(.body))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                    Image(systemName: "chevron.right")
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                }
+                .padding(.vertical, 2)
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .focused($focusedNavigation, equals: .model)
+            .accessibilityLabel("Select model")
+            .accessibilityValue(ModelDisplayName.pretty(pill.name))
+            .onKeyPress(.rightArrow) {
+                showingModels = true
+                return .handled
+            }
+            if let thinkingControls {
+                thinkingControls
+                    .padding(.top, 4)
+            }
+        }
+        .onAppear {
+            focusedModel = nil
+            DispatchQueue.main.async {
+                guard isPresented, !showingModels else { return }
+                focusedNavigation = .model
+            }
+        }
+    }
+
+    private var modelPicker: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                if thinkingControls != nil {
+                    Button { showingModels = false } label: {
+                        Label("Back", systemImage: "chevron.left")
+                            .labelStyle(.iconOnly)
+                            .frame(width: 24, height: 24)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.borderless)
+                    .focused($focusedNavigation, equals: .back)
+                    .help("Back")
+                }
+                Text("Select model")
+                    .font(.app(.callout))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
+            ScrollViewReader { proxy in
+                ModelPickerScrollView {
+                    VStack(alignment: .leading, spacing: 12) { menuContent }
+                }
+                .onKeyPress(.upArrow) { moveFocus(-1) }
+                .onKeyPress(.downArrow) { moveFocus(1) }
+                .onKeyPress(characters: .alphanumerics, phases: .down, action: typeAhead)
+                .onChange(of: focusedModel) { _, tag in
+                    if let tag { proxy.scrollTo(tag, anchor: .center) }
+                }
+                .onAppear {
+                    typedPrefix = ""
+                    let tag = navigationRows.first { $0.tag == selection.wrappedValue }?.tag
+                        ?? navigationRows.first?.tag
+                    DispatchQueue.main.async {
+                        guard isPresented, showingModels else { return }
+                        if let tag {
+                            focusedNavigation = nil
+                            focusedModel = tag
+                            proxy.scrollTo(tag, anchor: .center)
+                        } else {
+                            focusedModel = nil
+                            focusedNavigation = thinkingControls == nil ? .manage : .back
+                        }
+                    }
+                }
+            }
+            Divider()
+            Button {
+                isPresented = false
+                appState.showModels()
+            } label: {
+                Label("Manage Models…", systemImage: "square.stack.3d.up")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .focused($focusedNavigation, equals: .manage)
+        }
+        .onKeyPress(.leftArrow) {
+            guard thinkingControls != nil else { return .ignored }
+            showingModels = false
+            return .handled
+        }
+    }
+
+    private var navigationRows: [(tag: String, title: String)] {
+        let local = pickableModels
+        let duplicates = LocalModel.duplicateNames(in: local)
+        var rows = LocalModelSource.allCases.flatMap { source in
+            local.filter { $0.source == source }.map { (tag: $0.path, title: rowLabel($0, dupNames: duplicates)) }
+        }
+        for remote in [lanChatModels.filter { $0.provider == nil }, lanChatModels.filter { $0.provider != nil }] {
+            rows += remote.map { (tag: "lan:" + $0.name, title: $0.lanDisplayName) }
+        }
+        if AppleFoundationChat.availability.isAvailable {
+            rows.append((tag: ChatModelSelection.appleTag, title: AppleFoundationChat.displayName))
+        }
+        return rows
+    }
+
+    private func moveFocus(_ delta: Int) -> KeyPress.Result {
+        let rows = navigationRows
+        let index = rows.firstIndex { $0.tag == focusedModel }
+        if let next = ModelPalette.move(index, by: delta, count: rows.count) { focusedModel = rows[next].tag }
+        typedPrefix = ""
+        return .handled
+    }
+
+    private func typeAhead(_ press: KeyPress) -> KeyPress.Result {
+        guard press.modifiers.intersection([.command, .control, .option]).isEmpty else { return .ignored }
+        let now = Date()
+        typedPrefix = now.timeIntervalSince(lastTyped) > 1 ? press.characters : typedPrefix + press.characters
+        lastTyped = now
+        let prefix = typedPrefix.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        if let match = navigationRows.first(where: {
+            $0.title.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current).hasPrefix(prefix)
+        }) { focusedModel = match.tag }
+        return .handled
     }
 
     @ViewBuilder
@@ -211,13 +426,13 @@ struct ChatModelPill: View {
                 Text("No chat models downloaded").font(.app(.body))
             }
         } else {
-            // Same duplicate-name suffixing as the tray: a menu keys its
-            // checkmark by row TITLE, so two same-named rows both tick.
+            // Keep identically named models distinguishable across engines.
             let dupNames = LocalModel.duplicateNames(in: pickable)
             ForEach(LocalModelSource.allCases, id: \.self) { source in
                 let models = pickable.filter { $0.source == source }
                 if !models.isEmpty {
-                    Section(L10n.text(source.sectionTitle)) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        modelSectionTitle(source.sectionTitle)
                         ForEach(models) { model in
                             row(title: rowLabel(model, dupNames: dupNames),
                                 tag: model.path)
@@ -228,14 +443,16 @@ struct ChatModelPill: View {
             let network = lanChatModels.filter { $0.provider == nil }
             let providers = lanChatModels.filter { $0.provider != nil }
             if !network.isEmpty {
-                Section(L10n.text(ModelPalette.networkSection)) {
+                VStack(alignment: .leading, spacing: 2) {
+                    modelSectionTitle(ModelPalette.networkSection)
                     ForEach(network, id: \.name) { m in
                         row(title: m.lanDisplayName, tag: "lan:" + m.name)
                     }
                 }
             }
             if !providers.isEmpty {
-                Section(L10n.text(ModelPalette.providersSection)) {
+                VStack(alignment: .leading, spacing: 2) {
+                    modelSectionTitle(ModelPalette.providersSection)
                     ForEach(providers, id: \.name) { m in
                         row(title: m.lanDisplayName, tag: "lan:" + m.name)
                     }
@@ -243,31 +460,50 @@ struct ChatModelPill: View {
             }
         }
         if AppleFoundationChat.availability.isAvailable {
-            Section(L10n.text(ModelPalette.onDeviceSection)) {
+            VStack(alignment: .leading, spacing: 2) {
+                modelSectionTitle(ModelPalette.onDeviceSection)
                 row(title: AppleFoundationChat.displayName, tag: ChatModelSelection.appleTag)
             }
         }
-        Divider()
-        Button {
-            // A MODE of this window now, not a window of its own — so the
-            // picker's "manage" route lands beside the picker rather than on
-            // top of it. AppState.showModels is the one way in, and it is the
-            // LAST row: everything above it is a model you can pick right now.
-            appState.showModels()
-        } label: { Text("Manage Models…")
-            .font(.app(.body)) }
+    }
+
+    private func modelSectionTitle(_ title: String) -> some View {
+        Text(L10n.text(title))
+            .font(.app(.caption))
+            .foregroundStyle(.secondary)
+            .padding(.top, 4)
     }
 
     private func row(title: String, tag: String) -> some View {
         Button {
+            isPresented = false
             selection.wrappedValue = tag
         } label: {
-            if selection.wrappedValue == tag {
-                Label(L10n.text(title), systemImage: "checkmark").font(.app(.body))
-            } else {
-                Text(L10n.text(title)).font(.app(.body))
+            HStack(spacing: 12) {
+                Text(verbatim: title)
+                    .font(.app(.body))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                Image(systemName: "checkmark")
+                    .opacity(selection.wrappedValue == tag ? 1 : 0)
+                    .accessibilityHidden(true)
             }
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.borderless)
+        .help(title)
+        .focused($focusedModel, equals: tag)
+        .id(tag)
+        .onKeyPress(.return) {
+            isPresented = false
+            selection.wrappedValue = tag
+            return .handled
+        }
+        .accessibilityAddTraits(selection.wrappedValue == tag ? .isSelected : [])
     }
 
     /// `displayLabel`, not `name`: a GGUF repo ships several quants and each is

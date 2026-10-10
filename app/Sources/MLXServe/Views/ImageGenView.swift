@@ -2,9 +2,7 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
-/// Image generation window — native FLUX.2, Krea-2-Turbo and Mage-Flow (no
-/// Python). The model picker lists every `ImageModelPreset`; the server
-/// auto-routes to the right image backend by the model's `model_type`.
+/// Image generation workspace with model-specific controls.
 struct ImageGenView: View {
     @EnvironmentObject var service: ImageGenService
     @EnvironmentObject var server: ServerManager
@@ -82,9 +80,6 @@ struct ImageGenView: View {
     @State private var refsDroppedOnHydrate: Bool = false
 
     var body: some View {
-        // No window-sized floor: this is a PAGE of the chat window now, and a
-        // root minimum wider than the detail column overflows it and clips
-        // both edges. Small windows shrink the preview side instead.
         readyView
         .onAppear {
             if !didHydrate {
@@ -102,6 +97,12 @@ struct ImageGenView: View {
         // One persistence site for every sticky control: what is captured in
         // `stickySnapshot` is sticky by construction.
         .onChange(of: stickySnapshot) { _, _ in guard !hydrating else { return }; persist() }
+        .onChange(of: model) { _, _ in guard !hydrating else { return }; applyModelDefaults() }
+        .onChange(of: appState.mediaModelSelection) { _, selection in
+            guard let selection, let settings = selection.applying(to: stickySnapshot) else { return }
+            model = settings.resolvedModel(models: server.allModels)
+            lanModel = LanPick.lanId(settings.modelId)
+        }
         .onChange(of: initImageURL) { _, url in
             sourceSize = url.flatMap { AspectCanvases.pixelSize(of: $0) }
             guard !hydrating, isEditing else { return }
@@ -118,35 +119,21 @@ struct ImageGenView: View {
     }
 
     private var readyView: some View {
-        HSplitView {
-            ScrollView {
-                // The model decides what the rest of the pane offers, so it is read first.
-                VStack(alignment: .leading, spacing: 14) {
-                    modelSection
-                    promptSection
-                    sourceImageSection
-                    qualitySection
-                    canvasSection
-                    advancedSection
-                    // Generate stands apart from the settings it acts on.
-                    actionRow.padding(.top, 14)
-                }
-                // Full-width, leading-aligned frame OUTSIDE the padding — see
-                // AudioGenView.
-                .padding(16)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .frame(minWidth: 340, idealWidth: 380)
-
-            VStack(spacing: 12) {
-                previewArea
-                outputFolderLink
-            }
-            .padding(16)
-            // The preview is what gives way in a small window — the generated
-            // image scales to fit; the controls column keeps its form floor.
-            .frame(minWidth: 280)
-        }
+        GenerationWorkspace(title: "Image", modelName: lanModel ?? model.name,
+                            hasAttachments: takesSourceImage,
+                            attachmentCount: (initImageURL == nil ? 0 : 1)
+                                + (effectiveEditMode ? refImageURLs.count : 0),
+                            notice: generationNotice,
+                            prompt: { promptSection }, model: { modelSection },
+                            attachments: { sourceImageSection }, parameters: {
+            qualitySection
+            canvasSection
+            advancedSection
+            keepResidentToggle
+        }, actions: { actionRow }, result: {
+            previewArea
+            outputFolderLink
+        })
         .alert("Model exceeds your Mac's RAM", isPresented: $showRAMWarning) {
             Button(role: .cancel) { pendingRequest = nil } label: { Text("Cancel")
                 .font(.app(.body)) }
@@ -166,30 +153,48 @@ struct ImageGenView: View {
 
     // MARK: - Sections
 
+    private var generationNotice: String? {
+        if lanModel == nil && !downloads.bundleReady(model.bundle) {
+            return "Download the selected model using the model control."
+        }
+        if !customSizeValid { return "Choose a supported canvas size in generation settings." }
+        if !condWeightsValid { return "Check the layer weights in generation settings." }
+        return nil
+    }
+
     private var promptSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                Text("Prompt").font(.app(.headline).weight(.semibold))
-                Spacer()
-                PromptEnhanceButton(disabled: prompt.isBlank) { showEnhance = true }
-                templatesMenu
-            }
+        HStack(alignment: .top, spacing: AppLayout.compactSpacing) {
             TextEditor(text: $prompt, selection: $promptSelection)
+                .accessibilityLabel("Prompt")
                 .focused($promptFocused)
                 .font(.app(.body))
-                .frame(height: promptHeight)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.3), lineWidth: 0.5)
-                )
-            EditorResizeHandle(height: $promptHeight, onCommit: persist,
-                               help: "Drag to resize the prompt box.")
+                .frame(height: min(promptHeight, 180))
+                .scrollContentBackground(.hidden)
+                .overlay(alignment: .topLeading) {
+                    if prompt.isEmpty {
+                        Text("Describe an image…")
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 8)
+                            .allowsHitTesting(false)
+                    }
+                }
+            Menu {
+                Button("Enhance…") { showEnhance = true }.disabled(prompt.isBlank)
+                templatesMenu
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .padding(.top, 6)
+            .accessibilityLabel("Prompt actions")
+            .help("Prompt actions")
         }
     }
 
-    /// For an EDIT model this menu is the feature discovery surface: the
-    /// repertoire is prompts, so an unlisted capability may as well not exist.
-    /// One group lists flat; the edit repertoires have several, one submenu
-    /// each.
+    /// Edit templates expose the model's supported operations.
     private var templatesMenu: some View {
         let groups = model.promptExamples(editing: isEditing)
         return Menu {
@@ -209,11 +214,7 @@ struct ImageGenView: View {
                 }
             }
         } label: {
-            HStack(spacing: 5) {
-                Text("Templates")
-                Image(systemName: "chevron.down")
-            }
-            .modifier(PaneChip())
+            Text("Templates")
         }
         .modifier(PaneChipMenu())
     }
@@ -225,7 +226,7 @@ struct ImageGenView: View {
     @ViewBuilder
     private var sourceImageSection: some View {
         if takesSourceImage {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: AppLayout.labelSpacing) {
                 HStack(spacing: 6) {
                     Text("Source image(s)").font(.app(.subheadline).weight(.semibold))
                     if refsDroppedOnHydrate {
@@ -243,7 +244,7 @@ struct ImageGenView: View {
                     // exist, and only once there is a source for it to apply
                     // to.
                     if initImageURL != nil && model.supportsReferenceEdit && model.supportsImg2Img {
-                        Picker("", selection: $editMode) {
+                        Picker("Mode", selection: $editMode) {
                             Text("Edit").tag(true)
                             Text("Variation").tag(false)
                         }
@@ -422,22 +423,17 @@ struct ImageGenView: View {
             bundleOf: { $0.bundle },
             downloads: downloads,
             onDownloadFinished: { appState.refreshModels() },
-            persist: persist,
-            accessory: keepResidentToggle)
-        .onChange(of: model) { _, _ in guard !hydrating else { return }; applyModelDefaults() }
+            persist: persist)
     }
 
-    private var keepResidentToggle: AnyView {
-        AnyView(
-            Toggle(isOn: $keepResident) {
-                Text("Keep model loaded after generating")
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
-                .font(.app(.caption))
-                .controlSize(.small)
-                .help("On: the model stays resident so the next generation is instant. Off (default): it's unloaded to free GPU memory.")
-        )
+    private var keepResidentToggle: some View {
+        Toggle(isOn: $keepResident) {
+            Text("Keep model loaded after generating")
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .font(.app(.caption))
+        .controlSize(.small)
+        .help("On: the model stays resident so the next generation is instant. Off (default): it's unloaded to free GPU memory.")
     }
 
     @ViewBuilder
@@ -445,14 +441,14 @@ struct ImageGenView: View {
         // A distilled model has ONE schedule. Offering tiers that only buy time
         // is the same silent-no-op the capability flags exist to kill.
         if model.stepsAreFixed {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: AppLayout.labelSpacing) {
                 Text("Quality").font(.app(.headline).weight(.semibold))
                 Text("Fixed at \(model.fixedSteps) steps — this model is distilled for a \(model.fixedSteps)-step schedule, so more steps cost time without adding detail.")
                     .font(.app(.caption))
                     .foregroundStyle(.secondary)
             }
         } else {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: AppLayout.labelSpacing) {
                 Text("Quality").font(.app(.rowTitle).weight(.semibold))
                 // Measured, not `ViewThatFits`: the menu variant is `fixedSize`
                 // and would never re-fit. Five segments degrade to a menu
@@ -498,7 +494,7 @@ struct ImageGenView: View {
 
     @ViewBuilder
     private func qualityPicker(segmented: Bool) -> some View {
-        let picker = Picker("", selection: qualitySelection) {
+        let picker = Picker("Quality", selection: qualitySelection) {
             ForEach(QualityPreset.allCases) { q in
                 Text(L10n.text(q.label)).font(.app(.body)).tag(QualitySelection.preset(q))
             }
@@ -526,7 +522,7 @@ struct ImageGenView: View {
     /// size off a finished image.
     private var canvasSection: some View {
         let verdict = customResolutionVerdict
-        return VStack(alignment: .leading, spacing: 6) {
+        return VStack(alignment: .leading, spacing: AppLayout.labelSpacing) {
             // Bottom, not centre: the fields carry a heading above them, and
             // centring the row puts the button halfway up that heading.
             HStack(alignment: .bottom, spacing: 8) {
@@ -565,6 +561,7 @@ struct ImageGenView: View {
                 .font(.app(.subheadline).weight(.semibold))
                 .fixedSize()
             TextField("", text: text)
+                .accessibilityLabel(L10n.text(title))
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 80).font(.app(.body))
         }
@@ -589,14 +586,7 @@ struct ImageGenView: View {
             Divider()
             sourceImageMenu
         } label: {
-            HStack(spacing: 5) {
-                Text("Presets")
-                Image(systemName: "chevron.down")
-            }
-            // Body, not caption: this sits beside the size fields rather than
-            // above a text box. The height is the fields' own.
-            .font(.app(.body))
-            .modifier(PaneChip(height: 24))
+            Text("Presets")
         }
         .modifier(PaneChipMenu())
         .help("Sizes this model ships with, and sizes that match the source image.")
@@ -700,64 +690,61 @@ struct ImageGenView: View {
     }
 
     private var advancedSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            FoldingSectionHeader(title: "Advanced options", isExpanded: $showAdvanced)
-            if showAdvanced {
-                // Steps stay overridable even where the schedule is fixed —
-                // it's the Advanced panel, and the hint says the cost.
-                intSliderRow("Steps", value: $steps, range: 1...50)
-                if model.stepsAreFixed {
-                    Text("This model is distilled for \(model.fixedSteps) steps; other values cost time without adding detail.")
-                        .font(.app(.caption2))
-                        .foregroundStyle(.secondary)
-                }
-
-                // Real CFG — the undistilled base checkpoint only. Every other
-                // preset has guidance baked into its weights, so the field
-                // would be pure decoration there and stays hidden.
-                if model.supportsGuidance {
-                    Text("Classifier-free guidance").font(.app(.caption).weight(.semibold))
-                    sliderRow("Guidance scale", value: $guidanceScale, range: 1...20, step: 0.5)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Negative prompt").font(.app(.caption))
-                        TextField("", text: $negativePrompt, prompt: Text("what to steer away from (optional)"))
-                            .textFieldStyle(.roundedBorder)
-                            .font(.app(.caption))
-                    }
-                }
-                // -1 is the random sentinel and renders as an EMPTY box, so the
-                // placeholder explains it instead of a literal -1 that reads as
-                // a broken value.
-                SeedField(label: "Seed", placeholder: "random", range: -1...Int.max, value: $seed,
-                          help: "Same seed + same settings reproduces the image. Paste one to rerun someone else's; leave it empty for a new one each time.")
-                // Rebalance scales the TAPPED text-encoder layers. A backend
-                // that conditions on a single final hidden state has none to
-                // tap (`condWeightCount == 0`), and the panel used to ask for
-                // "Layer weights (0 numbers…)".
-                if model.condWeightCount > 0 {
-                    Divider()
-                    Text("Conditioning rebalance").font(.app(.caption).weight(.semibold))
-                    sliderRow("Global gain", value: $condGain, range: 0...4, step: 0.1)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Layer weights (\(model.condWeightCount) numbers, comma or space separated)")
-                            .font(.app(.caption))
-                        TextField("", text: $condWeightsText, prompt: Text(defaultWeightsPlaceholder))
-                            .textFieldStyle(.roundedBorder)
-                            .font(.app(.caption).monospaced())
-                        if !condWeightsValid {
-                            Text("Needs exactly \(model.condWeightCount) numbers — one per tapped encoder layer.")
-                                .font(.app(.caption2))
-                                .foregroundStyle(.red)
-                        } else {
-                            Text("Scales each tapped text-encoder layer's contribution (1 = neutral). Empty = off.")
-                                .font(.app(.caption2))
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                // LoRA attaches to the DiT; a backend without that path answers 400.
-                if model.supportsLoRA { loraSection }
+        VStack(alignment: .leading, spacing: AppLayout.rowSpacing) {
+            // Steps stay overridable even where the schedule is fixed —
+            // it's the Advanced panel, and the hint says the cost.
+            intSliderRow("Steps", value: $steps, range: 1...50)
+            if model.stepsAreFixed {
+                Text("This model is distilled for \(model.fixedSteps) steps; other values cost time without adding detail.")
+                    .font(.app(.caption2))
+                    .foregroundStyle(.secondary)
             }
+
+            // Real CFG — the undistilled base checkpoint only. Every other
+            // preset has guidance baked into its weights, so the field
+            // would be pure decoration there and stays hidden.
+            if model.supportsGuidance {
+                Text("Classifier-free guidance").font(.app(.caption).weight(.semibold))
+                sliderRow("Guidance scale", value: $guidanceScale, range: 1...20, step: 0.5)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Negative prompt").font(.app(.caption))
+                    TextField("", text: $negativePrompt, prompt: Text("what to steer away from (optional)"))
+                        .textFieldStyle(.roundedBorder)
+                        .font(.app(.caption))
+                }
+            }
+            // -1 is the random sentinel and renders as an EMPTY box, so the
+            // placeholder explains it instead of a literal -1 that reads as
+            // a broken value.
+            SeedField(label: "Seed", placeholder: "random", range: -1...Int.max, value: $seed,
+                      help: "Same seed + same settings reproduces the image. Paste one to rerun someone else's; leave it empty for a new one each time.")
+            // Rebalance scales the TAPPED text-encoder layers. A backend
+            // that conditions on a single final hidden state has none to
+            // tap (`condWeightCount == 0`), and the panel used to ask for
+            // "Layer weights (0 numbers…)".
+            if model.condWeightCount > 0 {
+                Divider()
+                Text("Conditioning rebalance").font(.app(.caption).weight(.semibold))
+                sliderRow("Global gain", value: $condGain, range: 0...4, step: 0.1)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Layer weights (\(model.condWeightCount) numbers, comma or space separated)")
+                        .font(.app(.caption))
+                    TextField("", text: $condWeightsText, prompt: Text(defaultWeightsPlaceholder))
+                        .textFieldStyle(.roundedBorder)
+                        .font(.app(.caption).monospaced())
+                    if !condWeightsValid {
+                        Text("Needs exactly \(model.condWeightCount) numbers — one per tapped encoder layer.")
+                            .font(.app(.caption2))
+                            .foregroundStyle(.red)
+                    } else {
+                        Text("Scales each tapped text-encoder layer's contribution (1 = neutral). Empty = off.")
+                            .font(.app(.caption2))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            // LoRA attaches to the DiT; a backend without that path answers 400.
+            if model.supportsLoRA { loraSection }
         }
     }
 
@@ -787,6 +774,7 @@ struct ImageGenView: View {
                     .foregroundStyle(.secondary)
             }
             Slider(value: value, in: range, step: step)
+                .accessibilityLabel(L10n.text(label))
                 .padding(.top, Self.steppedSliderTrackDrop)
         }
     }
@@ -809,6 +797,7 @@ struct ImageGenView: View {
                 in: Double(range.lowerBound)...Double(range.upperBound),
                 step: 1
             )
+            .accessibilityLabel(L10n.text(label))
             .padding(.top, Self.steppedSliderTrackDrop)
         }
     }
@@ -904,14 +893,13 @@ struct ImageGenView: View {
     }
 
     private var actionRow: some View {
-        VStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: AppLayout.compactSpacing) {
             HStack {
                 if service.isRunning {
                     Button(role: .destructive) {
                         service.cancel()
                     } label: {
                         Label("Cancel", systemImage: "stop.circle")
-                            .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
                 } else {
@@ -919,30 +907,27 @@ struct ImageGenView: View {
                         tryGenerate()
                     } label: {
                         Label("Generate", systemImage: "wand.and.stars")
-                            .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.return, modifiers: [.command])
                     .disabled(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (lanModel == nil && !downloads.bundleReady(model.bundle)) || !condWeightsValid || !customSizeValid)
                 }
             }
-            .font(.app(.callout))
         }
+        .controlSize(.large)
     }
 
     private var previewArea: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.black.opacity(0.15))
+        Group {
             Group {
                 switch service.phase {
                 case .idle:
                     ContentUnavailableView("No generation yet", systemImage: "photo", description: Text("Enter a prompt and press Generate.").font(.app(.body)))
                 case .running(let step, let total, let message):
-                    VStack(spacing: 12) {
+                    VStack(spacing: AppLayout.rowSpacing) {
                         ProgressView(value: Double(step), total: max(1, Double(total)))
                             .progressViewStyle(.linear)
-                            .frame(width: 240)
+                            .frame(maxWidth: 240)
                         Text(message).font(.app(.footnote)).foregroundStyle(.secondary)
                     }
                 case .completed(let path):
@@ -958,17 +943,18 @@ struct ImageGenView: View {
                     }
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func completedPreview(path: String) -> some View {
-        VStack(spacing: 8) {
+        VStack(spacing: AppLayout.compactSpacing) {
             MediaImageView(url: URL(fileURLWithPath: path), maxPixel: 3072,
                            contentMode: .fit)
             // The name and the ways to reach the file belong together, centred
             // under the picture they describe.
-            HStack(spacing: 8) {
+            HStack(spacing: AppLayout.compactSpacing) {
                 Text(URL(fileURLWithPath: path).lastPathComponent)
                     .font(.app(.caption))
                     .foregroundStyle(.secondary)
@@ -979,9 +965,10 @@ struct ImageGenView: View {
                 } label: { Image(systemName: "folder") }
                 .buttonStyle(.borderless)
                 .help("Reveal in Finder")
+                .accessibilityLabel("Reveal in Finder")
             }
         }
-        .padding(8)
+        .padding(AppLayout.compactSpacing)
     }
 
     private var outputFolderLink: some View {

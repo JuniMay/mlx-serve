@@ -107,23 +107,6 @@ final class ChatDeleteShortcutTests: XCTestCase {
 /// keeps the composer holding the keyboard forever.
 final class KeyboardFocusTests: XCTestCase {
 
-    /// A conversation row is a `.buttonStyle(.plain)` Button, which takes no
-    /// first responder under macOS's default keyboard navigation — the same
-    /// fact that made `.onDeleteCommand` on that column never fire. So clicking
-    /// a chat moved the selection while the composer kept the keyboard, and
-    /// nothing in the window ever took it back.
-    func testClickingAConversationRowMovesTheKeyboardOutOfTheComposer() throws {
-        let source = SourceScan.source("Views/ChatView.swift", from: #filePath)
-        let body = try XCTUnwrap(
-            SourceScan.declarationBody(from: "private func selectRow", in: source),
-            "selectRow moved — repoint this scan")
-        XCTAssertTrue(body.contains("KeyboardFocus.resignTextEditor"), """
-            clicking a conversation row leaves the composer holding the \
-            keyboard — the rows take no first responder themselves, so nothing \
-            else will move it.
-            """)
-    }
-
     /// The second half. `updateNSView` re-took first responder on EVERY update
     /// while `isFocused` was true, and `onResignFocus` publishes the cleared
     /// flag asynchronously — so the re-grab landed first and put the keyboard

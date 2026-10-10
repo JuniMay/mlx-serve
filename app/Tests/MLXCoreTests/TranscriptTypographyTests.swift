@@ -108,7 +108,11 @@ final class TranscriptTypographyTests: XCTestCase {
         let rendered = MarkdownText.attributedString(for: "- an item")
         let style = rendered.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle
         XCTAssertGreaterThan(style?.headIndent ?? 0, 0, "the bullet's own hang is missing")
-        XCTAssertEqual(style?.firstLineHeadIndent ?? 0, 0, "only the WRAPPED lines hang")
+        let markerWidth = ("• " as NSString).size(withAttributes: [
+            .font: NSFont.systemFont(ofSize: ChatMetrics.transcriptFontSize)
+        ]).width.rounded(.up)
+        XCTAssertEqual((style?.firstLineHeadIndent ?? 0) + markerWidth,
+                       style?.headIndent ?? 0, "wrapped lines start after the marker column")
     }
 
     // MARK: - The setting
@@ -137,10 +141,10 @@ final class TranscriptTypographyTests: XCTestCase {
     /// over and the lines wrap to it.
     func testAWindowNarrowerThanTheSettingWrapsTheTextInstead() {
         withColumn(.medium) {
-            XCTAssertEqual(ChatMetrics.proseWidth(panelWidth: 900), 900)
+            XCTAssertEqual(ChatMetrics.proseWidth(panelWidth: 900), 900 - 2 * ChatMetrics.gutter)
         }
         withColumn(.narrow) {
-            XCTAssertEqual(ChatMetrics.proseWidth(panelWidth: 600), 600)
+            XCTAssertEqual(ChatMetrics.proseWidth(panelWidth: 600), 600 - 2 * ChatMetrics.gutter)
         }
     }
 

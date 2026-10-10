@@ -160,7 +160,7 @@ final class SettingsSectionResetTests: XCTestCase {
                       "a section reset must say it's scoped: \(voice)")
         XCTAssertFalse(voice.localizedCaseInsensitiveContains("every section"))
 
-        XCTAssertEqual(SettingsReset.buttonLabel(.all), "Reset All Settings")
+        XCTAssertEqual(SettingsReset.buttonLabel(.all), "Reset Server and Agent Settings…")
         XCTAssertEqual(SettingsReset.buttonLabel(.category(.voice)), "Reset Voice")
         XCTAssertTrue(SettingsReset.confirmTitle(.category(.server)).contains("Server"))
     }

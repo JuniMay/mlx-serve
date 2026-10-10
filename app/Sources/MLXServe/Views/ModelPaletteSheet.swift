@@ -1,14 +1,11 @@
 import SwiftUI
 
-/// ⌘L: the model switcher. A search field over every model this chat can be
-/// pointed at — the composer's pill is the same list for the mouse, this is the
-/// one for the keyboard: type to narrow, ↑/↓ to move, Return to load, Esc out.
-///
-/// Every decision it makes is `ModelPalette`'s (rows, filtering, where the
-/// selection opens, how the arrows behave); this draws them and reports a pick.
+/// The global model chooser opens the workspace for the selected model's capabilities.
 struct ModelPaletteSheet: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var server: ServerManager
+    @Environment(\.openWindow) private var openWindow
+    @AppStorage("audioGenTab") private var audioTab: AudioGenView.Tab = .voice
 
     @State private var query = ""
     /// Index into the FILTERED rows. Read through `ModelPalette.clamped`, never
@@ -19,15 +16,33 @@ struct ModelPaletteSheet: View {
     private var rows: [ModelPaletteRow] {
         ModelPalette.rows(appleAvailable: AppleFoundationChat.availability.isAvailable,
                           local: appState.localModels,
-                          lan: server.lanModels(capability: "chat"))
+                          lan: server.lanModels(capability: "chat"), mediaModels: server.allModels)
     }
 
     private var matches: [ModelPaletteRow] { ModelPalette.filtered(rows, query: query) }
 
-    /// The row the chat is on right now, so it opens on the model already
-    /// answering and ⌘L + Return is a no-op.
+    /// Prefer the model selected in the visible workspace.
     private var currentTag: String {
-        ChatModelSelection.tag(localPath: appState.selectedModelPath,
+        if case .create(let experiment) = appState.chatWorkspace {
+            let modality: MediaModality
+            let modelID: String
+            switch experiment {
+            case .image: modality = .image; modelID = ImageGenSettings.load().modelId
+            case .video: modality = .video; modelID = VideoGenSettings.load().modelId
+            case .model3d: modality = .mesh; modelID = Model3DGenSettings.load().modelId
+            case .audio:
+                switch audioTab {
+                case .voice: modality = .voice; modelID = AudioGenSettings.load().modelId
+                case .music: modality = .music; modelID = MusicGenSettings.load().modelId
+                case .sound: modality = .sound; modelID = SoundGenSettings.load().modelId
+                }
+            }
+            return appState.localModels.first {
+                ModelBrowserUse.mediaPresetID(modality: modality, name: $0.name, path: $0.path,
+                                              models: server.allModels) == modelID
+            }?.path ?? ""
+        }
+        return ChatModelSelection.tag(localPath: appState.selectedModelPath,
                                lanChatModelId: server.lanChatModelId,
                                apple: appState.useAppleModel)
     }
@@ -45,9 +60,6 @@ struct ModelPaletteSheet: View {
             footer
         }
         .frame(width: 520, height: 420)
-        // Esc closes. The sheet is not blocking — it configures the next
-        // message, it does not gate it — so SwiftUI's own dismissal is the
-        // right behaviour and nothing intercepts the binding.
         .onExitCommand { close() }
         .onAppear {
             selection = ModelPalette.selection(in: matches, current: currentTag)
@@ -118,10 +130,8 @@ struct ModelPaletteSheet: View {
         let selected = ModelPalette.clamped(selection, count: matches.count) == index
         return Button { pick(row) } label: {
             HStack(spacing: 10) {
-                // The checkmark says which model is answering NOW; the
-                // highlight says which one Return would load. Two different
-                // facts, so they are two different marks.
-                Image(systemName: row.tag == currentTag ? "checkmark" : "cpu")
+                // The checkmark marks the current model; the highlight tracks keyboard selection.
+                Image(systemName: row.tag == currentTag ? "checkmark" : row.interaction.symbol)
                     .font(.app(.callout, weight: .medium))
                     .foregroundStyle(row.tag == currentTag ? Color.accentColor : .secondary)
                     .frame(width: 16)
@@ -149,7 +159,7 @@ struct ModelPaletteSheet: View {
     private var emptyState: some View {
         VStack(spacing: 10) {
             Spacer()
-            Text(L10n.text(rows.isEmpty ? "No chat models on this Mac" : "No models match “\(query)”"))
+            Text(L10n.text(rows.isEmpty ? "No models available" : "No models match “\(query)”"))
                 .foregroundStyle(.secondary)
             // With nothing to pick, the one useful thing is the way to get a
             // model — the same door the pill's last row opens.
@@ -219,10 +229,19 @@ struct ModelPaletteSheet: View {
     private func pick(_ row: ModelPaletteRow) { apply(row.tag) }
 
     private func apply(_ tag: String) {
-        // What a pick MEANS is `AppState.applyChatModelPick` — the palette
-        // decides which row, never what loading it involves.
-        appState.applyChatModelPick(tag)
+        guard let row = rows.first(where: { $0.tag == tag }) else { return }
         close()
+        switch row.interaction {
+        case .chat:
+            appState.applyChatModelPick(tag)
+            appState.showConversation()
+        case .media(let modality):
+            guard let model = appState.localModels.first(where: { $0.path == tag }) else { return }
+            appState.selectMediaModel(modality: modality, name: model.name, path: model.path)
+        case .decision:
+            appState.decisionsModelPath = tag
+            AppActivation.openWindow(id: "decisions", using: openWindow)
+        }
     }
 
     private func close() { appState.modelPalettePresented = false }

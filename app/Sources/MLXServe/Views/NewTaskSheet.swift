@@ -63,7 +63,7 @@ struct NewTaskSheet: View {
             header
             Divider()
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: AppLayout.sectionSpacing) {
                     // A task is TWO answers — what, and when. Everything else is
                     // a default worth leaving alone, so it sits behind one
                     // disclosure rather than competing for the same attention:
@@ -76,8 +76,8 @@ struct NewTaskSheet: View {
 
                     optionsSection
                 }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 20)
+                .padding(.horizontal, AppLayout.pageInset)
+                .padding(.vertical, AppLayout.pageInset)
             }
             // Content-sized, capped — with Options collapsed there is far less
             // to show, and a fixed 640 left a third of the sheet empty.
@@ -99,9 +99,8 @@ struct NewTaskSheet: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 24)
-        .padding(.top, 18)
-        .padding(.bottom, 14)
+        .padding(.horizontal, AppLayout.pageInset)
+        .padding(.vertical, AppLayout.contentInset)
     }
 
     // MARK: - The two questions
@@ -112,8 +111,9 @@ struct NewTaskSheet: View {
                 TextEditor(text: $goal)
                     .font(.app(.body))
                     .scrollContentBackground(.hidden)
-                    .padding(8)
+                    .padding(AppLayout.compactSpacing)
                     .frame(minHeight: 88)
+                    .accessibilityLabel(Text("Goal"))
                 // A placeholder rather than a hint UNDER the box: the example
                 // belongs where the typing happens, and it costs no height once
                 // there is something to read instead.
@@ -127,24 +127,24 @@ struct NewTaskSheet: View {
                         // matching 5 on the vertical (or the 16 this had) drops
                         // the placeholder a line below the cursor it is
                         // standing in for.
-                        .padding(.horizontal, 8 + 5)
-                        .padding(.vertical, 8)
+                        .padding(.horizontal, AppLayout.compactSpacing + 5)
+                        .padding(.vertical, AppLayout.compactSpacing)
                         .allowsHitTesting(false)
                 }
             }
             .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.primary.opacity(0.05)))
+                RoundedRectangle(cornerRadius: AppLayout.textEditorRadius, style: .continuous)
+                    .fill(Color(.textBackgroundColor)))
             .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1))
+                RoundedRectangle(cornerRadius: AppLayout.textEditorRadius, style: .continuous)
+                    .strokeBorder(Color(.separatorColor), lineWidth: 0.5))
         }
     }
 
     private var scheduleField: some View {
         field("Schedule") {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: AppLayout.compactSpacing) {
+                HStack(spacing: AppLayout.labelSpacing) {
                     ForEach(presets, id: \.0) { preset in
                         presetChip(preset.0, value: preset.1)
                     }
@@ -152,6 +152,7 @@ struct NewTaskSheet: View {
                 TextField("every weekday at 8am · or a cron expression",
                           text: $scheduleText)
                     .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel(Text("Schedule"))
                 // The echo is the whole point of typing a schedule in English:
                 // it is the only confirmation that what you meant is what will
                 // run. Reserved height, so the layout does not jump on every
@@ -179,23 +180,25 @@ struct NewTaskSheet: View {
         let selected = scheduleText.trimmingCharacters(in: .whitespaces)
             .caseInsensitiveCompare(value) == .orderedSame
         return Button { scheduleText = value } label: {
-            Text(L10n.text(title))
-                .font(.app(.caption).weight(.medium))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(
-                    Capsule().fill(selected ? Color.accentColor
-                                            : Color.primary.opacity(0.07)))
-                .foregroundStyle(selected ? Color.white : Color.primary)
+            HStack(spacing: 4) {
+                Text(L10n.text(title))
+                Image(systemName: "checkmark")
+                    .font(.app(.caption2))
+                    .opacity(selected ? 1 : 0)
+                    .accessibilityHidden(true)
+            }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .tint(selected ? Color.accentColor : .secondary)
+        .accessibilityAddTraits(selected ? .isSelected : [])
         .help(value)
     }
 
     private var autonomyField: some View {
         field("Autonomy") {
-            VStack(alignment: .leading, spacing: 8) {
-                Picker("", selection: $autonomy) {
+            VStack(alignment: .leading, spacing: AppLayout.compactSpacing) {
+                Picker("Autonomy", selection: $autonomy) {
                     ForEach(TaskAutonomy.allCases, id: \.self) { level in
                         Text(L10n.text(level.shortLabel)).tag(level)
                     }
@@ -216,63 +219,53 @@ struct NewTaskSheet: View {
     /// Agent, model and MCP are real but rarely touched. Collapsing them costs
     /// nothing as long as the row SAYS what is set — see `TaskOptionsSummary`.
     private var optionsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.15)) { showOptions.toggle() }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "chevron.right")
-                        .font(.app(.caption).weight(.semibold))
-                        .rotationEffect(.degrees(showOptions ? 90 : 0))
-                        .foregroundStyle(.secondary)
-                    Text("Options").font(.app(.headline).weight(.semibold))
-                    if !showOptions, let summary = optionsSummary {
-                        Text(L10n.text(summary))
-                            .font(.app(.caption))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
+        DisclosureGroup(isExpanded: $showOptions) {
+            VStack(alignment: .leading, spacing: AppLayout.sectionSpacing) {
+                field("Run as", hint: "An agent brings its own prompt, tools, model and workspace.") {
+                    Picker("Run as", selection: $agentId) {
+                        Text("None (app defaults)").font(.app(.body)).tag(UUID?.none)
+                        ForEach(appState.agents.allAgents) { agent in
+                            Text(agent.name).font(.app(.body)).tag(UUID?.some(agent.id))
+                        }
                     }
-                    Spacer(minLength: 0)
+                    .labelsHidden()
                 }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
 
-            if showOptions {
-                VStack(alignment: .leading, spacing: 18) {
-                    field("Run as", hint: "An agent brings its own prompt, tools, model and workspace.") {
-                        Picker("", selection: $agentId) {
-                            Text("None (app defaults)").font(.app(.body)).tag(UUID?.none)
-                            ForEach(appState.agents.allAgents) { agent in
-                                Text(agent.name).font(.app(.body)).tag(UUID?.some(agent.id))
+                if !baseModels.isEmpty {
+                    field("Model") {
+                        Picker("Model", selection: $modelPath) {
+                            Text("Use current model").font(.app(.body)).tag(String?.none)
+                            ForEach(baseModels) { model in
+                                Text(model.name).font(.app(.body)).tag(String?.some(model.path))
                             }
                         }
                         .labelsHidden()
                     }
-
-                    if !baseModels.isEmpty {
-                        field("Model") {
-                            Picker("", selection: $modelPath) {
-                                Text("Use current model").font(.app(.body)).tag(String?.none)
-                                ForEach(baseModels) { model in
-                                    Text(model.name).font(.app(.body)).tag(String?.some(model.path))
-                                }
-                            }
-                            .labelsHidden()
-                        }
-                    }
-
-                    field("MCP tools",
-                          hint: "Your enabled MCP servers (configure them in Chat ▸ MCP). Outside Read-only/Workspace, MCP calls pause for approval.") {
-                        Toggle(isOn: $useMCP) {
-                            Text("Available to this task").font(.app(.subheadline))
-                        }
-                        .toggleStyle(.switch)
-                    }
                 }
-                .padding(.leading, 18)
+
+                field("MCP tools",
+                      hint: "Your enabled MCP servers (configure them in Settings ▸ Tools & MCP). Outside Read-only/Workspace, MCP calls pause for approval.") {
+                    Toggle(isOn: $useMCP) {
+                        Text("Available to this task").font(.app(.subheadline))
+                    }
+                    .toggleStyle(.switch)
+                }
             }
+            .padding(.top, AppLayout.rowSpacing)
+        } label: {
+            HStack(spacing: AppLayout.compactSpacing) {
+                Text("Options").font(.app(.headline))
+                if !showOptions, let summary = optionsSummary {
+                    Text(L10n.text(summary))
+                        .font(.app(.caption))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+            .onTapGesture { showOptions.toggle() }
         }
     }
 
@@ -298,8 +291,8 @@ struct NewTaskSheet: View {
                 .disabled(!canSave)
                 .keyboardShortcut(.defaultAction)
         }
-        .padding(.horizontal, 22)
-        .padding(.vertical, 14)
+        .padding(.horizontal, AppLayout.pageInset)
+        .padding(.vertical, AppLayout.contentInset)
     }
 
     /// One labelled field: title, control, optional explainer UNDER it. The old
@@ -308,7 +301,7 @@ struct NewTaskSheet: View {
     @ViewBuilder
     private func field<Content: View>(_ title: String, hint: String? = nil,
                                       @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: AppLayout.labelSpacing) {
             Text(L10n.text(title)).font(.app(.subheadline).weight(.semibold))
             content()
             if let hint {

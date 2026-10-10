@@ -336,6 +336,55 @@ final class VoiceModeControllerTests: XCTestCase {
         XCTAssertEqual(config?.voiceStyle, true)
     }
 
+    func testEachVoiceTurnResolvesTheSubmittedConversationAgain() async {
+        let (c, rec, _, runner, sid) = makeRunnable()
+        var plain = false
+        var resolvedIds: [UUID] = []
+        c.resolveTurn = { sessionId in
+            resolvedIds.append(sessionId)
+            var result = ResolvedAgentSettings(
+                tools: Set(AgentToolKind.allCases), toolsEnabled: true, mcpEnabled: true)
+            result.plainChat = plain
+            return result
+        }
+        _ = await c.begin()
+        rec.onFinalTranscript?("first")
+        XCTAssertTrue(runner.calls[0].config.mcpMode)
+        c.bargeIn()
+        plain = true
+        let moved = UUID()
+        c.turnContext = { (moved, nil) }
+        rec.onFinalTranscript?("second")
+        XCTAssertEqual(resolvedIds, [sid, moved])
+        XCTAssertFalse(runner.calls[1].config.agentMode)
+        XCTAssertFalse(runner.calls[1].config.mcpMode)
+        c.end()
+    }
+
+    func testPlainChatClearsOnlyTheBoundVoicesApproval() async {
+        let (c, _, _, _, sid) = makeRunnable()
+        _ = await c.begin()
+        c.autoApproveTools = true
+        c.revokeToolApprovals(for: UUID())
+        XCTAssertTrue(c.autoApproveTools)
+        c.revokeToolApprovals(for: sid)
+        XCTAssertFalse(c.autoApproveTools)
+        let decision = Task { await c.approvalDecision(for: Self.toolCall("shell")) }
+        for _ in 0..<100 where c.pendingApproval == nil { await Task.yield() }
+        guard c.pendingApproval != nil else {
+            c.end()
+            decision.cancel()
+            return XCTFail("approval did not become pending")
+        }
+        c.revokeToolApprovals(for: sid)
+        c.resolve(.allow, allowAll: true)
+        let allowed = await decision.value
+        XCTAssertFalse(allowed)
+        XCTAssertFalse(c.autoApproveTools)
+        XCTAssertTrue(c.isActive)
+        c.end()
+    }
+
     func testStreamingAnswerIsSanitizedChunkedAndSpoken() async {
         let (c, rec, syn) = make()
         await beginAndSubmit(c, rec)
@@ -909,6 +958,111 @@ final class VoiceModeControllerTests: XCTestCase {
 
     // MARK: Tool approval routing
 
+    func testNewVoiceApprovalDeniesAnUnresolvedStoppedTurn() async throws {
+        let (c, rec, synth, runner, sid) = makeRunnable()
+        defer { c.end() }
+        c.autoApproveTools = false
+        _ = await c.begin()
+        var current: ToolApprovalScope? = ToolApprovalScope(sessionID: sid, turnID: UUID())
+        c.approvalScopeForSession = { $0 == sid ? current : nil }
+        rec.onFinalTranscript?("first request")
+        let firstApproval = try XCTUnwrap(runner.lastApproval)
+        var firstResult: Bool?
+        let first = Task {
+            let result = await firstApproval(Self.toolCall("shell"))
+            firstResult = result
+            return result
+        }
+        for _ in 0..<100 where c.pendingApproval == nil { await Task.yield() }
+        let oldRequest = try XCTUnwrap(c.pendingApproval)
+
+        // A chat-side Stop followed by a typed reply returns voice to listening.
+        current = nil
+        runner.stop(sessionId: sid)
+        c.observeAssistant(messageId: "typed-reply", content: "Ready. ", generating: false)
+        synth.simulateDrain()
+        XCTAssertEqual(c.state, .listening)
+        current = ToolApprovalScope(sessionID: sid, turnID: UUID())
+        rec.onFinalTranscript?("second request")
+        let nextApproval = try XCTUnwrap(runner.lastApproval)
+        let second = Task { await nextApproval(Self.toolCall("writeFile")) }
+        for _ in 0..<100 where c.pendingApproval?.id == oldRequest.id { await Task.yield() }
+        for _ in 0..<100 where firstResult == nil { await Task.yield() }
+
+        XCTAssertEqual(firstResult, false, "replacing approval must release the old turn")
+        XCTAssertEqual(c.pendingApproval?.toolName, "writeFile")
+        if firstResult == nil { oldRequest.continuation.resume(returning: .deny) }
+        c.resolve(.deny)
+        _ = await first.value
+        let secondResult = await second.value
+        XCTAssertFalse(secondResult)
+    }
+
+    func testScopedApprovalCannotGrantAfterTurnStopsOrIsSuperseded() async throws {
+        for superseded in [false, true] {
+            let (c, _, _, _, sid) = makeRunnable()
+            defer { c.end() }
+            c.autoApproveTools = false
+            _ = await c.begin()
+            let original = ToolApprovalScope(sessionID: sid, turnID: UUID())
+            var current: ToolApprovalScope? = original
+            c.approvalScopeForSession = { $0 == sid ? current : nil }
+
+            let decision = Task { await c.approvalDecision(for: Self.toolCall("shell")) }
+            for _ in 0..<100 where c.pendingApproval == nil { await Task.yield() }
+            let request = try XCTUnwrap(c.pendingApproval)
+            XCTAssertEqual(request.scope, original)
+            current = superseded ? ToolApprovalScope(sessionID: sid, turnID: UUID()) : nil
+
+            c.resolve(.allow, allowAll: true, requestID: request.id)
+
+            let allowed = await decision.value
+            XCTAssertFalse(allowed)
+            XCTAssertFalse(c.autoApproveTools)
+            XCTAssertNil(c.pendingApproval)
+        }
+    }
+
+    func testScopedApprovalRequiresCurrentAccessBeforeAutoApproving() async {
+        let (c, _, _, _, _) = makeRunnable()
+        defer { c.end() }
+        _ = await c.begin()
+        c.autoApproveTools = true
+        c.approvalScopeForSession = { _ in nil }
+
+        let allowed = await c.approvalDecision(for: Self.toolCall("shell"))
+
+        XCTAssertFalse(allowed)
+        XCTAssertNil(c.pendingApproval)
+    }
+
+    func testScopedApprovalAllowsCurrentOriginAndRechecksAfterWait() async throws {
+        let (c, rec, _, runner, sid) = makeRunnable()
+        defer { c.end() }
+        c.autoApproveTools = false
+        _ = await c.begin()
+        var current: ToolApprovalScope? = ToolApprovalScope(sessionID: sid, turnID: UUID())
+        c.approvalScopeForSession = { $0 == sid ? current : nil }
+        rec.onFinalTranscript?("do a thing")
+        let approval = try XCTUnwrap(runner.lastApproval)
+        let first = Task { await approval(Self.toolCall("shell")) }
+        for _ in 0..<100 where c.pendingApproval == nil { await Task.yield() }
+        let firstID = try XCTUnwrap(c.pendingApproval?.id)
+        c.resolve(.allow, allowAll: true, requestID: firstID)
+        let firstAllowed = await first.value
+        XCTAssertTrue(firstAllowed)
+        XCTAssertTrue(c.autoApproveTools)
+
+        c.autoApproveTools = false
+        let second = Task { await approval(Self.toolCall("writeFile")) }
+        for _ in 0..<100 where c.pendingApproval == nil { await Task.yield() }
+        let secondID = try XCTUnwrap(c.pendingApproval?.id)
+        c.resolve(.allow, requestID: secondID)
+        current = nil
+        let secondAllowed = await second.value
+        XCTAssertFalse(secondAllowed)
+    }
+
     func testAutoApproveReturnsTrueWithoutPrompting() async {
         let (c, _, _, _, _) = makeRunnable()
         c.autoApproveTools = true
@@ -969,6 +1123,45 @@ final class VoiceModeControllerTests: XCTestCase {
         XCTAssertFalse(allowed)
         XCTAssertNil(c.pendingApproval)
         XCTAssertEqual(c.state, .idle)
+    }
+
+    func testInterruptDeniesPendingApproval() async {
+        let (c, rec, _, _, _) = makeRunnable()
+        c.autoApproveTools = false
+        _ = await c.begin()
+        rec.onFinalTranscript?("do a thing")
+        let decision = Task { await c.approvalDecision(for: Self.toolCall("shell")) }
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertNotNil(c.pendingApproval)
+
+        c.bargeIn()
+
+        XCTAssertNil(c.pendingApproval)
+        c.resolve(.deny) // Clean up a failed regression without stranding its continuation.
+        let allowed = await decision.value
+        XCTAssertFalse(allowed)
+        XCTAssertEqual(c.state, .listening)
+        c.end()
+    }
+
+    func testStaleApprovalCannotAllowANewerRequestOrEnableAutoApprove() async throws {
+        let (c, _, _, _, _) = makeRunnable()
+        c.autoApproveTools = false
+        let first = Task { await c.approvalDecision(for: Self.toolCall("shell")) }
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        let oldID = try XCTUnwrap(c.pendingApproval?.id)
+        c.resolve(.deny, requestID: oldID)
+        _ = await first.value
+
+        let second = Task { await c.approvalDecision(for: Self.toolCall("writeFile")) }
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        let currentID = try XCTUnwrap(c.pendingApproval?.id)
+        c.resolve(.allow, allowAll: true, requestID: oldID)
+        XCTAssertEqual(c.pendingApproval?.id, currentID)
+        XCTAssertFalse(c.autoApproveTools)
+        c.resolve(.deny, requestID: currentID)
+        let allowed = await second.value
+        XCTAssertFalse(allowed)
     }
 
     // MARK: - Per-session binding (voice is ONE instance, bound to ONE chat)

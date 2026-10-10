@@ -88,11 +88,12 @@ final class AppActivationTests: XCTestCase {
         XCTAssertEqual(AppActivation.windowTitle(for: "agents"), "Agents")
         XCTAssertEqual(AppActivation.windowTitle(for: "decisions"), "Decisions")
         XCTAssertEqual(AppActivation.windowTitle(for: "modelSettings"), "Model Settings")
+        XCTAssertEqual(AppActivation.windowTitle(for: "settings"), "Settings")
     }
 
     func testRetiredAndUnknownSceneIdsDoNotFallThroughToBrowser() {
         // These are modes of the chat window now, not Browser windows to raise.
-        for retired in ["modelBrowser", "settings", "tasks", "imageGen", "videoGen", "audioGen", "model3dGen"] {
+        for retired in ["modelBrowser", "tasks", "imageGen", "videoGen", "audioGen", "model3dGen"] {
             XCTAssertNil(AppActivation.windowTitle(for: retired), "\(retired) must not match Browser by title")
         }
         XCTAssertNil(AppActivation.windowTitle(for: "unknown"))
@@ -123,6 +124,12 @@ final class AppActivationTests: XCTestCase {
                        "opening Agents after Browser must not raise Browser again")
         XCTAssertFalse(AppActivation.windowMatches(id: "benchmarks", title: "Browser", identifier: "browser"),
                        "opening Benchmarks after Browser must not raise Browser again")
+    }
+
+    func testSettingsWindowDoesNotMatchModelSettingsIdentifier() {
+        XCTAssertFalse(AppActivation.windowMatches(id: "settings", title: "Model Settings", identifier: "modelSettings"))
+        XCTAssertFalse(AppActivation.windowMatches(id: "settings", title: "", identifier: "SwiftUI-Window-modelSettings"))
+        XCTAssertTrue(AppActivation.windowMatches(id: "settings", title: "", identifier: "SwiftUI-Window-settings"))
     }
 
     /// The sandbox terminal window is retired (terminals are rows of the chat

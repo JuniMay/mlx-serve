@@ -3,6 +3,37 @@ import SwiftUI
 @testable import MLXCore
 
 final class GenerationDefaultsRowsTests: XCTestCase {
+    func testSearchFiltersFieldsAndSuppressesBulkControls() {
+        let search = GenerationDefaultsSearch(query: "top_p", inheritance: "Model default")
+        XCTAssertEqual(search.fields, [.topP])
+        XCTAssertFalse(search.showsBulkControls)
+        XCTAssertTrue(search.hasContent)
+
+        let unmatched = GenerationDefaultsSearch(query: "--max-resident-mem", inheritance: "Model default")
+        XCTAssertTrue(unmatched.fields.isEmpty)
+        XCTAssertFalse(unmatched.showsBulkControls)
+        XCTAssertFalse(unmatched.hasContent)
+    }
+
+    func testSearchAndClearingPreserveFieldScopeAndSearchVocabulary() {
+        let fields: [GenerationField] = [.temperature, .topP]
+        let inherited = GenerationDefaultsSearch(query: "Model default", fields: fields, inheritance: "Model default")
+        XCTAssertEqual(inherited.fields, fields)
+        XCTAssertFalse(inherited.showsBulkControls)
+        let forced = GenerationDefaultsSearch(query: "Ignore client override", fields: fields, inheritance: "Model default")
+        XCTAssertEqual(forced.fields, fields)
+
+        let cleared = GenerationDefaultsSearch(query: " \n ", fields: fields, inheritance: "Model default")
+        XCTAssertEqual(cleared.fields, fields)
+        XCTAssertTrue(cleared.showsBulkControls)
+        XCTAssertTrue(cleared.hasContent)
+
+        let section = SettingsSearch.section(query: "Generation Defaults", title: "Generation Defaults")
+        let titleMatch = GenerationDefaultsSearch(query: section.childQuery, fields: fields, inheritance: "Model default")
+        XCTAssertEqual(titleMatch.fields, fields)
+        XCTAssertTrue(titleMatch.showsBulkControls)
+    }
+
     @MainActor
     func testSharedRowsRenderAtModelSheetWidth() throws {
         var profile = GenerationDefaults()

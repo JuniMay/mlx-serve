@@ -10,6 +10,17 @@ import XCTest
 /// row or a badge shows lives here so it can be tested without SwiftUI.
 final class ModelBrowserSectionTests: XCTestCase {
 
+    func testMediaUseResolvesTheClickedCatalogModel() {
+        let preset = ImageModelPreset.krea2Turbo
+        XCTAssertEqual(ModelBrowserUse.mediaPresetID(modality: .image,
+                                                     name: "Renamed local model",
+                                                     path: "/fixture/models/\(preset.bundle.primaryRepo)"), preset.id)
+        XCTAssertNil(ModelBrowserUse.mediaPresetID(modality: .image, name: "Unknown", path: "/fixture/custom"))
+        XCTAssertNil(ModelBrowserUse.mediaPresetID(modality: .music,
+                                                  name: preset.bundle.primaryRepo,
+                                                  path: "/fixture/models/\(preset.bundle.primaryRepo)"))
+    }
+
     // MARK: - Sections
 
     func testEverySectionHasADistinctTitleAndIcon() {

@@ -23,20 +23,12 @@ enum CodeTheme {
     /// rather than pure black/white — the block should read as inset, not as a
     /// hole punched in the transcript.
     static let backgroundNS = dynamic(
-        light: NSColor(red: 0.96, green: 0.96, blue: 0.97, alpha: 1),
-        dark: NSColor(red: 0.11, green: 0.11, blue: 0.13, alpha: 1))
-    static let headerNS = dynamic(
-        light: NSColor(red: 0.92, green: 0.92, blue: 0.94, alpha: 1),
-        dark: NSColor(red: 0.15, green: 0.15, blue: 0.17, alpha: 1))
-    static let borderNS = dynamic(
-        light: NSColor(white: 0.0, alpha: 0.10),
-        dark: NSColor(white: 1.0, alpha: 0.10))
+        light: NSColor(white: 0.96, alpha: 1),
+        dark: NSColor(white: 0.13, alpha: 1))
     static let plainTextNS = dynamic(
         light: NSColor(white: 0.15, alpha: 1),
         dark: NSColor(white: 0.90, alpha: 1))
     static let background = Color(nsColor: backgroundNS)
-    static let header = Color(nsColor: headerNS)
-    static let border = Color(nsColor: borderNS)
 
     private static let kindColors: [SyntaxKind: NSColor] = [
         .keyword: dynamic(
@@ -78,11 +70,16 @@ enum CodeTheme {
 /// crosses, and no arithmetic that an emoji can shift.
 enum CodeBlockText {
 
-    static let font = NSFont.monospacedSystemFont(ofSize: CodeBlockLayout.fontSize, weight: .regular)
+    private static let metrics = Dictionary(uniqueKeysWithValues: ChatTextSize.allCases.map { size in
+        let font = NSFont.monospacedSystemFont(ofSize: CodeBlockLayout.fontSize(for: size), weight: .regular)
+        return (size.rawValue, (font: font, lineHeight: NSLayoutManager().defaultLineHeight(for: font)))
+    })
+
+    static var font: NSFont { metrics[ChatMetrics.textSize.rawValue]!.font }
 
     /// The text system's own line height for `font`, resolved once. Every line
     /// of a code block is this tall — one font, no attachments, no wrapping.
-    static let lineHeight: CGFloat = NSLayoutManager().defaultLineHeight(for: font)
+    static var lineHeight: CGFloat { metrics[ChatMetrics.textSize.rawValue]!.lineHeight }
 
     private static let paragraph: NSParagraphStyle = {
         let p = NSMutableParagraphStyle()
@@ -154,6 +151,12 @@ enum CodeBlockText {
         let oldText = old.string as NSString, newText = new.string as NSString
         let limit = min(oldText.length, newText.length)
         guard limit > 0 else { return nil }
+        // Font and paragraph metrics are uniform across a block.
+        guard (old.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)
+                == (new.attribute(.font, at: 0, effectiveRange: nil) as? NSFont),
+              (old.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle)
+                == (new.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle)
+        else { return nil }
 
         var i = 0
         while i < limit {
@@ -174,12 +177,59 @@ enum CodeBlockText {
 
 /// Layout constants for a code block.
 enum CodeBlockLayout {
-    /// The code block's text, on the same ladder as everything else: the
-    /// `callout` step, so a block reads at the same size as a chat bubble's
-    /// secondary line instead of at a number of its own.
-    static let fontSize = AppType.pointSize(for: .callout)
-    static let cornerRadius: CGFloat = 10
-    static let lineSpacing: CGFloat = 2.5
+    /// A separate listing gets a little more room than inline code.
+    static func fontSize(for textSize: ChatTextSize) -> CGFloat {
+        textSize.codeSize + 1
+    }
+    static let cornerRadius = AppLayout.surfaceRadius
+    static let lineSpacing: CGFloat = 5
+}
+
+enum CodeBlockLanguage {
+    static func label(for fence: String) -> String {
+        let trimmed = fence.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch trimmed.lowercased() {
+        case "": return "Code"
+        case "swift": return "Swift"
+        case "js", "javascript", "mjs", "cjs": return "JavaScript"
+        case "jsx": return "JavaScript (JSX)"
+        case "ts", "typescript": return "TypeScript"
+        case "tsx": return "TypeScript (TSX)"
+        case "py", "python", "python3": return "Python"
+        case "json": return "JSON"
+        case "jsonc": return "JSONC"
+        case "json5": return "JSON5"
+        case "sh", "shell": return "Shell"
+        case "bash": return "Bash"
+        case "zsh": return "Zsh"
+        case "fish": return "Fish"
+        case "console": return "Console"
+        case "html", "xhtml": return "HTML"
+        case "xml": return "XML"
+        case "svg": return "SVG"
+        case "vue": return "Vue"
+        case "svelte": return "Svelte"
+        case "c", "h": return "C"
+        case "cpp", "c++", "cc", "hpp", "cxx": return "C++"
+        case "objc", "objective-c", "m": return "Objective-C"
+        case "mm": return "Objective-C++"
+        case "java": return "Java"
+        case "kotlin", "kt": return "Kotlin"
+        case "cs", "csharp", "c#": return "C#"
+        case "zig": return "Zig"
+        case "rust", "rs": return "Rust"
+        case "go", "golang": return "Go"
+        case "text", "txt", "plaintext": return "Plain text"
+        case "md", "markdown": return "Markdown"
+        case "yaml", "yml": return "YAML"
+        case "toml": return "TOML"
+        case "sql": return "SQL"
+        case "css": return "CSS"
+        case "diff": return "Diff"
+        case "dockerfile": return "Dockerfile"
+        default: return trimmed
+        }
+    }
 }
 
 /// A fenced code block: language header with a copy button, and syntax-colored
@@ -201,21 +251,15 @@ struct CodeBlockView: View {
 
     private var resolved: SyntaxLanguage? { SyntaxLanguage(fence: language) }
 
-    /// Header label: the fence the model wrote, else nothing to claim.
-    ///
-    /// Deliberately NOT the lexer's name. Several fences share one lexer, so
-    /// naming it labelled a `tsx` block "JavaScript", a `java` block "C", and
-    /// `svg` / `vue` / `svelte` all "HTML" — describing the highlighter rather
-    /// than the code in front of you.
+    /// Several languages share a lexer, but the header names the fence itself.
     private var label: String {
-        let trimmed = language.trimmingCharacters(in: .whitespaces)
-        return trimmed.isEmpty ? "Code" : trimmed
+        let name = CodeBlockLanguage.label(for: language)
+        return name == "Code" || name == "Plain text" ? L10n.text(name) : name
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-            Divider().opacity(0.5)
             ScrollView(.horizontal, showsIndicators: false) {
                 // ONE text view for the whole block. This was a `ForEach`
                 // building a `Text` per line, so a 300-line block carried
@@ -223,23 +267,24 @@ struct CodeBlockView: View {
                 // reply rebuilt every one of them per token.
                 CodeNSText(attributed: CodeBlockText.code(code, language: resolved), selectable: true,
                            computed: CodeBlockText.measuredSize(of: code))
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
+                    .padding(.horizontal, AppLayout.contentInset)
+                    .padding(.top, 4)
+                    .padding(.bottom, AppLayout.contentInset)
             }
         }
         .background(CodeTheme.background)
-        .clipShape(RoundedRectangle(cornerRadius: CodeBlockLayout.cornerRadius))
-        .overlay(
-            RoundedRectangle(cornerRadius: CodeBlockLayout.cornerRadius)
-                .stroke(CodeTheme.border, lineWidth: 1)
-        )
+        .clipShape(RoundedRectangle(cornerRadius: CodeBlockLayout.cornerRadius, style: .continuous))
     }
 
     private var header: some View {
-        HStack(spacing: 6) {
-            Text(L10n.text(label))
-                .font(.app(.caption2, weight: .medium))
+        HStack(spacing: 8) {
+            Image(systemName: "chevron.left.forwardslash.chevron.right")
+                .font(.app(.body))
                 .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            Text(verbatim: label)
+                .font(.app(.callout, weight: .medium))
+                .foregroundStyle(.primary)
             Spacer()
             Button {
                 NSPasteboard.general.clearContents()
@@ -252,23 +297,20 @@ struct CodeBlockView: View {
                     copied = false
                 }
             } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                        .font(.app(.caption2, weight: .medium))
-                    Text(L10n.text(copied ? "Copied" : "Copy"))
-                        .font(.app(.caption2, weight: .medium))
-                }
-                .foregroundStyle(copied ? Color.green : Color.secondary)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .contentShape(Rectangle())
+                Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                    .font(.app(.body))
+                    .foregroundStyle(copied ? Color.green : Color.secondary)
+                    .frame(minWidth: 24, minHeight: 24)
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.borderless)
+            .controlSize(.small)
+            .accessibilityLabel(L10n.text(copied ? "Copied" : "Copy this code block"))
             .help("Copy this code block")
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(CodeTheme.header)
+        .padding(.horizontal, AppLayout.contentInset)
+        .padding(.top, AppLayout.rowSpacing)
+        .padding(.bottom, AppLayout.compactSpacing)
     }
 
 }

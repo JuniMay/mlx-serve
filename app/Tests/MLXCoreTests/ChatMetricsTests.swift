@@ -8,6 +8,24 @@ import XCTest
 /// `ChatMetrics` is the single source of truth; this test keeps the
 /// relationships from regressing.
 final class ChatMetricsTests: XCTestCase {
+    func testTranscriptSurfacesShareTheirCornerGeometry() {
+        XCTAssertEqual(ChatMetrics.bubbleCornerRadius, CodeBlockLayout.cornerRadius)
+        XCTAssertEqual(ChatMetrics.composerCornerRadius, ChatMetrics.bubbleCornerRadius)
+    }
+
+    func testReadingColumnReservesItsOuterGuttersAtNarrowWidths() {
+        let defaults = UserDefaults.standard
+        let key = InterfacePrefKey.chatColumn
+        let previous = defaults.object(forKey: key)
+        defer {
+            if let previous { defaults.set(previous, forKey: key) }
+            else { defaults.removeObject(forKey: key) }
+        }
+        for width in ChatColumnWidth.allCases {
+            defaults.set(width.rawValue, forKey: key)
+            XCTAssertLessThanOrEqual(ChatMetrics.proseWidth(panelWidth: 300), 300 - 2 * ChatMetrics.gutter)
+        }
+    }
 
     func testChatColumnGutter() {
         XCTAssertEqual(ChatMetrics.gutter, 16)

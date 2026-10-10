@@ -9,10 +9,6 @@ import SwiftUI
 /// width and puts the detail one click away.
 struct ContextPill: View {
     let stats: ContextWindowStats
-    /// Model the window belongs to — shown in the popover, because "78.8K" means
-    /// nothing without knowing whose window it is (and LAN chats can be talking
-    /// to another Mac's model entirely).
-    let modelName: String?
     /// Decode speed of the last timed reply, from the SERVER's own `timings`
     /// (see `ContextWindowStats.speedText`). nil until a reply has been timed.
     let decodeSpeed: Double?
@@ -34,25 +30,25 @@ struct ContextPill: View {
     var body: some View {
         Button { showDetail.toggle() } label: {
             HStack(spacing: 5) {
+                ring
                 Text(L10n.text(stats.percentText))
                     .font(.app(.caption).monospacedDigit().weight(.medium))
                     .foregroundStyle(stats.pressure == .comfortable ? Color.secondary : tint)
-                ring
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Color.secondary.opacity(0.12))
-            .clipShape(Capsule())
-            .contentShape(Capsule())
+            .padding(.horizontal, ComposerControlMetrics.horizontalPadding)
+            .frame(minHeight: ComposerControlMetrics.height)
+            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.borderless)
+        .accessibilityLabel("Context window")
+        .accessibilityValue(L10n.text(stats.percentText))
         .help(L10n.format(
             "Context window — %@ of %@ tokens used. Click for the breakdown.",
             stats.percentText,
             ContextWindowStats.compact(stats.contextLength)
         ))
         .popover(isPresented: $showDetail, arrowEdge: .top) {
-            ContextWindowDetail(stats: stats, modelName: modelName, decodeSpeed: decodeSpeed)
+            ContextWindowDetail(stats: stats, decodeSpeed: decodeSpeed)
         }
     }
 
@@ -76,7 +72,6 @@ struct ContextPill: View {
 /// The pill's popover: headline percentage, fill bar, and the exact figures.
 struct ContextWindowDetail: View {
     let stats: ContextWindowStats
-    let modelName: String?
     let decodeSpeed: Double?
 
     private var tint: Color {
@@ -94,17 +89,8 @@ struct ContextWindowDetail: View {
                 Image(systemName: "brain")
                     .font(.app(.title3))
                     .foregroundStyle(.secondary)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Context window")
-                        .font(.app(.callout).weight(.semibold))
-                    if let modelName, !modelName.isEmpty {
-                        Text(L10n.text(modelName))
-                            .font(.app(.caption))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                }
+                Text("Context window")
+                    .font(.app(.callout).weight(.semibold))
                 Spacer(minLength: 0)
             }
             .padding(12)
@@ -135,6 +121,10 @@ struct ContextWindowDetail: View {
                     Text("Last request overflowed the context window.")
                         .font(.app(.caption))
                         .foregroundStyle(.red)
+                } else {
+                    Text("Last reported token usage, compared with the current context limit. Changing models can change token counts.")
+                        .font(.app(.caption))
+                        .foregroundStyle(.secondary)
                 }
             }
             .padding(12)
@@ -154,7 +144,7 @@ struct ContextWindowDetail: View {
             // has been timed, rather than a placeholder dash.
             if let speed = ContextWindowStats.speedText(decodeSpeed) {
                 Divider()
-                textRow(icon: "gauge.with.needle", label: "Decode speed", value: speed)
+                textRow(icon: "gauge.with.needle", label: "Last reply speed", value: speed)
                     .padding(12)
             }
         }

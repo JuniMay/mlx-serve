@@ -161,13 +161,14 @@ final class RecommendedModelsTests: XCTestCase {
         XCTAssertTrue(ids.contains("gemma-4-31b"))
     }
 
-    /// The hover card over the bars names each bar and prints its score —
-    /// the bars alone cannot say which is which.
-    func testCapabilityTipNamesBothBarsWithTheirScores() {
+    /// Scores identify their scale and provenance without requiring a tooltip.
+    func testCapabilityMetricsIdentifyRelativeEstimatesAndOriginalWeightIndex() {
         let fn = CapabilityTip.lines(for: .qwen38FlashNext)
-        XCTAssertEqual(fn, ["Intelligence: 67 (our estimate)", "Speed: 47 (with its built-in draft head)"])
+        XCTAssertEqual(fn, ["Intelligence: 67/100 (our estimate)",
+                            "Speed: 47/100 (relative estimate, with built-in draft head)"])
         let e4b = CapabilityTip.lines(for: .gemmaE4B)
-        XCTAssertEqual(e4b, ["Intelligence: 20", "Speed: 57"])
+        XCTAssertEqual(e4b, ["Intelligence: 20/100 (AA Index, rescaled)",
+                             "Speed: 57/100 (relative estimate)"])
     }
 
     /// Only the picks the site has no entry for are flagged estimated —

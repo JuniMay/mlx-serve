@@ -37,8 +37,9 @@ enum SettingsReset {
         // `@AppStorage`-backed display prefs, not a `ServerOptions` field —
         // each of its rows (appearance/accent/text size/compact/shortcut)
         // carries its own control default or Reset (the shortcut row's).
-        // Providers live in providers.json, edited row by row in their own pane.
-        case .modelFolders, .updates, .about, .interface, .providers:
+        // Providers live in providers.json; General's startup preferences live
+        // in UserDefaults rather than ServerOptions.
+        case .general, .modelFolders, .updates, .about, .interface, .providers, .tools:
             return []
 
         case .server:
@@ -149,8 +150,7 @@ enum SettingsReset {
         case .sandbox:
             return [
                 f("sandbox") { $0.sandbox = $1.sandbox },
-                // Agent behavior rather than sandboxing, but this is the pane
-                // that holds it — and every field needs exactly one owner.
+                // Legacy persisted field, kept in its original reset scope.
                 f("toolsOnlyWhenAsked") { $0.toolsOnlyWhenAsked = $1.toolsOnlyWhenAsked },
             ]
 
@@ -206,14 +206,14 @@ enum SettingsReset {
 
     static func buttonLabel(_ selection: SettingsSelection) -> String {
         switch selection {
-        case .all:               return "Reset All Settings"
+        case .all:               return "Reset Server and Agent Settings…"
         case .category(let c):   return "Reset \(c.sidebarLabel)"
         }
     }
 
     static func confirmTitle(_ selection: SettingsSelection) -> String {
         switch selection {
-        case .all:               return "Reset ALL settings to defaults?"
+        case .all:               return "Reset Server and Agent Settings?"
         case .category(let c):   return "Reset \(c.sidebarLabel) to defaults?"
         }
     }
@@ -221,7 +221,7 @@ enum SettingsReset {
     static func confirmMessage(_ selection: SettingsSelection) -> String {
         switch selection {
         case .all:
-            return "This resets every section — Server, Speculative Decoding, Performance, Generation Defaults, Voice, Agent Sandbox and Messaging — not just the one you're looking at. Your Telegram bot token is kept, since only @BotFather can reissue it. Generation defaults apply to the next request; launch flags apply after Restart Now."
+            return "This resets server options, Generation Defaults, Voice, Agent Sandbox, and Messaging settings across every section. Tools & MCP defaults, startup, appearance, model folders, providers, your workspace folder, per-model rules, and your Telegram bot token are kept. Generation defaults apply to the next request; server options apply after a restart."
         case .category(let c):
             let scope = "This resets only the \(c.sidebarLabel) section. Every other section is left untouched."
             let tail = c == .messaging

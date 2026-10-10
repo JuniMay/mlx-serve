@@ -57,6 +57,7 @@ enum ChatFork {
         fork.enableThinking = source.enableThinking
         fork.reasoningEffort = source.reasoningEffort
         fork.useMCP = source.useMCP
+        fork.toolPreferences = source.toolPreferences
         fork.agentId = source.agentId
         fork.disabledTools = source.disabledTools
         return fork

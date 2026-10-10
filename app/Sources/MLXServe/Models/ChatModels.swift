@@ -1,8 +1,6 @@
 import Foundation
 
-/// How hard the model thinks while the Think toggle is on — the wire's own
-/// `reasoning_effort` values. Picked from the brain disc's right-click menu,
-/// per session like the toggle itself.
+/// The wire's `reasoning_effort` values, chosen per chat in the model popover.
 enum ReasoningEffort: String, Codable, CaseIterable, Identifiable, Sendable {
     case low, medium, high
     var id: String { rawValue }
@@ -50,6 +48,8 @@ struct ChatSession: Identifiable, Codable {
     var agentId: UUID?
     /// Tools this chat has switched OFF in the Tools menu, by wire name.
     var disabledTools: [String]
+    /// nil preserves the legacy mode, MCP and disabled-tool snapshot.
+    var toolPreferences: ChatToolPreferences?
 
     init(title: String = "New Chat") {
         self.id = UUID()
@@ -67,6 +67,7 @@ struct ChatSession: Identifiable, Codable {
         self.useMCP = false
         self.agentId = nil
         self.disabledTools = []
+        self.toolPreferences = nil
     }
 
     /// Resolve stored names to tools, silently dropping any this build no longer
@@ -78,6 +79,7 @@ struct ChatSession: Identifiable, Codable {
     enum CodingKeys: String, CodingKey {
         case id, title, messages, createdAt, updatedAt, mode, workingDirectory, attachedFolderPath, taskRunId, isExternalBridge, enableThinking, useMCP, agentId
         case disabledTools
+        case toolPreferences
         case reasoningEffort
     }
 
@@ -111,6 +113,7 @@ struct ChatSession: Identifiable, Codable {
         // Absent (every session saved before the Tools menu) → nothing disabled,
         // i.e. exactly the behaviour that build had.
         disabledTools = try c.decodeIfPresent([String].self, forKey: .disabledTools) ?? []
+        toolPreferences = try c.decodeIfPresent(ChatToolPreferences.self, forKey: .toolPreferences)
     }
 
     /// Shared default cwd for all chat sessions — a SETTING since 2026-07-20

@@ -291,8 +291,12 @@ class AppState: ObservableObject {
         get { serverOptions.ctxSize }
         set { serverOptions.ctxSize = newValue }
     }
-    @Published var mcpMode: Bool {
-        didSet { UserDefaults.standard.set(mcpMode, forKey: "mcpMode") }
+    @Published var chatToolDefaults: ChatToolDefaults {
+        didSet { chatToolDefaults.save() }
+    }
+    var mcpMode: Bool {
+        get { chatToolDefaults.mcpEnabled }
+        set { chatToolDefaults.mcpEnabled = newValue }
     }
     let mcpManager = MCPManager()
 
@@ -320,6 +324,10 @@ class AppState: ObservableObject {
     /// second near-identical tick: they want the same window.
     @Published var pendingChatOpenTick = 0
 
+    /// The menu-bar bridge opens Settings without changing the active workspace.
+    @Published var pendingSettingsOpenTick = 0
+    @Published var settingsCategoryRequest: SettingsCategory?
+
     /// Is the welcome screen up? It is a SHEET on the chat window (see
     /// `LaunchDecision`), so this is a flag the scene binds rather than a
     /// window somebody has to remember to close — which is what it was, with
@@ -345,6 +353,7 @@ class AppState: ObservableObject {
     /// welcome screen — so the flag lives here rather than in the view, because
     /// the thing that opens it is a menu command with no view to talk to.
     @Published var modelPalettePresented = false
+    @Published var mediaModelSelection: MediaModelSelectionRequest?
 
     /// Open the model switcher — the ONE way in, same shape as `showModels()`:
     /// it must both raise the picker AND bring the chat window forward, or ⌘L
@@ -459,12 +468,10 @@ class AppState: ObservableObject {
         pendingChatOpenTick += 1
     }
 
-    /// Show Settings in the content area — the ONE way in: the sidebar's row
-    /// and the menu bar's ⌘, both land here (the Settings Window scene is
-    /// gone; a second surface showing the same form is how the two drift).
-    func showSettings() {
-        chatWorkspace = .settings
-        pendingChatOpenTick += 1
+    /// Every Settings entry point opens the same independent window.
+    func showSettings(category: SettingsCategory? = nil) {
+        settingsCategoryRequest = category
+        pendingSettingsOpenTick += 1
     }
 
     /// Switch the browser's section. Deliberately a NO-OP outside the models
@@ -476,19 +483,10 @@ class AppState: ObservableObject {
         chatWorkspace = .models(section)
     }
 
-    /// Show a media generator — the ONE way in, same shape as `showModels()`.
-    /// The four used to be four `Window` scenes; they are pages of this window
-    /// now, so a request has to both pick the page and bring the window up.
+    /// Open a media workspace and bring the main window forward.
     func showCreate(_ experiment: GenExperiment = .image) {
         chatWorkspace = .create(experiment)
         pendingChatOpenTick += 1
-    }
-
-    /// Switch generator page. A no-op outside create mode, for the same reason
-    /// `selectModelSection` is: the page list must not be a second door in.
-    func selectCreatePage(_ experiment: GenExperiment) {
-        guard chatWorkspace.isCreate else { return }
-        chatWorkspace = .create(experiment)
     }
 
     /// Back to the transcript. Selecting a conversation does this too — the
@@ -571,7 +569,7 @@ class AppState: ObservableObject {
         opts.migrateLegacyPrefixCacheMem()
         opts.save()
         self.serverOptions = opts
-        self.mcpMode = UserDefaults.standard.bool(forKey: "mcpMode")
+        self.chatToolDefaults = ChatToolDefaults.load()
         self.defaultAgentId = UserDefaults.standard.string(forKey: "defaultAgentId")
             .flatMap(UUID.init(uuidString:))
         self.quickLauncherEnabled = UserDefaults.standard.bool(forKey: "quickLauncherEnabled")
@@ -870,10 +868,10 @@ class AppState: ObservableObject {
         // named after — the sidebar lists it under Agents, where "New Chat"
         // would describe the wrong thing.
         var session = ChatSession(title: ChatSessionTitle.placeholder(hasAgent: agentId != nil))
-        // Seed the new tab's MCP toggle from the global default so a user who
-        // generally runs with MCP on keeps it; Think/Tools start off. Each tab
-        // then remembers its own choice (ChatSession.useMCP/enableThinking).
-        session.useMCP = mcpMode
+        session.toolPreferences = ChatToolPreferences()
+        session.mode = chatToolDefaults.toolsEnabled ? .agent : .chat
+        session.useMCP = chatToolDefaults.mcpEnabled
+        session.disabledTools = chatToolDefaults.disabledTools
         session.agentId = agentId
         chatSessions.insert(session, at: 0)
         activeChatId = session.id
@@ -920,25 +918,16 @@ class AppState: ObservableObject {
     /// is nothing — the menu item reads this to disable itself rather than
     /// offer a command that does nothing when you pick it.
     var chatDeletionTarget: Set<UUID>? {
-        SidebarDeleteConfirm.target(selection: sidebarSelection, activeChatId: activeChatId)
+        SidebarDeleteConfirm.target(selection: sidebarSelection, activeChatId: activeChatId,
+                                    workspace: chatWorkspace)
     }
 
-    /// The File menu's Delete Chat (⌘⌫). A menu command, NOT a key handler:
-    /// the sidebar's conversation column is a ScrollView of plain Buttons, so
-    /// nothing there ever becomes first responder and a bare `.onDeleteCommand`
-    /// never fired. Routed through the same rule every delete control reads, so
-    /// the keyboard cannot become the one path that skips the confirmation.
-    ///
-    /// It also has to give the keystroke BACK when something is being typed
-    /// into: a menu key equivalent is offered the event ahead of the first
-    /// responder, so this command otherwise stole ⌘⌫ from the composer, where
-    /// it deletes to the start of the line (`ChatDeleteShortcut`). Performing
-    /// that deletion here rather than returning early is the load-bearing part
-    /// — the menu has already swallowed the event, and nothing else will run.
+    /// Menu shortcuts arrive before the first responder; preserve text editing
+    /// while routing conversation deletion through its confirmation policy.
     func requestChatDeletionFromMenu() {
         let responder = NSApp.keyWindow?.firstResponder
         switch ChatDeleteShortcut.route(editingText: KeyboardFocus.isTextEditor(responder),
-                                        selectedChats: sidebarSelection.count) {
+                                        selectedChats: chatWorkspace.isConversation ? sidebarSelection.count : 0) {
         case .deleteToLineStart:
             (responder as? NSTextView)?.deleteToBeginningOfLine(nil)
             return
@@ -1208,17 +1197,11 @@ class AppState: ObservableObject {
         guard let sIdx = chatSessions.firstIndex(where: { $0.id == sessionId }),
               let mIdx = chatSessions[sIdx].messages.firstIndex(where: { $0.id == messageId })
         else { return }
-        var removed = IndexSet(integer: mIdx)
-        var i = mIdx + 1
-        while i < chatSessions[sIdx].messages.count,
-              chatSessions[sIdx].messages[i].toolCallId != nil {
-            removed.insert(i)
-            i += 1
-        }
+        let removed = ChatDeletionRequest.messageRange(at: mIdx, in: chatSessions[sIdx].messages)
         // Captured BEFORE the removal, because the transcript is the only record
         // of which files a message owned.
-        let dropped = removed.map { chatSessions[sIdx].messages[$0] }
-        chatSessions[sIdx].messages.remove(atOffsets: removed)
+        let dropped = Array(chatSessions[sIdx].messages[removed])
+        chatSessions[sIdx].messages.removeSubrange(removed)
         // The second and last removal site. A message delete is a FINAL act, so
         // its files go now: leaving them would orphan them for good, since the
         // session-level cleanup reads the messages a session still holds.

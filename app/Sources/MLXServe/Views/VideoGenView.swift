@@ -4,12 +4,8 @@ import AVKit
 import AVFoundation
 import UniformTypeIdentifiers
 
-/// Video generation window — LTX-Video (2.3 / 2.5) and MiniMax-H3, run
-/// natively by the mlx-serve server. Uses the same Quality / Resolution preset
-/// shape as ImageGen, plus a Frames slider clamped to LTX's `8N+1` ladder and
-/// the user's RAM budget. Which controls are offered is decided by the
-/// preset's declared capabilities, never by its id — the two LTX releases
-/// share every one of them.
+/// Video generation workspace. Model capabilities determine its frame,
+/// audio, reference, and sampling controls.
 struct VideoGenView: View {
     @EnvironmentObject var service: VideoGenService
     @EnvironmentObject var server: ServerManager
@@ -23,14 +19,9 @@ struct VideoGenView: View {
     /// the user is typing. nil until the editor has had focus.
     @State private var promptSelection: TextSelection? = nil
     @FocusState private var promptFocused: Bool
-    /// Height of the prompt editor — dragged by `promptResizeHandle`, sticky.
+    /// Saved prompt editor height.
     @State private var promptHeight: Double = PromptEditorHeight.defaultHeight
-    /// The prompt header row in global space: the hover bubble sizes itself
-    /// against its width and is kept inside it.
-    @State private var promptRow: CGRect = .zero
     @State private var showAdvanced: Bool = false
-    /// The media-input block starts open: on most models it holds the first
-    /// frame, which is the thing people reach for straight after the prompt.
     @State private var showMediaInputs: Bool = true
     @State private var model: VideoModelPreset = .ltx23Q4
     /// Selected network model's routing id (`<model>@<peer>`); nil = local.
@@ -107,9 +98,6 @@ struct VideoGenView: View {
     @State private var isRefDropTargeted: Bool = false
     /// And for the audio-to-video clip slot.
     @State private var isAudioDropTargeted: Bool = false
-    /// The References heading row in global space (quantised, like the grid's
-    /// rect): the budget counter's bubble is kept inside it.
-    @State private var refHeaderRow: CGRect = .zero
     /// Whether the media-inputs block is wide enough for the two keyframe
     /// wells to share a row. False until its first `onGeometryChange`, which
     /// stacks them for one frame — the narrow answer either way.
@@ -128,8 +116,6 @@ struct VideoGenView: View {
     @State private var speechPreset: AudioModelPreset? = nil
 
     var body: some View {
-        // No window-sized floor — see ImageGenView: pages shrink their
-        // preview side, they don't overflow the detail column.
         readyView
         .onAppear {
             if !didHydrate {
@@ -146,14 +132,20 @@ struct VideoGenView: View {
         // ONE observation of the whole blob (the Music pane's mechanism):
         // anything in `stickySnapshot` is sticky by construction.
         .onChange(of: stickySnapshot) { _, _ in guard !hydrating else { return }; persist() }
+        .onChange(of: model) { _, _ in guard !hydrating else { return }; applyModelDefaults() }
+        .onChange(of: appState.mediaModelSelection) { _, selection in
+            guard let selection, let settings = selection.applying(to: stickySnapshot) else { return }
+            model = settings.resolvedModel(models: server.allModels)
+            lanModel = LanPick.lanId(settings.modelId)
+        }
         .onChange(of: prompt) { _, _ in guard !hydrating else { return }; refsDroppedOnHydrate = false }
         .onChange(of: refFilesAttached) { _, _ in guard !hydrating else { return }; refsDroppedOnHydrate = false }
         // Windows multiply the DELIVERED frames (`w*n - (w-1)` in one
         // response), so raising them shortens the ladder under a set length.
         .onChange(of: chainWindows) { _, _ in guard !hydrating else { return }; clampFramesToRAM() }
         // The two size fields are separate because they do more than persist.
-        .onChange(of: customWidthText) { _, _ in guard !hydrating else { return }; clampFramesToRAM(); persist() }
-        .onChange(of: customHeightText) { _, _ in guard !hydrating else { return }; clampFramesToRAM(); persist() }
+        .onChange(of: customWidthText) { _, _ in guard !hydrating else { return }; clampFramesToRAM() }
+        .onChange(of: customHeightText) { _, _ in guard !hydrating else { return }; clampFramesToRAM() }
         .onChange(of: service.phase) { _, phase in
             if case .completed(let path) = phase {
                 player = AVPlayer(url: URL(fileURLWithPath: path))
@@ -186,38 +178,20 @@ struct VideoGenView: View {
     }
 
     private var readyView: some View {
-        HSplitView {
-            ScrollView {
-                // The model decides what the rest of the pane means — which
-                // anchors exist, whether there are references or a soundtrack
-                // to attach, what Advanced holds — so it is read first.
-                VStack(alignment: .leading, spacing: 14) {
-                    modelSection
-                    promptSection
-                    mediaInputsSection
-                    clipSizeSection
-                    qualitySection
-                    framesSection
-                    advancedSection
-                    // Generate stands apart from the settings it acts on.
-                    actionRow.padding(.top, 14)
-                }
-                // Full-width, leading-aligned frame OUTSIDE the padding: a
-                // child that will not compress otherwise makes the stack
-                // oversized, and the ScrollView centres the overflow.
-                .padding(16)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .frame(minWidth: 340, idealWidth: 380)
-
-            VStack(spacing: 12) {
-                previewArea
-                outputFolderLink
-            }
-            .padding(16)
-            // The preview gives way in a small window; the player scales.
-            .frame(minWidth: 280)
-        }
+        GenerationWorkspace(title: "Video", modelName: lanModel ?? model.name,
+                            hasAttachments: true, attachmentCount: inputAttachmentCount,
+                            notice: generationNotice,
+                            prompt: { promptSection }, model: { modelSection },
+                            attachments: { mediaInputsSection }, parameters: {
+            clipSizeSection
+            qualitySection
+            framesSection
+            advancedBody
+            keepResidentToggle
+        }, actions: { actionRow }, result: {
+            previewArea
+            outputFolderLink
+        })
         .alert("Model exceeds your Mac's RAM", isPresented: $showRAMWarning) {
             Button(role: .cancel) { pendingRequest = nil } label: { Text("Cancel")
                 .font(.app(.body)) }
@@ -240,80 +214,52 @@ struct VideoGenView: View {
 
     // MARK: - Sections
 
+    private var generationNotice: String? {
+        if lanModel == nil && !downloads.bundleReady(model.bundle) {
+            return "Download the selected model using the model control."
+        }
+        if !customSizeValid { return "Choose a supported canvas size in generation settings." }
+        return nil
+    }
+
     private var promptSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                Text("Prompt").font(.app(.headline).weight(.semibold))
-                Spacer()
-                if let hint = promptHint { promptWarning(hint) }
-                PromptEnhanceButton(disabled: prompt.isBlank) { showEnhance = true }
-                templatesMenu
-            }
-            // The header's hover bubble reaches over the editor below it, and
-            // zIndex only orders SIBLINGS: without this the row is painted
-            // first and the editor lands on top of what it opened.
-            .zIndex(1)
-            // Quantised: only `minX` and `width` are read, and an exact rect
-            // changes on every frame of a drag.
-            .onGeometryChange(for: CGRect.self) { proxy in
-                let r = proxy.frame(in: .global)
-                return CGRect(x: (r.minX / 8).rounded() * 8, y: 0,
-                              width: (r.width / 8).rounded() * 8, height: 0)
-            } action: { promptRow = $0 }
-            ZStack(alignment: .topLeading) {
-                // Selection and focus are read by the reference tiles: a click
-                // on one drops its marker where the caret is, or on the end
-                // when the editor is not the one being typed into.
+        VStack(alignment: .leading, spacing: AppLayout.labelSpacing) {
+            if let hint = promptHint { promptWarning(hint) }
+            VideoPromptInput(isEmpty: prompt.isEmpty, format: model.promptFormat, editor: {
+                // Reference tiles insert their marker at the editor's selection.
                 TextEditor(text: $prompt, selection: $promptSelection)
+                    .accessibilityLabel("Prompt")
                     .focused($promptFocused)
                     .font(.app(.body))
-                    .frame(height: promptHeight)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.3), lineWidth: 0.5)
-                    )
-                if prompt.isEmpty {
-                    Text(L10n.text(H3PromptExamples.placeholder(for: model.promptFormat)))
-                        .font(.app(.body))
-                        .foregroundStyle(.secondary.opacity(0.6))
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 8)
-                        .allowsHitTesting(false)
+                    .frame(height: min(promptHeight, 180))
+                    .scrollContentBackground(.hidden)
+            }, actions: {
+                Menu {
+                    Button("Enhance…") { showEnhance = true }.disabled(prompt.isBlank)
+                    templatesMenu
+                } label: {
+                    Image(systemName: "ellipsis.circle")
                 }
-            }
-            promptResizeHandle
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .padding(.top, 6)
+                .accessibilityLabel("Prompt actions")
+                .help("Prompt actions")
+            })
         }
     }
 
-    /// Four fifths of the column, floored so a narrow pane still gets a
-    /// readable paragraph, capped so a wide one does not get one long line,
-    /// and never wider than the column it has to stay inside.
-    private var bubbleWidth: CGFloat {
-        guard promptRow.width > 0 else { return 320 }
-        return min(min(max(promptRow.width * 0.8, 320), 640), promptRow.width)
-    }
-
-    /// One badge for every format complaint; the sentence that fired floats
-    /// over the pointer.
+    /// The warning wraps independently of the prompt actions; help carries the detail.
     private func promptWarning(_ hint: String) -> some View {
         HStack(spacing: 4) {
             Image(systemName: "info.triangle.fill")
             Text("Prompt not optimal. Look at templates or prompt tips.")
-                .lineLimit(1)
-                .truncationMode(.tail)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .font(.app(.caption))
         .foregroundStyle(.orange)
-        .hoverReveal(placement: .pointerClamped(width: bubbleWidth, container: promptRow)) {
-            RefTiles.hoverBubble(L10n.text(hint))
-        }
-    }
-
-    /// H3's format is a multi-section document, so 110pt is a keyhole. The
-    /// height sticks (clamped on the way in and out, so a value dragged on a
-    /// taller window can't come back unusable).
-    private var promptResizeHandle: some View {
-        EditorResizeHandle(height: $promptHeight, onCommit: persist,
-                           help: "Drag to resize the prompt box.")
+        .help(L10n.text(hint))
     }
 
     /// Soft caption under the prompt field. Per-BACKEND: LTX's "4–8 sentences"
@@ -349,11 +295,7 @@ struct VideoGenView: View {
                 Label("Prompt tips…", systemImage: "arrow.up.forward.square").font(.app(.body))
             }
         } label: {
-            HStack(spacing: 5) {
-                Text("Templates").font(.app(.body))
-                Image(systemName: "chevron.down")
-            }
-            .modifier(PaneChip())
+            Text("Templates")
         }
         .modifier(PaneChipMenu())
     }
@@ -371,25 +313,14 @@ struct VideoGenView: View {
         }
     }
 
-    /// Residency rides the switcher's row: it is a property of the model, and
-    /// the only thing about it the pane still has to say once it is picked.
-    private var keepResidentToggle: AnyView {
-        AnyView(
-            // No `fixedSize()`: the row it rides also carries the switcher and
-            // the residency line, and a label that refuses to compress makes
-            // the whole column wider than the pane can offer.
-            Toggle(isOn: $keepResident) {
-                // One line that ellipsises, like the model name above it:
-                // wrapping to two lines makes the row taller than the switcher
-                // beside it. The full sentence is in the tooltip.
-                Text("Keep model loaded after generating")
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
-                .font(.app(.caption))
-                .controlSize(.small)
-                .help("On: the model stays resident so the next generation is instant. Off (default): it's unloaded to free GPU memory.")
-        )
+    private var keepResidentToggle: some View {
+        Toggle(isOn: $keepResident) {
+            Text("Keep model loaded after generating")
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .font(.app(.caption))
+        .controlSize(.small)
+        .help("On: the model stays resident so the next generation is instant. Off (default): it's unloaded to free GPU memory.")
     }
 
     private var modelChooser: some View {
@@ -409,9 +340,7 @@ struct VideoGenView: View {
                 speechPreset = Self.resolveSpeechPreset()
             },
             persist: persist,
-            status: AnyView(residencyRow),
-            accessory: keepResidentToggle)
-        .onChange(of: model) { _, _ in guard !hydrating else { return }; applyModelDefaults(); persist() }
+            status: AnyView(residencyRow))
     }
 
     /// What the switcher shows. `custom` exists only while it is SELECTED, so
@@ -448,12 +377,11 @@ struct VideoGenView: View {
                 guard case .preset(let q) = sel else { return }
                 quality = q
                 applyQualityDefaults()
-                persist()
             })
     }
 
     private var qualitySection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: AppLayout.labelSpacing) {
             Text("Quality").font(.app(.headline).weight(.semibold))
             // Measured, not `ViewThatFits`: see `qualityFitsSegments`. Five
             // segments degrade to a menu rather than shortening the tier names
@@ -472,7 +400,7 @@ struct VideoGenView: View {
 
     @ViewBuilder
     private func qualityPicker(segmented: Bool) -> some View {
-        let picker = Picker("", selection: qualitySelection) {
+        let picker = Picker("Quality", selection: qualitySelection) {
             ForEach(QualityPreset.allCases) { q in
                 Text(L10n.text(q.label)).font(.app(.body)).tag(QualitySelection.preset(q))
             }
@@ -588,7 +516,7 @@ struct VideoGenView: View {
     /// between a hint and a failed generation.
     private var clipSizeSection: some View {
         let verdict = customResolutionVerdict
-        return VStack(alignment: .leading, spacing: 6) {
+        return VStack(alignment: .leading, spacing: AppLayout.labelSpacing) {
             // Bottom, not centre: the fields carry a heading above them, and
             // centring the row puts the button halfway up that heading.
             HStack(alignment: .bottom, spacing: 8) {
@@ -631,6 +559,7 @@ struct VideoGenView: View {
                 .font(.app(.subheadline).weight(.semibold))
                 .fixedSize()
             TextField("", text: text)
+                .accessibilityLabel(L10n.text(title))
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 80).font(.app(.body))
         }
@@ -708,15 +637,7 @@ struct VideoGenView: View {
     }
 
     private func clipMenuLabel(_ title: String) -> some View {
-        HStack(spacing: 5) {
-            Text(title).font(.app(.body))
-            Image(systemName: "chevron.down")
-        }
-        // Body, not caption: this sits beside the size fields rather than
-        // above a text box. The height is the fields' own, so the two line up
-        // instead of the chip hugging its text a few points shorter.
-        .font(.app(.body))
-        .modifier(PaneChip(height: 24))
+        Text(L10n.text(title))
     }
 
     private func orientationName(_ o: ResolutionOption.Orientation) -> String {
@@ -762,7 +683,6 @@ struct VideoGenView: View {
         customWidthText = String(width)
         customHeightText = String(height)
         clampFramesToRAM()
-        persist()
     }
 
     /// A two-stage pipeline denoises at HALF the canvas, so the server tightens
@@ -791,7 +711,7 @@ struct VideoGenView: View {
     }
 
     private var framesSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: AppLayout.labelSpacing) {
             HStack {
                 Text("Frames").font(.app(.headline).weight(.semibold))
                 Spacer()
@@ -920,21 +840,21 @@ struct VideoGenView: View {
     /// its own header and says as much.
     private var mediaInputsSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            FoldingSectionHeader(title: "Media inputs for generation", isExpanded: $showMediaInputs)
-            if showMediaInputs {
-                keyframeRow
-                referencesSection
-                speechSection
-                // Closes the block, the way the rule above Style LoRAs opens
-                // one: the sections inside are wells, and without it the
-                // last well runs straight into the clip-size fields.
-                Divider()
-            }
+            keyframeRow
+            referencesSection
+            speechSection
         }
         // The ANSWER, not the width: `onGeometryChange` fires only when its
         // value changes, so a Bool fires at the threshold and nowhere else.
         .onGeometryChange(for: Bool.self) { $0.size.width >= Self.keyframePairMinWidth }
             action: { keyframesSideBySide = $0 }
+    }
+
+    private var inputAttachmentCount: Int {
+        (firstFrameImageURL == nil ? 0 : 1)
+            + (model.supportsLastFrame && lastFrameImageURL != nil ? 1 : 0)
+            + (model.supportsReferences ? refImageURLs.count + refVideoURLs.count + refAudioURLs.count : 0)
+            + (model.supportsAudioInput && audioURL != nil ? 1 : 0)
     }
 
     /// Side by side only where two wells are still wells rather than slots.
@@ -977,7 +897,7 @@ struct VideoGenView: View {
     @ViewBuilder
     private var lastFrameSection: some View {
         if model.supportsLastFrame {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: AppLayout.labelSpacing) {
                 keyframeWell(title: "Last frame",
                              note: "optional, ends here",
                              url: $lastFrameImageURL,
@@ -995,7 +915,7 @@ struct VideoGenView: View {
     /// Both anchors draw the same shape so they read as a pair.
     private func keyframeWell(title: String, note: String, url: Binding<URL?>,
                               isTargeted: Binding<Bool>, help: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: AppLayout.labelSpacing) {
             // The note reads as part of the heading, so it sits against it
             // rather than across the row from it.
             HStack(spacing: 6) {
@@ -1062,10 +982,7 @@ struct VideoGenView: View {
                         Image(systemName: "exclamationmark.circle.fill")
                             .font(.app(.caption))
                             .foregroundStyle(.orange)
-                            .hoverReveal(placement: .pointerClamped(width: refCapBubbleWidth,
-                                                                    container: refHeaderRow)) {
-                                RefTiles.hoverBubble(L10n.text("Some previously added references were not found on disk. Double-check the media identifiers in the prompt and adjust them if necessary."))
-                            }
+                            .help(L10n.text("Some previously added references were not found on disk. Double-check the media identifiers in the prompt and adjust them if necessary."))
                     }
                     Text("optional, the model follows them")
                         .font(.app(.caption))
@@ -1080,18 +997,8 @@ struct VideoGenView: View {
                     }
                     .font(.app(.caption))
                     .foregroundStyle(.secondary)
-                    .hoverReveal(placement: .pointerClamped(width: refCapBubbleWidth,
-                                                            container: refHeaderRow)) {
-                        RefTiles.hoverBubble(L10n.text(H3RefLimits.combinedCapNote))
-                    }
+                    .help(L10n.text(H3RefLimits.combinedCapNote))
                 }
-                // Painted over the well below it — see the prompt heading.
-                .zIndex(1)
-                .onGeometryChange(for: CGRect.self) { proxy in
-                    let r = proxy.frame(in: .global)
-                    return CGRect(x: (r.minX / 8).rounded() * 8, y: 0,
-                                  width: (r.width / 8).rounded() * 8, height: 0)
-                } action: { refHeaderRow = $0 }
                 refPanel
             }
             // The whole section (heading included) so its left edge matches
@@ -1151,13 +1058,6 @@ struct VideoGenView: View {
         .background(MediaDropWellBackground(isTargeted: isRefDropTargeted))
     }
 
-    /// The count rides the title rather than a tile of its own: a tile that is
-    /// not a reference still reads as one, and it moved every real tile.
-    /// One sentence wide (300), never wider than the row it is clamped inside.
-    private var refCapBubbleWidth: CGFloat {
-        refHeaderRow.width > 0 ? min(300, refHeaderRow.width) : 300
-    }
-
     private func refGroupTitle(_ title: String, count: Int, limit: Int) -> some View {
         Text(L10n.format("%@ (%lld/%lld)", L10n.text(title), Int64(count), Int64(limit)))
             .font(.app(.caption).weight(.medium))
@@ -1171,7 +1071,7 @@ struct VideoGenView: View {
     /// property of the images, and at the bottom it read as a property of the
     /// whole set.
     private var imageDetailPicker: some View {
-        Picker("", selection: $refImageSize) {
+        Picker("Image detail", selection: $refImageSize) {
             ForEach(RefImageSizing.allCases, id: \.self) { s in
                 Text(L10n.text(s.label)).font(.app(.body)).tag(s)
             }
@@ -1272,7 +1172,7 @@ struct VideoGenView: View {
         // whole section is hidden rather than offered and refused. Declared by
         // the preset, never inferred from the model id.
         if !model.supportsAudioInput {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: AppLayout.labelSpacing) {
                 HStack(spacing: 6) {
                     Text("Sound").font(.app(.headline).weight(.semibold))
                     Text(L10n.text(model.generatesAudio ? "generated with the video" : "not supported"))
@@ -1304,7 +1204,7 @@ struct VideoGenView: View {
     /// TTS — in the well the Voice pane's reference slot draws. `audioSource`
     /// is which way the user took; the slot's contents are `audioURL`.
     private var audioInputSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: AppLayout.labelSpacing) {
             HStack(spacing: 6) {
                 Text("Speech & sound").font(.app(.headline).weight(.semibold))
                 Text("optional, audio-to-video")
@@ -1321,16 +1221,14 @@ struct VideoGenView: View {
                     clearAudio()
                     audioSource = .none
                 } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "arrow.backward")
-                        Text("Back").font(.app(.body))
-                    }
-                    .modifier(PaneChip())
+                    Label("Back", systemImage: "arrow.backward")
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
                 .help("Discard the line and the clip")
                 .opacity(audioSource == .speech ? 1 : 0)
                 .allowsHitTesting(audioSource == .speech)
+                .accessibilityHidden(audioSource != .speech)
             }
             audioWell
             if audioURL != nil {
@@ -1560,15 +1458,8 @@ struct VideoGenView: View {
         return Double(f.length) / sr
     }
 
-    private var advancedSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            FoldingSectionHeader(title: "Advanced options", isExpanded: $showAdvanced)
-            if showAdvanced { advancedBody }
-        }
-    }
-
     private var advancedBody: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: AppLayout.rowSpacing) {
             // Steps — more steps = more detail/smoother motion, but slower.
             intSliderRow("Steps", value: $steps, range: effectiveStepsRange,
                          help: "Denoising steps. More = more detail and smoother motion, but slower.")
@@ -1634,7 +1525,7 @@ struct VideoGenView: View {
                         // Through `modeLabel`, the same three words as the
                         // caption under the Quality switcher. Shows the
                         // EFFECTIVE mode and locks while a clip forces it.
-                        Picker("", selection: modeSelection) {
+                        Picker("Mode", selection: modeSelection) {
                             Text(L10n.text(modeLabel(.oneStage))).font(.app(.body)).tag(VideoPipelineMode.oneStage)
                             Text(L10n.text(modeLabel(.twoStage))).font(.app(.body)).tag(VideoPipelineMode.twoStage)
                             Text(L10n.text(modeLabel(.twoStageHQ))).font(.app(.body)).tag(VideoPipelineMode.twoStageHQ)
@@ -1746,9 +1637,7 @@ struct VideoGenView: View {
             ForEach(Array(loras.enumerated()), id: \.element.id) { index, _ in
                 LoraAdapterRow(lora: $loras[index]) {
                     loras.remove(at: index)
-                    persist()
                 }
-                .onChange(of: loras[index].scale) { _, _ in guard !hydrating else { return }; persist() }
             }
             // The way in is the well itself, and it comes back under the last
             // adapter so adding a second one needs no separate control. At the
@@ -1805,7 +1694,6 @@ struct VideoGenView: View {
             for url in panel.urls.prefix(maxLoras - loras.count) {
                 loras.append(LoraAdapter(path: url.path))
             }
-            persist()
         }
     }
 
@@ -1860,6 +1748,7 @@ struct VideoGenView: View {
                     .foregroundStyle(.secondary)
             }
             Slider(value: value, in: range, step: step)
+                .accessibilityLabel(L10n.text(label))
                 .disabled(lockedReadout != nil)
                 .padding(.top, Self.steppedSliderTrackDrop).font(.app(.body))
         }
@@ -1884,6 +1773,7 @@ struct VideoGenView: View {
                 in: Double(range.lowerBound)...Double(range.upperBound),
                 step: 1
             )
+            .accessibilityLabel(L10n.text(label))
             .padding(.top, Self.steppedSliderTrackDrop).font(.app(.body))
         }
         .help(help ?? "")
@@ -1922,6 +1812,7 @@ struct VideoGenView: View {
                 step: 1
             )
             .disabled(disabled)
+            .accessibilityLabel(L10n.text(label))
             .padding(.top, Self.steppedSliderTrackDrop).font(.app(.body))
         }
         .help(help ?? "")
@@ -1933,22 +1824,20 @@ struct VideoGenView: View {
     private static let steppedSliderTrackDrop: CGFloat = 3
 
     private var actionRow: some View {
-        VStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: AppLayout.compactSpacing) {
             HStack {
                 if service.isRunning {
                     Button(role: .destructive) {
                         service.cancel()
                     } label: {
-                        Label("Cancel", systemImage: "stop.circle").font(.app(.body))
-                            .frame(maxWidth: .infinity)
+                        Label("Cancel", systemImage: "stop.circle")
                     }
                     .buttonStyle(.bordered)
                 } else {
                     Button {
                         tryGenerate()
                     } label: {
-                        Label("Generate", systemImage: "wand.and.stars").font(.app(.body))
-                            .frame(maxWidth: .infinity)
+                        Label("Generate", systemImage: "wand.and.stars")
                     }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.return, modifiers: [.command])
@@ -1969,18 +1858,17 @@ struct VideoGenView: View {
                     .help("Estimated from measured runs and this Mac's GPU. Actual time varies with what else is using the GPU.")
             }
         }
+        .controlSize(.large)
     }
 
     private var previewArea: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.black.opacity(0.15))
+        Group {
             Group {
                 switch service.phase {
                 case .idle:
                     ContentUnavailableView("No generation yet", systemImage: "film", description: Text("Enter a prompt and press Generate.").font(.app(.body)))
                 case .running(let step, let total, let message):
-                    VStack(spacing: 12) {
+                    VStack(spacing: AppLayout.rowSpacing) {
                         if let img = service.livePreview {
                             Image(nsImage: img)
                                 .resizable()
@@ -1990,7 +1878,7 @@ struct VideoGenView: View {
                         }
                         ProgressView(value: Double(step), total: max(1, Double(total)))
                             .progressViewStyle(.linear)
-                            .frame(width: 240)
+                            .frame(maxWidth: 240)
                         Text(message).font(.app(.footnote)).foregroundStyle(.secondary)
                         Text(service.startedAt, style: .timer)
                             .font(.app(.footnote)).monospacedDigit().foregroundStyle(.secondary)
@@ -2010,17 +1898,18 @@ struct VideoGenView: View {
                     }
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func completedPreview(path: String) -> some View {
-        VStack(spacing: 8) {
+        VStack(spacing: AppLayout.compactSpacing) {
             if let player {
                 AVPlayerViewRepresentable(player: player)
-                    .frame(minHeight: 240)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            HStack(spacing: 8) {
+            HStack(spacing: AppLayout.compactSpacing) {
                 Text(URL(fileURLWithPath: path).lastPathComponent)
                     .font(.app(.caption))
                     .foregroundStyle(.secondary)
@@ -2032,9 +1921,10 @@ struct VideoGenView: View {
                 } label: { Image(systemName: "folder") }
                 .buttonStyle(.borderless)
                 .help("Reveal in Finder")
+                .accessibilityLabel("Reveal in Finder")
             }
         }
-        .padding(8)
+        .padding(AppLayout.compactSpacing)
     }
 
     private var outputFolderLink: some View {
@@ -2345,14 +2235,30 @@ struct VideoGenView: View {
     }
 }
 
-// MARK: - AVPlayerView wrapper
+/// Keeps the editor and its prompt actions together inside the input dock.
+struct VideoPromptInput<Editor: View, Actions: View>: View {
+    let isEmpty: Bool
+    let format: VideoPromptFormat
+    @ViewBuilder var editor: Editor
+    @ViewBuilder var actions: Actions
 
-/// Direct `NSViewRepresentable` around AVKit's `AVPlayerView`. We use this
-/// instead of SwiftUI's generic `VideoPlayer<VideoOverlay>` because on
-/// macOS 26.4 the Swift runtime fatal-aborts while resolving VideoPlayer's
-/// generic metadata when it's mounted via a state-driven transition
-/// (phase `.running` → `.completed`), crashing the whole app.
-// `AVPlayerViewRepresentable` moved to Views/ChatMediaAttachmentView.swift when
-// the chat transcript grew video attachments. SwiftUI's own `VideoPlayer`
-// fatal-aborts under state transitions on macOS 26.4, so there must be exactly
-// ONE AVPlayerView wrapper — a second copy is a second thing to get wrong.
+    var body: some View {
+        HStack(alignment: .top, spacing: AppLayout.compactSpacing) {
+            editor
+                .overlay(alignment: .topLeading) {
+                    if isEmpty {
+                        Text("Describe a video…")
+                            .font(.app(.body))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 8)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .help(L10n.text(H3PromptExamples.placeholder(for: format)))
+            actions
+        }
+    }
+}

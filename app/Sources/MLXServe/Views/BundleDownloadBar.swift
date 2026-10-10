@@ -59,13 +59,14 @@ struct BundleDownloadBar: View {
     private func downloadingRow(_ a: (repo: String, index: Int, count: Int, state: DownloadManager.DownloadState)) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
-                ProgressView(value: a.state.progress).frame(maxWidth: .infinity)
+                ProgressView(value: a.state.progress)
+                    .frame(maxWidth: .infinity)
+                    .accessibilityLabel(L10n.text(a.count > 1 ? "Current model download" : "Model download"))
                 Text("\(a.state.percentFormatted) \(a.state.speedFormatted)")
                     .font(.app(.caption2).monospacedDigit()).foregroundStyle(.secondary)
-                Button { downloads.cancelBundle(bundle) } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
+                Button("Cancel") { downloads.cancelBundle(bundle) }
+                .controlSize(.small)
+                .accessibilityLabel(L10n.format("Cancel download of %@", bundle.displayName))
                 .help("Cancel download")
             }
             let label = a.count > 1
@@ -73,14 +74,17 @@ struct BundleDownloadBar: View {
                 : L10n.text("Downloading: ")
             Text(label + (a.state.currentFile.isEmpty ? a.state.statusText : a.state.currentFile))
                 .font(.app(.caption2)).foregroundStyle(.secondary)
-                .lineLimit(1).truncationMode(.middle)
+                .lineLimit(2).truncationMode(.middle)
+                .help(label + a.state.currentFile)
         }
     }
 
     private func failedRow(_ state: DownloadManager.DownloadState) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(state.error ?? "Download failed")
-                .font(.app(.caption2)).foregroundStyle(.red).lineLimit(2)
+                .font(.app(.caption)).foregroundStyle(.red)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
             Button {
                 downloads.startBundle(bundle) { appState.refreshModels() }
             } label: { Text("Retry")

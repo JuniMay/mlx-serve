@@ -47,6 +47,7 @@ struct ModelDownloadRow: View {
                         VStack(alignment: .trailing, spacing: 1) {
                             ProgressView(value: state.progress)
                                 .frame(width: 60)
+                                .accessibilityLabel(L10n.format("Download %@", option.displayName))
                             Text("\(state.percentFormatted) \(state.speedFormatted)")
                                 .font(.app(.caption2).monospacedDigit())
                                 .foregroundStyle(.secondary)
@@ -57,8 +58,12 @@ struct ModelDownloadRow: View {
                             Image(systemName: "xmark.circle.fill")
                                 .foregroundStyle(.secondary)
                                 .font(.app(.caption))
+                                .frame(minWidth: 22, minHeight: 22)
+                                .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                        .accessibilityLabel(L10n.format("Cancel download of %@", option.displayName))
                         .help("Cancel download")
                     }
                 } else if let state, state.status == .completed {
@@ -70,15 +75,15 @@ struct ModelDownloadRow: View {
                         startDownload()
                     } label: { Text(L10n.text(downloads.hasPartialDownload(option.repoId) ? "Resume" : "Retry"))
                         .font(.app(.body)) }
-                    .font(.app(.caption))
-                    .controlSize(.mini)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                 } else {
                     Button {
                         startDownload()
                     } label: { Text(L10n.text(downloads.hasPartialDownload(option.repoId) ? "Resume" : "Download"))
                         .font(.app(.body)) }
-                    .font(.app(.caption))
-                    .controlSize(.mini)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                 }
             }
 
@@ -94,7 +99,8 @@ struct ModelDownloadRow: View {
                 Text(error)
                     .font(.app(.caption2))
                     .foregroundStyle(.red)
-                    .lineLimit(2)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(.vertical, 3)

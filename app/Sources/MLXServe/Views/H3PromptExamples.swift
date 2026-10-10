@@ -291,23 +291,18 @@ N/A
 """),
     ]
 
-    // MARK: - Placeholder + hint + tips link
+    // MARK: - Prompt help, hint, and tips link
 
-    /// Placeholder shown in the empty prompt field. For H3 it NAMES the section
-    /// labels: nothing else in the UI can tell the user that the model wants
-    /// `integrated_multimodal_description:`, and a format they can't guess is
-    /// worse than one they merely write badly.
+    /// Help for the prompt editor. H3 guidance names the required section
+    /// labels; Templates supplies complete examples for each format.
     static func placeholder(for format: VideoPromptFormat) -> String {
         switch format {
         case .ltx:
-            return "Describe your shot like a cinematographer — subject, action, camera movement, lighting, setting. 4–8 sentences. Put spoken dialogue in quotes to make characters talk. Click Templates above for a starting point."
-        // Kept to a few lines: this sits INSIDE the 110pt prompt editor, so a
-        // section-per-line list is clipped exactly where the last labels are.
-        // The labels are named here; the Templates menu carries the full shape.
+            return "Describe your shot like a cinematographer — subject, action, camera movement, lighting, setting. 4–8 sentences. Put spoken dialogue in quotes to make characters talk. Choose Templates in Prompt actions for a starting point."
         case .h3Base:
-            return "MiniMax-H3 expects three labelled fields — integrated_multimodal_description: (the shot, its style, action and camera movement), overall_soundscape: (ambience and physical sound), non_diegetic_music: (score only the audience hears, or N/A). Click Templates above for the exact shape."
+            return "MiniMax-H3 expects three labelled fields — integrated_multimodal_description: (the shot, its style, action and camera movement), overall_soundscape: (ambience and physical sound), non_diegetic_music: (score only the audience hears, or N/A). Choose Templates in Prompt actions for the exact format."
         case .h3Reference:
-            return "MiniMax-H3 REF2VA expects six labelled sections in order — subject_definitions:, summary:, retention_analysis: (what to DO with each reference), detailed_description:, overall_soundscape:, non_diegetic_music:. Refer to attachments as <Picture 1>, <Video 1>, <Audio 1>. Click Templates above."
+            return "MiniMax-H3 REF2VA expects six labelled sections in order — subject_definitions:, summary:, retention_analysis: (what to DO with each reference), detailed_description:, overall_soundscape:, non_diegetic_music:. Refer to attachments as <Picture 1>, <Video 1>, <Audio 1>. Choose Templates in Prompt actions."
         }
     }
 

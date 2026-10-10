@@ -14,21 +14,13 @@ struct TaskListPane: View {
 
     var body: some View {
         taskListBody
-        // The column's own title and control, in the window's toolbar.
         .toolbar {
-            // Title and control in ONE leading item, so the + sits beside the
-            // word rather than across the column at the trailing edge — and
-            // with the platform's own capsule suppressed, or it wraps both into
-            // a "Tasks +" lozenge (`PaneTitleBar`).
-            if #available(macOS 26.0, *) {
-                ToolbarItem(placement: .navigation) {
-                    paneTitle("Tasks", help: "New task") { showNewTask = true }
+            ToolbarItem(placement: .primaryAction) {
+                Button { showNewTask = true } label: {
+                    Label("New task", systemImage: "plus")
                 }
-                .sharedBackgroundVisibility(.hidden)
-            } else {
-                ToolbarItem(placement: .navigation) {
-                    paneTitle("Tasks", help: "New task") { showNewTask = true }
-                }
+                .labelStyle(.iconOnly)
+                .help("New task")
             }
         }
         .sheet(isPresented: $showNewTask) {
@@ -57,7 +49,7 @@ struct TaskListPane: View {
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 24)
+                        .padding(.vertical, AppLayout.pageInset)
                         .listRowSeparator(.hidden)
                 }
                 ForEach(scheduler.tasks) { task in
@@ -65,6 +57,7 @@ struct TaskListPane: View {
                         .tag(task.id)
                 }
             }
+            .listStyle(.sidebar)
             .scrollContentBackground(.hidden)
     }
 }
@@ -92,7 +85,7 @@ private struct TaskRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 6) {
+            HStack(spacing: AppLayout.labelSpacing) {
                 if isRunning {
                     ProgressView().controlSize(.small)
                 }
@@ -104,16 +97,25 @@ private struct TaskRow: View {
                     Image(systemName: "pause.circle").foregroundStyle(.secondary)
                 }
             }
-            HStack(spacing: 6) {
-                Image(systemName: "clock").font(.app(.caption2))
-                Text(ScheduleParser.describe(task.trigger))
-                    .font(.app(.caption))
-                AutonomyBadge(autonomy: task.autonomy)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: AppLayout.labelSpacing) {
+                    scheduleLabel
+                    AutonomyBadge(autonomy: task.autonomy)
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    scheduleLabel
+                    AutonomyBadge(autonomy: task.autonomy)
+                }
             }
             .foregroundStyle(.secondary)
             .lineLimit(1)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 3)
+    }
+
+    private var scheduleLabel: some View {
+        Label(ScheduleParser.describe(task.trigger), systemImage: "clock")
+            .font(.app(.caption))
     }
 }
 
@@ -142,15 +144,15 @@ private struct TaskDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: AppLayout.contentInset) {
                 // Header
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: AppLayout.compactSpacing) {
                     Text(task.title).font(.app(.title2).weight(.semibold))
                     Text(task.goal)
                         .font(.app(.callout))
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
-                    HStack(spacing: 10) {
+                    HStack(spacing: AppLayout.compactSpacing) {
                         Label(ScheduleParser.describe(task.trigger), systemImage: "clock")
                         AutonomyBadge(autonomy: task.autonomy)
                         if task.useMCP {
@@ -162,34 +164,7 @@ private struct TaskDetailView: View {
                 }
 
                 // Actions
-                HStack(spacing: 10) {
-                    Button {
-                        scheduler.runNow(task)
-                    } label: {
-                        Label(L10n.text(isRunning ? "Running…" : "Run now"), systemImage: "play.fill").font(.app(.body))
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(isRunning)
-
-                    Toggle("Enabled", isOn: Binding(
-                        get: { task.enabled },
-                        set: { scheduler.setEnabled(task.id, $0) }
-                    ))
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-
-                    Spacer()
-
-                    Button { showEdit = true } label: {
-                        Label("Edit", systemImage: "pencil").font(.app(.body))
-                    }
-                    .help("Edit task")
-
-                    Button(role: .destructive) {
-                        scheduler.deleteTask(task.id)
-                    } label: { Image(systemName: "trash") }
-                    .help("Delete task")
-                }
+                taskActions
 
                 if server.status != .running {
                     Label("The server isn't running — the task will start it on its first run.",
@@ -207,8 +182,8 @@ private struct TaskDetailView: View {
                     if runs.contains(where: { $0.status.isTerminal && scheduler.activeRun?.id != $0.id }) {
                         Button { scheduler.clearFinishedRuns(taskId: task.id) } label: { Text(L10n.text("Clear finished"))
                             .font(.app(.body)) }
-                            .buttonStyle(.link)
-                            .font(.app(.caption))
+                            .buttonStyle(.borderless)
+                            .controlSize(.small)
                             .help(L10n.text("Delete all completed, failed and cancelled runs"))
                     }
                 }
@@ -217,12 +192,17 @@ private struct TaskDetailView: View {
                         .font(.app(.callout)).foregroundStyle(.secondary)
                 } else {
                     ForEach(runs) { run in
-                        RunRow(task: task, run: run)
+                        GroupBox {
+                            RunRow(task: task, run: run)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(4)
+                        }
                     }
                 }
             }
-            .padding(20)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: 760, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(AppLayout.pageInset)
         }
         .id(task.id)
         .sheet(isPresented: $showEdit) {
@@ -230,6 +210,59 @@ private struct TaskDetailView: View {
                 scheduler.updateTask(updated)
             }
         }
+    }
+
+    private var taskActions: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: AppLayout.rowSpacing) {
+                runControls
+                Spacer(minLength: 12)
+                editControls
+            }
+            VStack(alignment: .leading, spacing: AppLayout.compactSpacing) {
+                runControls
+                editControls
+            }
+        }
+        .buttonStyle(.bordered)
+    }
+
+    private var runControls: some View {
+        HStack(spacing: AppLayout.rowSpacing) {
+            Button {
+                scheduler.runNow(task)
+            } label: {
+                Label(L10n.text(isRunning ? "Running…" : "Run now"), systemImage: "play.fill")
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(isRunning)
+
+            Toggle("Enabled", isOn: Binding(
+                get: { task.enabled },
+                set: { scheduler.setEnabled(task.id, $0) }
+            ))
+            .toggleStyle(.switch)
+            .controlSize(.small)
+        }
+        .fixedSize()
+    }
+
+    private var editControls: some View {
+        HStack(spacing: AppLayout.compactSpacing) {
+            Button { showEdit = true } label: {
+                Label("Edit", systemImage: "pencil")
+            }
+            .help("Edit task")
+
+            Button(role: .destructive) {
+                scheduler.deleteTask(task.id)
+            } label: {
+                Label("Delete task", systemImage: "trash")
+            }
+            .labelStyle(.iconOnly)
+            .help("Delete task")
+        }
+        .fixedSize()
     }
 }
 
@@ -248,7 +281,7 @@ private struct RunRow: View {
 
     var body: some View {
         DisclosureGroup(isExpanded: $expanded) {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: AppLayout.compactSpacing) {
                 if run.status == .needsApproval, let pending = run.pendingApproval {
                     ApprovalCard(task: task, run: run, pending: pending)
                 }
@@ -261,26 +294,26 @@ private struct RunRow: View {
                     } label: {
                         Label("Reveal artifacts in Finder", systemImage: "folder")
                     }
-                    .buttonStyle(.link)
+                    .buttonStyle(.borderless)
                     Spacer()
                     if !run.status.isTerminal {
                         Button(role: .destructive) {
                             scheduler.cancelRun(taskId: task.id, runId: run.id)
                         } label: { Label("Stop", systemImage: "stop.circle") }
-                        .buttonStyle(.link)
+                        .buttonStyle(.borderless)
                     }
                     Button(role: .destructive) {
                         scheduler.deleteRun(taskId: task.id, runId: run.id)
                     } label: { Label("Delete", systemImage: "trash") }
-                    .buttonStyle(.link)
+                    .buttonStyle(.borderless)
                     .disabled(isLive)
                     .help(isLive ? "Stop the run before deleting it" : "Delete this run and its artifacts")
                 }
                 .font(.app(.caption))
             }
-            .padding(.top, 6)
+            .padding(.top, AppLayout.labelSpacing)
         } label: {
-            HStack(spacing: 8) {
+            HStack(spacing: AppLayout.compactSpacing) {
                 Image(systemName: run.status.iconName)
                     .foregroundStyle(run.status.tint)
                 VStack(alignment: .leading, spacing: 2) {
@@ -323,16 +356,16 @@ private struct ApprovalCard: View {
     let pending: PendingApproval
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: AppLayout.compactSpacing) {
             Label(L10n.format("Wants to run “%@”", pending.toolName), systemImage: "hand.raised.fill")
                 .font(.app(.subheadline).weight(.semibold))
             Text(pending.reason).font(.app(.caption)).foregroundStyle(.secondary)
             if !pending.arguments.isEmpty {
                 Text(L10n.text(pending.arguments.map { "\($0.key): \($0.value)" }.sorted().joined(separator: "\n")))
                     .font(.app(.caption).monospaced())
-                    .padding(8)
+                    .padding(AppLayout.compactSpacing)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
+                    .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: AppLayout.textEditorRadius))
             }
             HStack {
                 Button { scheduler.resume(runId: run.id, approved: false) } label: { Text("Deny")
@@ -342,8 +375,8 @@ private struct ApprovalCard: View {
                     .buttonStyle(.borderedProminent)
             }
         }
-        .padding(10)
-        .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+        .padding(AppLayout.rowSpacing)
+        .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: AppLayout.surfaceRadius, style: .continuous))
     }
 }
 

@@ -39,7 +39,9 @@ enum ChatMetrics {
     /// Not a density knob: compact tightens the leading (`userLineSpacing`),
     /// and less padding reads as a rendering fault.
     static let bubblePaddingV: CGFloat = 10
-    static let bubbleCornerRadius: CGFloat = 14
+    static let bubbleCornerRadius = AppLayout.surfaceRadius
+    static let composerCornerRadius = AppLayout.surfaceRadius
+    static var markdownBlockSpacing: CGFloat { compactMode ? AppLayout.rowSpacing : AppLayout.sectionSpacing }
 
     /// Indent of the token-stats caption under an assistant reply so it
     /// aligns with the bubble's text column, not the bubble edge.
@@ -122,10 +124,11 @@ enum ChatMetrics {
     /// `.wide` stays proportional (`contentWidthFraction`).
     static func proseWidth(panelWidth: CGFloat) -> CGFloat {
         guard panelWidth > 0 else { return contentFallbackWidth }
+        let available = max(0, panelWidth - 2 * gutter)
         guard let target = chatColumn.proseWidth else {
-            return (panelWidth * contentWidthFraction).rounded()
+            return min(available, (panelWidth * contentWidthFraction).rounded())
         }
-        return min(target, panelWidth)
+        return min(target, available)
     }
     /// Fenced/inline code inside the transcript. Monospaced digits and glyphs
     /// run wide, so matching the prose size makes code look larger than the
@@ -147,6 +150,13 @@ enum ChatMetrics {
 }
 
 extension View {
+    /// One centered column for transcript, composer and empty state.
+    func chatColumn(width: CGFloat) -> some View {
+        frame(maxWidth: width)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, ChatMetrics.gutter)
+    }
+
     /// The sidebar's bottom-row button chrome: one exact height, one fill, one
     /// radius — applied to both controls so neither can drift from the other.
     func sidebarActionButton() -> some View {

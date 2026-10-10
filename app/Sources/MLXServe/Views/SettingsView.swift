@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
-/// Single-window form for the user-facing mlx-serve tunables. Bindings flow
+/// Preferences in the dedicated Settings window. Bindings flow
 /// through `appState.serverOptions`; AppState's `didSet` auto-saves to
 /// UserDefaults.
 struct SettingsView: View {
@@ -15,19 +15,23 @@ struct SettingsView: View {
     /// survived. The matching rule is pure and tested — `SettingsSearch`.
     @State private var searchQuery = ""
 
-    /// Sidebar selection. `.all` (the default) renders the whole form — exactly
-    /// what this screen was before the sidebar existed; a category renders just
-    /// that section. Never coexists with search text: see `SettingsSelection`.
-    @State private var selection: SettingsSelection = .all
+    @State private var selection: SettingsSelection = .initial
 
     /// Rows still visible under the current filter, summed up the tree from
     /// `SettingsVisibleRowCountKey`. Drives the "no matches" placeholder.
-    @State private var visibleRows = 0
+    @State private var visibleRows = SettingsVisibleRows()
 
     /// What the sections below the containers edit — see `SettingsFormState`.
     @StateObject private var formState = SettingsFormState()
 
     private var filtering: Bool { !SettingsSearch.tokens(searchQuery).isEmpty }
+
+    private var windowTitle: String {
+        switch selection {
+        case .category(let category): L10n.text(category.sidebarLabel)
+        case .all: L10n.text("Search Settings")
+        }
+    }
 
     /// Categories the form actually renders for the active engine — the sidebar
     /// must never offer a section that isn't there.
@@ -38,30 +42,34 @@ struct SettingsView: View {
 
     var body: some View {
         shell
-        .navigationTitle("Settings")
-        // An engine switch can retire the selected category (load a GGUF model
-        // while "MLX Performance" is selected) — fall back to All rather than
-        // leave a blank pane.
+        .navigationTitle(windowTitle)
+        .searchable(text: $searchQuery, placement: .sidebar, prompt: "Search Settings")
+        .onChange(of: searchQuery) { _, query in
+            selection = SettingsSelection.afterQueryEdit(query: query, current: selection)
+        }
         .onChange(of: categories) { _, visible in
             selection = SettingsSelection.reconciled(selection, visible: visible)
         }
+        .onAppear(perform: applyOpenRequest)
+        .onChange(of: appState.pendingSettingsOpenTick) { _, _ in
+            applyOpenRequest()
+        }
     }
 
-    /// This only ever renders inside the chat window's detail column
-    /// (`ChatWorkspace.settings`; the Settings Window scene is gone). A
-    /// `NavigationSplitView` nested inside another fights the outer sidebar
-    /// for column behaviour, so the shell is a plain two-pane HStack — same
-    /// category list, same form. Tasks answers the same problem the other
-    /// way, by becoming real columns of the window's own split
-    /// (`TaskListPane` / `TaskDetailPane`).
+    private func applyOpenRequest() {
+        let requested = appState.settingsCategoryRequest
+        selection = SettingsSelection.afterOpen(requested: requested, current: selection, visible: categories)
+        if requested != nil { searchQuery = "" }
+    }
+
     private var shell: some View {
-        HStack(spacing: 0) {
+        NavigationSplitView {
             categoryList
-                .frame(width: 210)
-            Divider()
+        } detail: {
             form
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .navigationSplitViewStyle(.balanced)
     }
 
     private var categoryList: some View {
@@ -78,64 +86,50 @@ struct SettingsView: View {
             if server.needsRestartFor(appState.serverOptions) {
                 RestartBanner()
             }
-            SettingsSearchField(text: $searchQuery)
-                // Typing searches across EVERYTHING, so it snaps the sidebar
-                // back to All — a search that silently only looked inside the
-                // selected category would hide its own best answers.
-                .onChange(of: searchQuery) { _, q in
-                    selection = SettingsSelection.afterQueryEdit(query: q, current: selection)
-                }
-            ScrollView {
-                // Lazy while nothing is filtered — a `ScrollView` is measured from
-                // its content, so an eager stack lays out every section. A query
-                // stays eager: a deferred section publishes no count to collapse on.
-                Group {
-                    if filtering {
-                        VStack(alignment: .leading, spacing: 0) {
-                            sections
-                        }
-                    } else {
-                        LazyVStack(alignment: .leading, spacing: 0) {
-                            sections
-                        }
-                    }
-                }
-                .environment(\.settingsSearchQuery, searchQuery)
-                .environment(\.settingsSelection, selection)
-                .environmentObject(formState)
-                .onPreferenceChange(SettingsVisibleRowCountKey.self) { visibleRows = $0 }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 20)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            Form {
+                SettingsFormSections { sections }
             }
+            .formStyle(.grouped)
+            ResetDefaultsFooter()
+                .environment(\.settingsSelection, selection == .category(.general) ? .all : selection)
         }
+        .environment(\.settingsSearchQuery, searchQuery)
+        .environment(\.settingsSelection, selection)
+        .environment(\.settingsVisibleRows, visibleRows)
+        .environmentObject(formState)
+        .onPreferenceChange(SettingsVisibleRowCountKey.self) { visibleRows = $0 }
     }
 
-    /// The form's sections, in sidebar order. ONE list, so the lazy and the eager
-    /// container cannot drift.
+    /// Search and category browsing share the same sections and bindings.
     @ViewBuilder
     private var sections: some View {
         SettingsSection(
+            category: .general,
+            subtitle: "Startup and Quick Launcher."
+        ) {
+            GeneralSectionContent()
+        }
+        SettingsSection(
             category: .modelFolders,
-            subtitle: "Choose where downloads are saved, and add a folder to scan if some of your models live elsewhere. Every folder listed here is served — restart the server after changing them."
+            subtitle: "Download and discovery folders. Every listed folder is served; restart after changes."
         ) {
             ModelFoldersSectionContent()
         }
         SettingsSection(
             category: .server,
-            subtitle: "Server-launch flags. Restart the server to apply changes."
+            subtitle: "Connection and server settings. Restart to apply changes."
         ) {
             ServerSectionContent()
         }
         SettingsSection(
             category: .lanSharing,
-            subtitle: "Share models with other Macs on your local network and use theirs — zero-setup discovery over Bonjour, everything off by default. Restart the server to apply."
+            subtitle: "Share and discover models on your local network. Restart to apply."
         ) {
             LanSharingSectionContent()
         }
         SettingsSection(
             category: .providers,
-            subtitle: "Add OpenAI-compatible chat endpoints — a cloud API, another machine, a local runtime. Their models join the picker as <model>@<name> while the provider answers. Applies on save — no restart needed."
+            subtitle: "OpenAI-compatible chat services. Changes apply when saved."
         ) {
             ProvidersSectionContent()
         }
@@ -146,38 +140,45 @@ struct SettingsView: View {
         EngineAwareSections()
         SettingsSection(
             category: .requestDefaults,
-            subtitle: "Server generation defaults for all clients — next request, no restart."
+            subtitle: "Defaults for all clients. Apply to the next request without a restart."
         ) {
             GlobalGenerationDefaultsView()
         }
 
         SettingsSection(
             category: .interface,
-            subtitle: "How the app looks and how you summon the Quick Launcher. Applies immediately — no restart needed."
+            subtitle: "Appearance, conversation layout, and terminal colors. Changes apply immediately."
         ) {
             InterfaceSectionContent()
         }
 
         SettingsSection(
             category: .voice,
-            subtitle: "Clone your voice once — hands-free voice mode answers in it via the local TTS model. No clip set: answers use the macOS system voice. Applies to the next spoken sentence — no restart needed."
+            subtitle: "Voice engine and hands-free controls. Changes apply to the next sentence."
         ) {
             WakePhraseSectionContent()
             VoiceCloneSectionContent()
         }
 
         SettingsSection(
+            category: .tools,
+            subtitle: "Defaults for conversations. Plain Chat disables all tools for one conversation."
+        ) {
+            ChatToolsSectionContent()
+        }
+
+        SettingsSection(
             category: .sandbox,
             subtitle: BuildFeatures.current.hostShell
-                ? "Run the agent's shell commands inside an isolated Linux sandbox instead of directly on this Mac. Off by default; applies to the next command — no restart needed."
-                : "Agent shell commands always run inside an isolated Linux sandbox in this build — they never touch macOS directly. The guest OS ships inside the app."
+                ? "Run agent shell commands in an isolated Linux environment. Off by default."
+                : "Agent shell commands run in the bundled Linux environment."
         ) {
             SandboxSectionContent()
         }
 
         SettingsSection(
             category: .messaging,
-            subtitle: "Message your local model from your phone via a Telegram bot. No public URL or port-forwarding needed — the app long-polls Telegram over your normal internet connection, so it works behind home Wi-Fi."
+            subtitle: "Chat with your local model through Telegram. No port forwarding required."
         ) {
             MessagingSectionContent(bridge: appState.telegramBridge)
         }
@@ -189,7 +190,7 @@ struct SettingsView: View {
         if BuildFeatures.current.selfUpdate {
             SettingsSection(
                 category: .updates,
-                subtitle: "New versions ship on the project's GitHub releases page. Installing downloads the notarized app, swaps it in place, and relaunches — chats, models, and settings are untouched."
+                subtitle: "Install app updates while keeping chats, models, and settings."
             ) {
                 UpdatesSectionContent(updates: appState.updates)
             }
@@ -200,7 +201,7 @@ struct SettingsView: View {
         // would never render.
         SettingsSection(
             category: .about,
-            subtitle: "mlx-serve is free and open source, built by one person. Star it, follow along, or just say hello — questions and bug reports are welcome."
+            subtitle: "Project links, support, and feedback."
         ) {
             ForEach(CommunityLinks.all) { item in
                 SettingsRow(title: item.title, explainer: item.explainer) {
@@ -209,19 +210,16 @@ struct SettingsView: View {
             }
         }
 
-        if filtering && visibleRows == 0 {
+        if filtering && visibleRows.total == 0 {
             NoSearchResults(query: searchQuery) { searchQuery = "" }
         }
 
-        ResetDefaultsFooter()
     }
 }
 
 // MARK: - Sidebar
 
-/// Category filter for the form: "All Settings" plus one row per section that
-/// the active engine actually renders. Icons are SF Symbols — free with the OS,
-/// no assets.
+/// Search spans all categories; normal browsing shows one category at a time.
 private struct SettingsSidebar: View {
     let categories: [SettingsCategory]
     @Binding var selection: SettingsSelection
@@ -237,20 +235,13 @@ private struct SettingsSidebar: View {
                 onPick()
             }
         )) {
-            Label("All Settings", systemImage: "square.grid.2x2").font(.app(.body))
-                .tag(SettingsSelection.all)
-            Section {
-                ForEach(categories) { category in
-                    Label(L10n.text(category.sidebarLabel), systemImage: category.icon)
-                        .tag(SettingsSelection.category(category)).font(.app(.body))
-                }
+            ForEach(categories) { category in
+                Label(L10n.text(category.sidebarLabel), systemImage: category.icon)
+                    .tag(SettingsSelection.category(category))
             }
         }
-        // The sidebar rows are the app's other callouts, not the platform
-        // default: without this they render at 13pt while every pane they open
-        // reads from the ladder.
-        .font(.app(.callout))
-        .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 260)
+        .listStyle(.sidebar)
+        .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 280)
     }
 }
 
@@ -265,9 +256,29 @@ private struct SettingsSearchQueryKey: EnvironmentKey {
 }
 
 extension EnvironmentValues {
-    fileprivate var settingsSearchQuery: String {
+    var settingsSearchQuery: String {
         get { self[SettingsSearchQueryKey.self] }
         set { self[SettingsSearchQueryKey.self] = newValue }
+    }
+}
+
+private struct SettingsSearchSectionKey: EnvironmentKey {
+    static let defaultValue: SettingsCategory? = nil
+}
+
+private struct SettingsVisibleRowsKey: EnvironmentKey {
+    static let defaultValue = SettingsVisibleRows()
+}
+
+extension EnvironmentValues {
+    fileprivate var settingsSearchSection: SettingsCategory? {
+        get { self[SettingsSearchSectionKey.self] }
+        set { self[SettingsSearchSectionKey.self] = newValue }
+    }
+
+    fileprivate var settingsVisibleRows: SettingsVisibleRows {
+        get { self[SettingsVisibleRowsKey.self] }
+        set { self[SettingsVisibleRowsKey.self] = newValue }
     }
 }
 
@@ -288,8 +299,10 @@ extension EnvironmentValues {
 /// read it to decide whether to collapse; the root reads it to decide whether
 /// to show the "no matches" placeholder.
 private struct SettingsVisibleRowCountKey: PreferenceKey {
-    static let defaultValue: Int = 0
-    static func reduce(value: inout Int, nextValue: () -> Int) { value += nextValue() }
+    static let defaultValue = SettingsVisibleRows()
+    static func reduce(value: inout SettingsVisibleRows, nextValue: () -> SettingsVisibleRows) {
+        value.merge(nextValue())
+    }
 }
 
 /// Wraps one row so the filter can hide it, and reports it as visible when it
@@ -300,41 +313,12 @@ struct SearchableRow<Content: View>: View {
     @ViewBuilder var content: Content
 
     @Environment(\.settingsSearchQuery) private var query
+    @Environment(\.settingsSearchSection) private var section
 
     var body: some View {
         if SettingsSearch.matches(query: query, in: searchText) {
-            content.preference(key: SettingsVisibleRowCountKey.self, value: 1)
+            content.preference(key: SettingsVisibleRowCountKey.self, value: .row(in: section))
         }
-    }
-}
-
-/// Filter field pinned above the scrolling form.
-private struct SettingsSearchField: View {
-    @Binding var text: String
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
-            TextField("Filter settings", text: $text)
-                .textFieldStyle(.plain).font(.app(.body))
-            if !text.isEmpty {
-                Button {
-                    text = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                }
-                .buttonStyle(.borderless)
-                .foregroundStyle(.secondary)
-                .help("Clear the filter")
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(Color(NSColor.controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .padding(.horizontal, 24)
-        .padding(.top, 14)
     }
 }
 
@@ -363,8 +347,7 @@ private struct NoSearchResults: View {
 
 // MARK: - Reset to Defaults footer
 
-/// Restores the fields of whatever the sidebar has selected — that one section,
-/// or (under "All Settings") the whole screen, keeping the Telegram bot token.
+/// Restores the selected section; General also offers the existing global reset.
 private struct ResetDefaultsFooter: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.settingsSelection) private var selection
@@ -384,8 +367,12 @@ private struct ResetDefaultsFooter: View {
     var body: some View {
         if !hidden {
             SearchableRow(searchText: [label, helpText]) {
-                HStack {
-                    Spacer()
+                VStack(alignment: .trailing, spacing: 6) {
+                    if selection == .all {
+                        Text("Keeps startup, appearance, folders, providers, workspace, and your Telegram token.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     Button(role: .destructive) {
                         showConfirm = true
                     } label: {
@@ -394,11 +381,12 @@ private struct ResetDefaultsFooter: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .help(helpText)
-                }
-                .padding(.top, 4)
-                .overlay(alignment: .bottomLeading) {
                     if let resetError { Text(verbatim: resetError).font(.app(.caption)).foregroundStyle(.red) }
                 }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.horizontal, 20)
+                .padding(.top, 10)
+                .padding(.bottom, 20)
                 .confirmationDialog(
                     SettingsReset.confirmTitle(selection),
                     isPresented: $showConfirm,
@@ -414,9 +402,9 @@ private struct ResetDefaultsFooter: View {
                         } catch { resetError = "Could not reset generation defaults: \(error.localizedDescription)" }
                     } label: { Text("Reset")
                         .font(.app(.body)) }
-                    .keyboardShortcut(.defaultAction)
                     Button(role: .cancel) { } label: { Text("Cancel")
                         .font(.app(.body)) }
+                    .keyboardShortcut(.defaultAction)
                 } message: {
                     Text(L10n.text(helpText))
                 }
@@ -516,7 +504,7 @@ private struct EngineAwareSections: View {
         if showMLX {
             SettingsSection(
                 category: .specDecode,
-                subtitle: "Big throughput wins on echo-heavy work; gates auto-disable on novel content. PLD, the drafter, and MTP are MLX-only — they no-op on GGUF / DSV4."
+                subtitle: "Token prediction settings for supported MLX models. Restart to apply."
             ) {
                 SpecDecodeSectionContent()
             }
@@ -524,7 +512,7 @@ private struct EngineAwareSections: View {
 
         SettingsSection(
             category: .memory,
-            subtitle: "How much memory the engine may use: resident models, the OS reserve, the KV cache and the hot prefix cache. Server-launch flags — restart to apply."
+            subtitle: "Model and cache memory limits. Restart to apply."
         ) {
             MemorySectionContent(showMLX: showMLX)
         }
@@ -536,8 +524,8 @@ private struct EngineAwareSections: View {
         SettingsSection(
             category: .performance,
             subtitle: showMLX
-                ? "Continuous batching, decode attention requant, and the SSD prefix cache. Server-launch flags — restart to apply."
-                : "Tunables that apply regardless of engine. Server-launch flags — restart to apply."
+                ? "Generation and caching settings for MLX. Restart to apply."
+                : "Performance settings for all engines. Restart to apply."
         ) {
             CommonPerformanceSectionContent()
             if showMLX {
@@ -549,7 +537,7 @@ private struct EngineAwareSections: View {
         // are not the text engine the gates above key on.
         SettingsSection(
             category: .neuralEngine,
-            subtitle: "Run part of the work on the Apple Neural Engine beside the GPU. Each switch keeps its own copy of part of the model, so it costs extra memory and disk — the estimate is under each switch. A Max or Ultra lands near the low end; smaller GPUs hand the Neural Engine more of the work and land near the high end. Compiled copies are cached on disk, up to 40 GB (less when the disk is nearly full). Opt-in and lossy by design; the server declines by name where the copy does not fit. Server-launch flags — restart to apply."
+            subtitle: "Optional acceleration with reduced precision and extra memory use. Compiled models can use up to 40 GB of disk. Restart to apply."
         ) {
             NeuralEngineSectionContent()
         }
@@ -559,7 +547,7 @@ private struct EngineAwareSections: View {
         // the next one.
         SettingsSection(
             category: .engines,
-            subtitle: "Launch flags for each embedded engine. A .gguf file goes to llama.cpp, or to ds4 for DeepSeek-V4-Flash; mlx-serve-gguf can take the ones it supports instead. Restart the server to apply."
+            subtitle: "GGUF engine settings. Restart to apply."
         ) {
             EnginesSectionContent()
         }
@@ -583,6 +571,24 @@ private struct EngineAwareSections: View {
 
 // MARK: - Section frame
 
+struct SettingsFormSections<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        ForEach(sections: content) { section in
+            if !section.content.isEmpty {
+                Section {
+                    section.content
+                } header: {
+                    section.header
+                } footer: {
+                    section.footer
+                }
+            }
+        }
+    }
+}
+
 private struct SettingsSection<Content: View>: View {
     /// Identity. The sidebar row and this header both read their text from it,
     /// so a section can never exist without a way to reach it (and its two
@@ -593,7 +599,6 @@ private struct SettingsSection<Content: View>: View {
 
     @Environment(\.settingsSearchQuery) private var query
     @Environment(\.settingsSelection) private var selection
-    @State private var visibleRows = 0
 
     private var title: String { category.title }
 
@@ -617,33 +622,35 @@ private struct SettingsSection<Content: View>: View {
 
     @ViewBuilder
     private var sectionBody: some View {
-        // `content` keeps rendering even when collapsed (as a stack of empty
-        // rows), because it is the only thing that publishes
-        // `SettingsVisibleRowCountKey`. Dropping it from the tree would pin
-        // `visibleRows` at 0 and the section could never come back when the
-        // query changes. So we hide the *chrome* — header, padding, card —
-        // never the subtree.
-        let collapsed = filter.collapsed(visibleRows: visibleRows)
-        VStack(alignment: .leading, spacing: collapsed ? 0 : 12) {
-            if !collapsed {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(L10n.text(title))
-                        .font(.app(.title3).weight(.semibold))
-                    Text(L10n.text(subtitle))
-                        .font(.app(.caption))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            VStack(alignment: .leading, spacing: collapsed ? 0 : 18) {
-                content
-            }
-            .environment(\.settingsSearchQuery, filter.childQuery)
-            .padding(collapsed ? 0 : 16)
-            .background(collapsed ? Color.clear : Color(NSColor.controlBackgroundColor))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+        // Keep filtered rows mounted so a later query can publish a nonzero
+        // count and restore the section header.
+        Section {
+            content
+                .environment(\.settingsSearchQuery, filter.childQuery)
+                .environment(\.settingsSearchSection, category)
+        } header: {
+            SettingsSectionHeader(category: category, subtitle: subtitle)
         }
-        .onPreferenceChange(SettingsVisibleRowCountKey.self) { visibleRows = $0 }
-        .padding(.bottom, collapsed ? 0 : 24)
+    }
+}
+
+private struct SettingsSectionHeader: View {
+    let category: SettingsCategory
+    let subtitle: String
+    @Environment(\.settingsSearchQuery) private var query
+    @Environment(\.settingsVisibleRows) private var visibleRows
+
+    var body: some View {
+        let filter = SettingsSearch.section(query: query, title: category.title)
+        if !filter.collapsed(visibleRows: visibleRows.count(in: category)) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(L10n.text(category.title))
+                    .font(.headline)
+                Text(L10n.text(subtitle))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 }
 
@@ -652,6 +659,8 @@ private struct SettingsSection<Content: View>: View {
 private struct SettingsRow<Control: View>: View {
     let title: String
     let explainer: String
+    var summary: String? = nil
+    var note: String? = nil
     /// True when this field has been changed since the running server was
     /// last launched — i.e. the user has edited it but not yet hit "Restart
     /// Now". Drives the orange restart icon. False (or always-false for
@@ -665,35 +674,75 @@ private struct SettingsRow<Control: View>: View {
     @ViewBuilder var control: Control
 
     var body: some View {
-        SearchableRow(searchText: [title, explainer] + [cost].compactMap { $0 }) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline) {
-                    HStack(spacing: 6) {
+        let help = SettingsHelpText(explainer: explainer, summary: summary)
+        SearchableRow(searchText: [title] + help.searchText + [note, cost].compactMap { $0 }) {
+            LabeledContent {
+                control
+                    .frame(maxWidth: 280, alignment: .trailing)
+                    .accessibilityLabel(Text(L10n.text(title)))
+            } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(L10n.text(title))
-                            .font(.app(.rowTitle))
+                            .font(.body)
+                        if let details = help.details {
+                            SettingsHelpButton(title: title, details: details)
+                        }
                         if isDirty {
                             Image(systemName: "arrow.clockwise.circle.fill")
-                                .font(.app(.caption))
+                                .font(.caption)
                                 .foregroundStyle(.orange)
                                 .help("Restart the server to apply this change")
+                                .accessibilityLabel("Restart required")
                         }
                     }
-                    Spacer(minLength: 12)
-                    control
-                        .frame(maxWidth: 280, alignment: .trailing)
-                }
-            Text(L10n.text(explainer))
-                    .font(.app(.explainer))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let cost {
-                    Text(L10n.text(cost))
-                        .font(.app(.value))
-                        .fontWeight(costActive ? .semibold : .regular)
-                        .foregroundStyle(costActive ? Color.orange : Color.secondary)
+                    Text(L10n.text(help.caption))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+                    if let note {
+                        Text(L10n.text(note))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let cost {
+                        Text(L10n.text(cost))
+                            .font(.caption)
+                            .fontWeight(costActive ? .semibold : .regular)
+                            .foregroundStyle(costActive ? Color.orange : Color.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
+        }
+    }
+}
+
+private struct SettingsHelpButton: View {
+    let title: String
+    let details: String
+    @State private var isPresented = false
+
+    var body: some View {
+        Button { isPresented = true } label: {
+            Image(systemName: "info.circle")
+                .foregroundStyle(.secondary)
+                .frame(width: 20, height: 20)
+        }
+        .buttonStyle(.borderless)
+        .help("More information")
+        .accessibilityLabel(L10n.format("About %@", L10n.text(title)))
+        .popover(isPresented: $isPresented) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(L10n.text(title)).font(.headline)
+                Text(L10n.text(details))
+                    .font(.body)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+            .padding(20)
+            .frame(width: 380)
         }
     }
 }
@@ -884,7 +933,7 @@ private struct LanSharingSectionContent: View {
 
     var body: some View {
         if let m = meta["lanShareEnabled"] {
-            SettingsRow(title: m.title, explainer: m.explainer, isDirty: dirty.dirty(\.lanShareEnabled)) {
+            SettingsRow(title: m.title, explainer: m.explainer, summary: m.summary, isDirty: dirty.dirty(\.lanShareEnabled)) {
                 Toggle("", isOn: $appState.serverOptions.lanShareEnabled)
                     .labelsHidden()
                     .toggleStyle(.switch).font(.app(.body))
@@ -892,7 +941,7 @@ private struct LanSharingSectionContent: View {
         }
         if appState.serverOptions.lanShareEnabled {
             if let m = meta["lanShareAll"] {
-                SettingsRow(title: m.title, explainer: m.explainer, isDirty: dirty.dirty(\.lanShareAll)) {
+                SettingsRow(title: m.title, explainer: m.explainer, summary: m.summary, isDirty: dirty.dirty(\.lanShareAll)) {
                     Toggle("", isOn: $appState.serverOptions.lanShareAll)
                         .labelsHidden()
                         .toggleStyle(.switch).font(.app(.body))
@@ -902,7 +951,7 @@ private struct LanSharingSectionContent: View {
                 sharedModelList
             }
             if let m = meta["lanName"] {
-                SettingsRow(title: m.title, explainer: m.explainer, isDirty: dirty.dirty(\.lanName)) {
+                SettingsRow(title: m.title, explainer: m.explainer, summary: m.summary, isDirty: dirty.dirty(\.lanName)) {
                     TextField(
                         "",
                         text: $appState.serverOptions.lanName,
@@ -915,7 +964,7 @@ private struct LanSharingSectionContent: View {
             }
         }
         if let m = meta["lanDiscoverEnabled"] {
-            SettingsRow(title: m.title, explainer: m.explainer, isDirty: dirty.dirty(\.lanDiscoverEnabled)) {
+            SettingsRow(title: m.title, explainer: m.explainer, summary: m.summary, isDirty: dirty.dirty(\.lanDiscoverEnabled)) {
                 Toggle("", isOn: $appState.serverOptions.lanDiscoverEnabled)
                     .labelsHidden()
                     .toggleStyle(.switch).font(.app(.body))
@@ -1229,14 +1278,8 @@ private struct ProviderModelPickerSheet: View {
     }
 }
 
-private struct ServerSectionContent: View {
+private struct GeneralSectionContent: View {
     @EnvironmentObject var appState: AppState
-    @EnvironmentObject var server: ServerManager
-
-    private var meta: [String: ServerOptionField] { ServerOptions.serverFlagFields }
-    private var dirty: ServerLaunchDirty {
-        ServerLaunchDirty(current: appState.serverOptions, last: server.liveLaunchedOptions)
-    }
 
     /// Chat models only — the `isChatPickable` filter every other model picker uses.
     private var pickable: [LocalModel] {
@@ -1273,7 +1316,8 @@ private struct ServerSectionContent: View {
         // Same value as the tray's toggle.
         SettingsRow(
             title: "Start server when the app launches",
-            explainer: "The server comes up as soon as the app does. Off means you start it from the tray."
+            explainer: "The server comes up as soon as the app does. Off means you start it from the tray.",
+            summary: "Start the server automatically when you open the app."
         ) {
             Toggle("", isOn: $appState.autoStartServer)
                 .labelsHidden()
@@ -1281,7 +1325,8 @@ private struct ServerSectionContent: View {
         }
         SettingsRow(
             title: "Preload the model when the server starts",
-            explainer: "Off by default: every start, automatic or from the Start Server button, comes up with no model resident and loads one on demand at your first message, so login stays fast. On pays for the load up front. A large checkpoint can take a while and holds the memory from the moment the server is up."
+            explainer: "Off by default: every start, automatic or from the Start Server button, comes up with no model resident and loads one on demand at your first message, so login stays fast. On pays for the load up front. A large checkpoint can take a while and holds the memory from the moment the server is up.",
+            summary: "Uses memory while idle and may slow startup. When off, the model loads on first use."
         ) {
             Toggle("", isOn: $appState.loadModelAtStart)
                 .labelsHidden()
@@ -1289,7 +1334,8 @@ private struct ServerSectionContent: View {
         }
         SettingsRow(
             title: "Which model",
-            explainer: "\"Last model used\" follows whatever you were last chatting with, decided when the app starts rather than when you set this — so it keeps up as you switch models. \"Always this model\" pins one regardless."
+            explainer: "\"Last model used\" follows whatever you were last chatting with, decided when the app starts rather than when you set this — so it keeps up as you switch models. \"Always this model\" pins one regardless.",
+            summary: "Preload your last chat model or always use one model."
         ) {
             Picker("", selection: $appState.startupModelMode) {
                 ForEach(StartupModelChoice.Mode.allCases) { mode in
@@ -1297,12 +1343,13 @@ private struct ServerSectionContent: View {
                 }
             }
             .labelsHidden()
-            .pickerStyle(.segmented)
+            .pickerStyle(.menu)
             .disabled(!appState.loadModelAtStart).font(.app(.body))
         }
         SettingsRow(
             title: "Model",
-            explainer: "If the pinned model is removed later — or nothing has been loaded yet — the server simply starts with nothing resident, rather than substituting a model you did not choose."
+            explainer: "If the pinned model is removed later — or nothing has been loaded yet — the server simply starts with nothing resident, rather than substituting a model you did not choose.",
+            summary: "If this model is unavailable, the server starts without a model."
         ) {
             VStack(alignment: .trailing, spacing: 4) {
                 Picker("", selection: startupModelDisplay) {
@@ -1323,11 +1370,11 @@ private struct ServerSectionContent: View {
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
-                .frame(minWidth: 180)
+                .frame(minWidth: 180, alignment: .trailing)
                 .disabled(!appState.loadModelAtStart || appState.startupModelMode == .lastUsed)
 
                 if appState.startupModelMode == .lastUsed {
-                    Text(L10n.text("Resolved each time the app starts, so it keeps up as you switch models."))
+                    Text(L10n.text("Selected at each app launch."))
                         .font(.app(.caption2))
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.trailing)
@@ -1335,10 +1382,34 @@ private struct ServerSectionContent: View {
                 }
             }
         }
+        SettingsRow(title: "Quick Launcher",
+                    explainer: "Open a small chat panel from any app with a global keyboard shortcut.") {
+            Toggle("", isOn: $appState.quickLauncherEnabled)
+                .labelsHidden()
+                .toggleStyle(.switch)
+        }
+        SettingsRow(title: "Quick Launcher Shortcut",
+                    explainer: "The global combo that summons the Quick Launcher (⌃Space by default) from any app. Must include at least one modifier key.",
+            summary: "Default: ⌃Space. Requires a modifier key.") {
+            HotKeyRecorderControl(onChange: { appState.quickLauncher.updateHotKey() })
+        }
+    }
+}
+
+private struct ServerSectionContent: View {
+    @EnvironmentObject var appState: AppState
+    @EnvironmentObject var server: ServerManager
+
+    private var meta: [String: ServerOptionField] { ServerOptions.serverFlagFields }
+    private var dirty: ServerLaunchDirty {
+        ServerLaunchDirty(current: appState.serverOptions, last: server.liveLaunchedOptions)
+    }
+
+    var body: some View {
         if let m = meta["host"] {
             SettingsRow(
                 title: m.title,
-                explainer: m.explainer,
+                explainer: m.explainer, summary: m.summary,
                 isDirty: dirty.dirty(\.host)
             ) {
                 TextField(
@@ -1360,7 +1431,7 @@ private struct ServerSectionContent: View {
         if let m = meta["noVision"] {
             SettingsRow(
                 title: m.title,
-                explainer: m.explainer,
+                explainer: m.explainer, summary: m.summary,
                 isDirty: dirty.dirty(\.noVision)
             ) {
                 Toggle("", isOn: $appState.serverOptions.noVision)
@@ -1371,7 +1442,7 @@ private struct ServerSectionContent: View {
         if let m = meta["enableMetrics"] {
             SettingsRow(
                 title: m.title,
-                explainer: m.explainer,
+                explainer: m.explainer, summary: m.summary,
                 isDirty: dirty.dirty(\.enableMetrics)
             ) {
                 Toggle("", isOn: $appState.serverOptions.enableMetrics)
@@ -1382,7 +1453,7 @@ private struct ServerSectionContent: View {
         if let m = meta["apiKey"] {
             SettingsRow(
                 title: m.title,
-                explainer: m.explainer,
+                explainer: m.explainer, summary: m.summary,
                 isDirty: dirty.dirty(\.apiKey)
             ) {
                 SecureField(
@@ -1400,7 +1471,7 @@ private struct ServerSectionContent: View {
         if let m = meta["toolAutocorrect"] {
             SettingsRow(
                 title: m.title,
-                explainer: m.explainer,
+                explainer: m.explainer, summary: m.summary,
                 isDirty: dirty.dirty(\.toolAutocorrect)
             ) {
                 Toggle("", isOn: $appState.serverOptions.toolAutocorrect)
@@ -1411,7 +1482,7 @@ private struct ServerSectionContent: View {
         if let m = meta["logLevel"] {
             SettingsRow(
                 title: m.title,
-                explainer: m.explainer,
+                explainer: m.explainer, summary: m.summary,
                 isDirty: dirty.dirty(\.logLevel)
             ) {
                 Picker("", selection: $appState.serverOptions.logLevel) {
@@ -1421,13 +1492,13 @@ private struct ServerSectionContent: View {
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
-                .frame(minWidth: 180).font(.app(.body))
+                .frame(minWidth: 180, alignment: .trailing).font(.app(.body))
             }
         }
         if let m = meta["logToFile"] {
             SettingsRow(
                 title: m.title,
-                explainer: m.explainer,
+                explainer: m.explainer, summary: m.summary,
                 isDirty: dirty.dirty(\.logToFile)
             ) {
                 Toggle("", isOn: $appState.serverOptions.logToFile)
@@ -1464,7 +1535,7 @@ private struct PortRow: View {
         if let m = ServerOptions.serverFlagFields["port"] {
             SettingsRow(
                 title: m.title,
-                explainer: m.explainer,
+                explainer: m.explainer, summary: m.summary,
                 isDirty: isDirty
             ) {
                 TextField("", text: text, prompt: Text("11234"))
@@ -1654,16 +1725,21 @@ private struct SpecDecodeSectionContent: View {
         let drafterActive = server.chatModelInfo?.drafterLoaded ?? false
         let pldUsable = appState.serverOptions.enablePLD && !drafterActive
 
-        Text(L10n.text("Drafters are chosen per model: Model Settings, Speculation."))
-            .font(.app(.caption2))
-            .foregroundStyle(.secondary)
+        let drafterHelp = "Drafters are chosen per model: Model Settings, Speculation."
+        SearchableRow(searchText: [drafterHelp]) {
+            Text(L10n.text(drafterHelp))
+                .font(.app(.caption2))
+                .foregroundStyle(.secondary)
+        }
         if let m = meta["enablePLD"] {
-            let suffix = drafterActive
-                ? " Locked off while Drafter is on (Drafter takes priority)."
-                : ""
+            let lockNote = drafterActive
+                ? "Locked off while Drafter is on (Drafter takes priority)."
+                : nil
             SettingsRow(
                 title: m.title,
-                explainer: m.explainer + suffix,
+                explainer: m.explainer,
+                summary: m.summary,
+                note: lockNote,
                 isDirty: dirty.dirty(\.enablePLD)
             ) {
                 Toggle("", isOn: opts.enablePLD)
@@ -1675,26 +1751,20 @@ private struct SpecDecodeSectionContent: View {
         if let m = meta["pldDraftLen"] {
             SettingsRow(
                 title: m.title,
-                explainer: m.explainer,
+                explainer: m.explainer, summary: m.summary,
                 isDirty: dirty.dirty(\.pldDraftLen)
             ) {
-                Stepper(value: opts.pldDraftLen, in: 1...16) {
-                    Text("\(appState.serverOptions.pldDraftLen)")
-                        .font(.app(.body).monospacedDigit())
-                }
+                NumberStepper(title: m.title, value: opts.pldDraftLen, range: 1...16)
                 .disabled(!pldUsable)
             }
         }
         if let m = meta["pldKeyLen"] {
             SettingsRow(
                 title: m.title,
-                explainer: m.explainer,
+                explainer: m.explainer, summary: m.summary,
                 isDirty: dirty.dirty(\.pldKeyLen)
             ) {
-                Stepper(value: opts.pldKeyLen, in: 1...8) {
-                    Text("\(appState.serverOptions.pldKeyLen)")
-                        .font(.app(.body).monospacedDigit())
-                }
+                NumberStepper(title: m.title, value: opts.pldKeyLen, range: 1...8)
                 .disabled(!pldUsable)
             }
         }
@@ -1708,7 +1778,7 @@ private struct SpecDecodeSectionContent: View {
         if let m = meta["enableMTP"] {
             SettingsRow(
                 title: m.title,
-                explainer: m.explainer,
+                explainer: m.explainer, summary: m.summary,
                 isDirty: dirty.dirty(\.enableMTP)
             ) {
                 Toggle("", isOn: opts.enableMTP)
@@ -1719,7 +1789,7 @@ private struct SpecDecodeSectionContent: View {
         if let m = meta["mtpDepth"] {
             SettingsRow(
                 title: m.title,
-                explainer: m.explainer,
+                explainer: m.explainer, summary: m.summary,
                 isDirty: dirty.dirty(\.mtpDepth)
             ) {
                 // 0 is the server's "auto" sentinel (the adaptive controller);
@@ -1742,7 +1812,7 @@ private struct SpecDecodeSectionContent: View {
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
-                .frame(width: 140)
+                .frame(width: 140, alignment: .trailing)
                 .disabled(!appState.serverOptions.enableMTP).font(.app(.body))
             }
         }
@@ -1751,7 +1821,7 @@ private struct SpecDecodeSectionContent: View {
         if let m = meta["enableDSpark"] {
             SettingsRow(
                 title: m.title,
-                explainer: m.explainer,
+                explainer: m.explainer, summary: m.summary,
                 isDirty: dirty.dirty(\.enableDSpark)
             ) {
                 Toggle("", isOn: opts.enableDSpark)
@@ -1801,14 +1871,11 @@ private struct PerformanceSectionContent: View {
         if let m = meta["maxConcurrent"] {
             SettingsRow(
                 title: m.title,
-                explainer: m.explainer,
+                explainer: m.explainer, summary: m.summary,
                 isDirty: dirty.dirty(\.maxConcurrent)
             ) {
                 VStack(alignment: .trailing, spacing: 4) {
-                    Stepper(value: opts.maxConcurrent, in: 1...8) {
-                        Text("\(appState.serverOptions.maxConcurrent)")
-                            .font(.app(.body).monospacedDigit())
-                    }
+                    NumberStepper(title: m.title, value: opts.maxConcurrent, range: 1...8)
                     if let b = server.batching {
                         Text(L10n.text(b.label))
                             .font(.app(.caption))
@@ -1820,7 +1887,7 @@ private struct PerformanceSectionContent: View {
         if let m = meta["decodeAttnQuant"] {
             SettingsRow(
                 title: m.title,
-                explainer: m.explainer,
+                explainer: m.explainer, summary: m.summary,
                 isDirty: dirty.dirty(\.decodeAttnQuantChoice)
             ) {
                 // Tri-state under a binary toggle: untouched (nil) RENDERS as
@@ -1838,7 +1905,7 @@ private struct PerformanceSectionContent: View {
         if let m = meta["enablePrefixCacheDisk"] {
             SettingsRow(
                 title: m.title,
-                explainer: m.explainer,
+                explainer: m.explainer, summary: m.summary,
                 isDirty: dirty.dirty(\.enablePrefixCacheDisk)
             ) {
                 Toggle("", isOn: opts.enablePrefixCacheDisk)
@@ -1849,7 +1916,7 @@ private struct PerformanceSectionContent: View {
         if let m = meta["prefixCacheDisk"], appState.serverOptions.enablePrefixCacheDisk {
             SettingsRow(
                 title: m.title,
-                explainer: m.explainer,
+                explainer: m.explainer, summary: m.summary,
                 isDirty: dirty.dirty(\.prefixCacheDisk)
             ) {
                 TextField("", text: opts.prefixCacheDisk, prompt: Text("10GB"))
@@ -1881,7 +1948,7 @@ private struct MemorySectionContent: View {
         if let m = meta["maxResidentMemGB"] {
             SettingsRow(
                 title: m.title,
-                explainer: m.explainer,
+                explainer: m.explainer, summary: m.summary,
                 isDirty: dirty.dirty(\.maxResidentMemGB)
             ) {
                 let gb = appState.serverOptions.maxResidentMemGB
@@ -1897,19 +1964,16 @@ private struct MemorySectionContent: View {
         if let m = meta["maxResidentModels"] {
             SettingsRow(
                 title: m.title,
-                explainer: m.explainer,
+                explainer: m.explainer, summary: m.summary,
                 isDirty: dirty.dirty(\.maxResidentModels)
             ) {
-                Stepper(value: opts.maxResidentModels, in: 1...8) {
-                    Text("\(appState.serverOptions.maxResidentModels)")
-                        .font(.app(.body).monospacedDigit())
-                }
+                NumberStepper(title: m.title, value: opts.maxResidentModels, range: 1...8)
             }
         }
         if let m = meta["idleEvictSecs"] {
             SettingsRow(
                 title: m.title,
-                explainer: m.explainer,
+                explainer: m.explainer, summary: m.summary,
                 isDirty: dirty.dirty(\.idleEvictSecs)
             ) {
                 let secs = appState.serverOptions.idleEvictSecs
@@ -1924,7 +1988,7 @@ private struct MemorySectionContent: View {
         if let m = meta["skipMemPreflight"] {
             SettingsRow(
                 title: m.title,
-                explainer: m.explainer,
+                explainer: m.explainer, summary: m.summary,
                 isDirty: dirty.dirty(\.skipMemPreflight)
             ) {
                 Toggle("", isOn: opts.skipMemPreflight)
@@ -1935,7 +1999,7 @@ private struct MemorySectionContent: View {
         if let m = meta["osReserveGiB"] {
             SettingsRow(
                 title: m.title,
-                explainer: m.explainer,
+                explainer: m.explainer, summary: m.summary,
                 isDirty: dirty.dirty(\.osReserveGiB)
             ) {
                 let auto = ServerOptions.autoOsReserveGiB(physicalMemoryBytes: ProcessInfo.processInfo.physicalMemory)
@@ -1948,14 +2012,14 @@ private struct MemorySectionContent: View {
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
-                .frame(minWidth: 220).font(.app(.body))
+                .frame(minWidth: 220, alignment: .trailing).font(.app(.body))
             }
         }
         if showMLX {
             if let m = meta["kvQuant"] {
                 SettingsRow(
                     title: m.title,
-                    explainer: m.explainer,
+                    explainer: m.explainer, summary: m.summary,
                     isDirty: dirty.dirty(\.kvQuant)
                 ) {
                     Picker("", selection: opts.kvQuant) {
@@ -1965,13 +2029,13 @@ private struct MemorySectionContent: View {
                     }
                     .labelsHidden()
                     .pickerStyle(.menu)
-                    .frame(minWidth: 220).font(.app(.body))
+                    .frame(minWidth: 220, alignment: .trailing).font(.app(.body))
                 }
             }
             if let m = meta["hotPrefixCacheEnabled"] {
                 SettingsRow(
                     title: m.title,
-                    explainer: m.explainer,
+                    explainer: m.explainer, summary: m.summary,
                     isDirty: dirty.dirty(\.hotPrefixCacheEnabled)
                 ) {
                     Toggle("", isOn: opts.hotPrefixCacheEnabled)
@@ -1991,18 +2055,16 @@ private struct MemorySectionContent: View {
                 SettingsRow(
                     title: m.title,
                     explainer: m.explainer + capNote,
+                    summary: effective < set ? nil : m.summary,
                     isDirty: dirty.dirty(\.prefixCacheEntries)
                 ) {
-                    Stepper(value: opts.prefixCacheEntries, in: 1...16) {
-                        Text("\(appState.serverOptions.prefixCacheEntries)")
-                            .font(.app(.body).monospacedDigit())
-                    }
+                    NumberStepper(title: m.title, value: opts.prefixCacheEntries, range: 1...16)
                 }
             }
             if let m = meta["prefixCacheMem"], appState.serverOptions.hotPrefixCacheEnabled {
                 SettingsRow(
                     title: m.title,
-                    explainer: m.explainer,
+                    explainer: m.explainer, summary: m.summary,
                     isDirty: dirty.dirty(\.prefixCacheMem)
                 ) {
                     TextField("", text: opts.prefixCacheMem, prompt: Text("Auto"))
@@ -2013,7 +2075,7 @@ private struct MemorySectionContent: View {
             if let m = meta["pleGpu"] {
                 SettingsRow(
                     title: m.title,
-                    explainer: m.explainer,
+                    explainer: m.explainer, summary: m.summary,
                     isDirty: dirty.dirty(\.pleGpu),
                     cost: m.cost,
                     costActive: appState.serverOptions.pleGpu
@@ -2049,7 +2111,7 @@ private struct NeuralEngineSectionContent: View {
         if let m = meta["anePrefill"] {
             SettingsRow(
                 title: m.title,
-                explainer: m.explainer,
+                explainer: m.explainer, summary: m.summary,
                 isDirty: dirty.dirty(\.anePrefill),
                 cost: m.cost,
                 costActive: appState.serverOptions.anePrefill
@@ -2073,19 +2135,19 @@ private struct NeuralEngineSectionContent: View {
             }
         }
         if let m = meta["aneImage"] {
-            SettingsRow(title: m.title, explainer: m.explainer, isDirty: dirty.dirty(\.aneImage),
+            SettingsRow(title: m.title, explainer: m.explainer, summary: m.summary, isDirty: dirty.dirty(\.aneImage),
                         cost: m.cost, costActive: appState.serverOptions.aneImage) {
                 Toggle("", isOn: opts.aneImage).labelsHidden().toggleStyle(.switch).font(.app(.body))
             }
         }
         if let m = meta["aneVideo"] {
-            SettingsRow(title: m.title, explainer: m.explainer, isDirty: dirty.dirty(\.aneVideo),
+            SettingsRow(title: m.title, explainer: m.explainer, summary: m.summary, isDirty: dirty.dirty(\.aneVideo),
                         cost: m.cost, costActive: appState.serverOptions.aneVideo) {
                 Toggle("", isOn: opts.aneVideo).labelsHidden().toggleStyle(.switch).font(.app(.body))
             }
         }
         if let m = meta["aneAudio"] {
-            SettingsRow(title: m.title, explainer: m.explainer, isDirty: dirty.dirty(\.aneAudio),
+            SettingsRow(title: m.title, explainer: m.explainer, summary: m.summary, isDirty: dirty.dirty(\.aneAudio),
                         cost: m.cost, costActive: appState.serverOptions.aneAudio) {
                 Toggle("", isOn: opts.aneAudio).labelsHidden().toggleStyle(.switch).font(.app(.body))
             }
@@ -2107,13 +2169,10 @@ private struct CommonPerformanceSectionContent: View {
         if let m = meta["tokenizeCacheEntries"] {
             SettingsRow(
                 title: m.title,
-                explainer: m.explainer,
+                explainer: m.explainer, summary: m.summary,
                 isDirty: dirty.dirty(\.tokenizeCacheEntries)
             ) {
-                Stepper(value: opts.tokenizeCacheEntries, in: 0...32) {
-                    Text("\(appState.serverOptions.tokenizeCacheEntries)")
-                        .font(.app(.body).monospacedDigit())
-                }
+                NumberStepper(title: m.title, value: opts.tokenizeCacheEntries, range: 0...32)
             }
         }
     }
@@ -2138,7 +2197,7 @@ private struct EnginesSectionContent: View {
         let opts = $appState.serverOptions
         EngineGroup(name: "mlx-serve-gguf", blurb: "GGUF files on MLX itself. Experimental.", boxed: grouped) {
             if let m = meta["mlxGguf"] {
-                SettingsRow(title: m.title, explainer: m.explainer, isDirty: dirty.dirty(\.mlxGguf)) {
+                SettingsRow(title: m.title, explainer: m.explainer, summary: m.summary, isDirty: dirty.dirty(\.mlxGguf)) {
                     Toggle("", isOn: opts.mlxGguf)
                         .labelsHidden()
                         .toggleStyle(.switch).font(.app(.body))
@@ -2147,7 +2206,7 @@ private struct EnginesSectionContent: View {
         }
         EngineGroup(name: "llama.cpp", blurb: "Serves every other .gguf file. Its own kernels and KV layout, so the MLX rows do not apply.", boxed: grouped) {
             if let m = meta["llamaKvQuant"] {
-                SettingsRow(title: m.title, explainer: m.explainer, isDirty: dirty.dirty(\.llamaKvQuant)) {
+                SettingsRow(title: m.title, explainer: m.explainer, summary: m.summary, isDirty: dirty.dirty(\.llamaKvQuant)) {
                     Picker("", selection: opts.llamaKvQuant) {
                         ForEach(ServerOptions.LlamaKVQuant.allCases) { q in
                             Text(L10n.text(q.label)).font(.app(.body)).tag(q)
@@ -2155,27 +2214,26 @@ private struct EnginesSectionContent: View {
                     }
                     .labelsHidden()
                     .pickerStyle(.menu)
-                    .frame(minWidth: 260).font(.app(.body))
+                    .frame(minWidth: 260, alignment: .trailing).font(.app(.body))
                 }
             }
             if let m = meta["llamaCacheEntries"] {
-                SettingsRow(title: m.title, explainer: m.explainer, isDirty: dirty.dirty(\.llamaCacheEntries)) {
-                    Stepper(value: opts.llamaCacheEntries, in: 1...8) {
-                        Text("\(appState.serverOptions.llamaCacheEntries)")
-                            .font(.app(.body).monospacedDigit())
-                    }
+                SettingsRow(title: m.title, explainer: m.explainer, summary: m.summary, isDirty: dirty.dirty(\.llamaCacheEntries)) {
+                    NumberStepper(title: m.title, value: opts.llamaCacheEntries, range: 1...8)
                 }
             }
             if let m = meta["llamaMtpDrafts"] {
-                SettingsRow(title: m.title, explainer: m.explainer, isDirty: dirty.dirty(\.llamaMtpDrafts)) {
-                    Stepper(value: opts.llamaMtpDrafts, in: 0...8) {
-                        Text(appState.serverOptions.llamaMtpDrafts == 0 ? L10n.text("Off") : "\(appState.serverOptions.llamaMtpDrafts)")
-                            .font(.app(.body).monospacedDigit())
+                SettingsRow(title: m.title, explainer: m.explainer, summary: m.summary, isDirty: dirty.dirty(\.llamaMtpDrafts)) {
+                    HStack(spacing: 6) {
+                        if appState.serverOptions.llamaMtpDrafts == 0 {
+                            Text("Off").font(.app(.caption)).foregroundStyle(.secondary)
+                        }
+                        NumberStepper(title: m.title, value: opts.llamaMtpDrafts, range: 0...8)
                     }
                 }
             }
             if let m = meta["llamaUbatch"] {
-                SettingsRow(title: m.title, explainer: m.explainer, isDirty: dirty.dirty(\.llamaUbatch)) {
+                SettingsRow(title: m.title, explainer: m.explainer, summary: m.summary, isDirty: dirty.dirty(\.llamaUbatch)) {
                     Picker("", selection: opts.llamaUbatch) {
                         Text(L10n.text("Default (512)")).font(.app(.body)).tag(0)
                         ForEach([1024, 2048, 4096], id: \.self) { n in
@@ -2184,13 +2242,13 @@ private struct EnginesSectionContent: View {
                     }
                     .labelsHidden()
                     .pickerStyle(.menu)
-                    .frame(minWidth: 140).font(.app(.body))
+                    .frame(minWidth: 140, alignment: .trailing).font(.app(.body))
                 }
             }
         }
         EngineGroup(name: "ds4", blurb: "Serves DeepSeek-V4-Flash GGUF files.", boxed: grouped) {
             if let m = meta["ssdStreaming"] {
-                SettingsRow(title: m.title, explainer: m.explainer, isDirty: dirty.dirty(\.ssdStreaming)) {
+                SettingsRow(title: m.title, explainer: m.explainer, summary: m.summary, isDirty: dirty.dirty(\.ssdStreaming)) {
                     Toggle("", isOn: opts.ssdStreaming)
                         .labelsHidden()
                         .toggleStyle(.switch).font(.app(.body))
@@ -2233,7 +2291,6 @@ private struct EngineGroup<Content: View>: View {
 /// Launcher shortcut — client-side display prefs, none of them a launch
 /// flag, so they're `@AppStorage`-backed instead of riding `ServerOptions`.
 private struct InterfaceSectionContent: View {
-    @EnvironmentObject var appState: AppState
     @AppStorage(InterfacePrefKey.appearanceMode) private var appearanceModeRaw = AppAppearanceMode.system.rawValue
     @AppStorage(InterfacePrefKey.accentColor) private var accentColorRaw = AppAccentColor.system.rawValue
     @AppStorage(InterfacePrefKey.textSize) private var textSizeRaw = ChatTextSize.medium.rawValue
@@ -2251,7 +2308,7 @@ private struct InterfaceSectionContent: View {
             }
             .labelsHidden()
             .pickerStyle(.segmented)
-            .frame(width: 180).font(.app(.body))
+            .fixedSize(horizontal: true, vertical: false).font(.app(.body))
         }
         SettingsRow(title: "Accent Color", explainer: "Tint for buttons, links and the selected message bubble.") {
             Picker("", selection: $accentColorRaw) {
@@ -2260,7 +2317,7 @@ private struct InterfaceSectionContent: View {
                 }
             }
             .labelsHidden()
-            .frame(width: 140).font(.app(.body))
+            .frame(width: 140, alignment: .trailing).font(.app(.body))
         }
         SettingsRow(title: "Text Size", explainer: "Size of the chat transcript's prose and code.") {
             Picker("", selection: $textSizeRaw) {
@@ -2269,10 +2326,11 @@ private struct InterfaceSectionContent: View {
                 }
             }
             .labelsHidden()
-            .frame(width: 140).font(.app(.body))
+            .frame(width: 140, alignment: .trailing).font(.app(.body))
         }
         SettingsRow(title: "Chat Column",
-                    explainer: "How wide a conversation reads. Narrow and Medium are fixed widths, so resizing the window moves the margins rather than the text; Wide follows the window. Also on ⌘⌥1-3, under View ▸ Interface.") {
+                    explainer: "How wide a conversation reads. Narrow and Medium are fixed widths, so resizing the window moves the margins rather than the text; Wide follows the window. Also on ⌘⌥1-3, under View ▸ Interface.",
+            summary: "Choose a comfortable reading width for conversations.") {
             Picker("", selection: $chatColumnRaw) {
                 ForEach(ChatColumnWidth.allCases) { width in
                     Text(L10n.text(width.label)).tag(width.rawValue)
@@ -2280,9 +2338,10 @@ private struct InterfaceSectionContent: View {
             }
             .labelsHidden()
             .pickerStyle(.segmented)
-            .frame(width: 220).font(.app(.body))
+            .fixedSize(horizontal: true, vertical: false).font(.app(.body))
         }
-        SettingsRow(title: "Compact Mode", explainer: "Tighter spacing between messages — more of the conversation on screen. Also on ⌘⌥C, under View ▸ Interface.") {
+        SettingsRow(title: "Compact Mode", explainer: "Tighter spacing between messages — more of the conversation on screen. Also on ⌘⌥C, under View ▸ Interface.",
+            summary: "Reduce spacing between messages. Shortcut: ⌘⌥C.") {
             Toggle("", isOn: $compactMode)
                 .labelsHidden()
                 .toggleStyle(.switch).font(.app(.body))
@@ -2295,7 +2354,7 @@ private struct InterfaceSectionContent: View {
                 }
             }
             .labelsHidden()
-            .frame(width: 160).font(.app(.body))
+            .frame(width: 160, alignment: .trailing).font(.app(.body))
         }
         SettingsRow(title: "Terminal Background",
                     explainer: "Ground under the default theme. Reset to use the theme's own.") {
@@ -2308,10 +2367,6 @@ private struct InterfaceSectionContent: View {
                         .controlSize(.small)
                 }
             }
-        }
-        SettingsRow(title: "Quick Launcher Shortcut",
-                    explainer: "The global combo that summons the Quick Launcher (⌃Space by default) from any app. Must include at least one modifier key.") {
-            HotKeyRecorderControl(onChange: { appState.quickLauncher.updateHotKey() })
         }
     }
 }
@@ -2432,7 +2487,7 @@ private struct VoiceCloneSectionContent: View {
                     }
                 }
                 .labelsHidden()
-                .frame(width: 260)
+                .frame(width: 260, alignment: .leading)
                 Spacer(minLength: 0)
             }
         }
@@ -2487,7 +2542,7 @@ private struct VoiceCloneSectionContent: View {
                     }
                 }
                 .labelsHidden()
-                .frame(width: 260)
+                .frame(width: 260, alignment: .leading)
 
                 Button {
                     previewer.preview(appState.serverOptions.kokoroVoice)
@@ -2627,6 +2682,77 @@ private struct VoiceRecordControl: View {
 
 // MARK: - Agent sandbox section
 
+private struct ChatToolsSectionContent: View {
+    @EnvironmentObject var appState: AppState
+    @State private var showMCPSettings = false
+
+    var body: some View {
+        SettingsRow(
+            title: "Built-in tools",
+            explainer: "Allow built-in tools in conversations that follow Settings defaults. Saved agents keep their own capability choices. Conversations using saved tool choices keep them until you choose Use Settings Defaults in Chat Mode. Tool approval rules still apply.",
+            summary: "Used by conversations that follow Settings defaults. Conversations with saved tool choices keep them."
+        ) {
+            Toggle("", isOn: $appState.chatToolDefaults.toolsEnabled).labelsHidden()
+        }
+        SettingsRow(
+            title: "MCP tools",
+            explainer: "Make configured, enabled MCP servers available to conversations that follow Settings defaults. Saved agents keep their own MCP choice. Telegram and scheduled tasks keep their separate settings. Enabling access does not change tool approval rules.",
+            summary: "Default access to enabled servers. Saved agents keep their own MCP choice."
+        ) {
+            Toggle("", isOn: $appState.chatToolDefaults.mcpEnabled).labelsHidden()
+        }
+        SettingsRow(title: "MCP servers",
+                    explainer: "Add, configure, or disable servers for the app.") {
+            Button("Configure…") { showMCPSettings = true }
+        }
+        .sheet(isPresented: $showMCPSettings) {
+            MCPMarketplaceView().environmentObject(appState.mcpManager)
+        }
+        SettingsRow(title: "Available tools",
+                    explainer: "Choose which built-in tools are available to chats that follow Settings, including saved agents.") {
+            EmptyView()
+        }
+        ForEach(AgentToolGroup.allCases, id: \.self) { group in
+            ChatToolGroupSettings(group: group)
+        }
+        SettingsRow(title: "Plain Chat",
+                    explainer: "Choose Plain Chat from the conversation's Chat Mode menu to disable built-in tools, MCP, and attached-folder search. Turning it off uses the conversation's saved choices or current Settings defaults again.") {
+            EmptyView()
+        }
+    }
+}
+
+private struct ChatToolGroupSettings: View {
+    let group: AgentToolGroup
+    @EnvironmentObject var appState: AppState
+    @Environment(\.settingsSearchQuery) private var query
+    @State private var expanded = false
+
+    var body: some View {
+        SearchableRow(searchText: [group.title] + group.tools.map(\.displayName)) {
+            DisclosureGroup(isExpanded: Binding(
+                get: { expanded || !SettingsSearch.tokens(query).isEmpty },
+                set: { expanded = $0 })) {
+                ForEach(group.tools, id: \.self) { tool in
+                    Toggle(isOn: Binding(
+                        get: { !appState.chatToolDefaults.disabledTools.contains(tool.rawValue) },
+                        set: { enabled in
+                            var disabled = Set(appState.chatToolDefaults.disabledTools)
+                            if enabled { disabled.remove(tool.rawValue) } else { disabled.insert(tool.rawValue) }
+                            appState.chatToolDefaults.disabledTools = disabled.sorted()
+                        })) {
+                            Label(L10n.text(tool.displayName), systemImage: tool.icon)
+                        }
+                        .toggleStyle(.checkbox)
+                        .padding(.vertical, 3)
+                }
+            } label: {
+                Text(L10n.text(group.title))
+            }
+        }
+    }
+}
+
 /// Toggle + base-image field for the agent execution sandbox. This is an
 /// app-side agent-behavior setting (the tool executor reads it), NOT a
 /// server-launch flag — so it binds straight through
@@ -2646,17 +2772,9 @@ private struct SandboxSectionContent: View {
 
     var body: some View {
         SettingsRow(
-            title: "Only use tools when I ask",
-            explainer: "ON = tools are opt-in: a chat only gets them when you turn the wrench (or MCP) on yourself, and sending a message that looks like a task — \"make me a website\", \"npm install react\" — no longer stops to ask whether to enable Tools or MCP first. OFF = that suggestion still appears before such a message is sent. Either way the toolbar toggles, and any agent that decides them for its tab, are unchanged."
-        ) {
-            Toggle("", isOn: $appState.serverOptions.toolsOnlyWhenAsked)
-                .labelsHidden()
-                .toggleStyle(.switch).font(.app(.body))
-        }
-
-        SettingsRow(
             title: "Agent workspace folder",
-            explainer: "The default working folder for the agent's tools (shell, readFile, writeFile, …) in every chat — and the folder shared into the sandbox VM at /workspace while the sandbox is on. Changing it moves chats still on the previous default, remounts a running sandbox, and restarts any open terminal sessions in the new folder; a chat with its own picked folder (the folder icon on the Agent pill) keeps it."
+            explainer: "The default working folder for the agent's tools (shell, readFile, writeFile, …) in every chat — and the folder shared into the sandbox VM at /workspace while the sandbox is on. Changing it moves chats still on the previous default, remounts a running sandbox, and restarts any open terminal sessions in the new folder; a chat with its own picked folder (the folder icon on the Agent pill) keeps it.",
+            summary: "Default folder for agent tools, shared with the sandbox. Changing it restarts open terminal sessions; custom chat folders are kept."
         ) {
             HStack(spacing: 8) {
                 Text((currentWorkspace as NSString).abbreviatingWithTildeInPath)
@@ -2680,7 +2798,8 @@ private struct SandboxSectionContent: View {
         if BuildFeatures.current.hostShell {
             SettingsRow(
                 title: "Sandbox agent commands",
-                explainer: "OFF = the agent runs shell commands directly on macOS (fast, full access to your files). ON = commands run inside an isolated Linux sandbox that can only touch the current working folder, so a bad command can't harm the rest of your Mac. Costs a bit more memory while active because it spins up a lightweight virtual machine for the session."
+                explainer: "OFF = the agent runs shell commands directly on macOS (fast, full access to your files). ON = commands run inside an isolated Linux sandbox that can only touch the current working folder, so a bad command can't harm the rest of your Mac. Costs a bit more memory while active because it spins up a lightweight virtual machine for the session.",
+            summary: "Run shell commands in a Linux sandbox using extra memory. When off, commands run directly on your Mac with access to your files."
             ) {
                 Toggle("", isOn: $appState.serverOptions.sandbox.enabled)
                     .labelsHidden()
@@ -2690,7 +2809,8 @@ private struct SandboxSectionContent: View {
 
         SettingsRow(
             title: "Network + port mapping",
-            explainer: "ON = the sandbox has outbound internet (NAT), and any server the agent starts inside it is automatically reachable on this Mac at localhost with the same port — e.g. a dev server on 8080 appears at localhost:8080 (bound to localhost only, never your LAN). OFF = the sandbox gets no network device at all: fully isolated, but installs and downloads inside it will fail. Applies to the next sandbox session."
+            explainer: "ON = the sandbox has outbound internet (NAT), and any server the agent starts inside it is automatically reachable on this Mac at localhost with the same port — e.g. a dev server on 8080 appears at localhost:8080 (bound to localhost only, never your LAN). OFF = the sandbox gets no network device at all: fully isolated, but installs and downloads inside it will fail. Applies to the next sandbox session.",
+            summary: "Allow internet access and forward sandbox ports to this Mac only. When off, network installs fail. Applies to the next sandbox session."
         ) {
             Toggle("", isOn: $appState.serverOptions.sandbox.network)
                 .labelsHidden()
@@ -2699,7 +2819,8 @@ private struct SandboxSectionContent: View {
 
         SettingsRow(
             title: "Reset sandbox",
-            explainer: "Deletes ALL sandbox data and returns it to factory state: the downloaded guest image and everything inside it (installed CLIs like pi/hermes, their configs and logins, any files created outside the shared workspace), the cached kernel, the sandbox ssh identity, and the activity transcript. Any running guest and live agent sessions are stopped immediately. Your workspace folder, models, and other app data on this Mac are not touched. The sandbox re-provisions itself on next use."
+            explainer: "Deletes ALL sandbox data and returns it to factory state: the downloaded guest image and everything inside it (installed CLIs like pi/hermes, their configs and logins, any files created outside the shared workspace), the cached kernel, the sandbox ssh identity, and the activity transcript. Any running guest and live agent sessions are stopped immediately. Your workspace folder, models, and other app data on this Mac are not touched. The sandbox re-provisions itself on next use.",
+            summary: "Permanently delete sandbox apps, logins, and data, and stop active sessions. Your Mac workspace and models are kept."
         ) {
             Button(role: .destructive) {
                 showResetConfirm = true
@@ -2727,9 +2848,9 @@ private struct SandboxSectionContent: View {
                     }
                 } label: { Text("Delete All Sandbox Data")
                     .font(.app(.body)) }
-                .keyboardShortcut(.defaultAction)
                 Button(role: .cancel) {} label: { Text("Cancel")
                     .font(.app(.body)) }
+                .keyboardShortcut(.defaultAction)
             } message: {
                 Text("""
                 This permanently deletes everything the sandbox has downloaded and every change made inside it — installed agent CLIs (pi, hermes), their configs and logins, and any files outside the shared workspace. Any running guest and live sessions stop immediately.
@@ -2788,7 +2909,8 @@ private struct MessagingSectionContent: View {
 
         SettingsRow(
             title: "Tools",
-            explainer: "OFF = plain chat (safe). ON = the bot can run shell commands and read/write files on this Mac, triggered from your phone. Confined to ~/.mlx-serve/telegram-workspace. Only enable if you understand the risk — anyone who can message the locked chat gets this power."
+            explainer: "When enabled, people in the linked Telegram chat can run shell commands and read or write files on this Mac without individual approval. The bot starts in ~/.mlx-serve/telegram-workspace, but the working folder is not an access boundary. Enable only for trusted participants.",
+            summary: "Let anyone in the linked Telegram chat run commands and access files on this Mac without confirmation. Enable only for trusted participants."
         ) {
             Toggle("", isOn: $appState.serverOptions.telegram.agentMode)
                 .labelsHidden()
@@ -2797,7 +2919,8 @@ private struct MessagingSectionContent: View {
 
         SettingsRow(
             title: "MCP tools",
-            explainer: "Expose your enabled MCP servers (configured in the MCP marketplace) to the bot and to the tasks it creates. Works with or without Tools. Servers start on first use."
+            explainer: "Expose your enabled MCP servers (configured in the MCP marketplace) to the bot and to the tasks it creates. Works with or without Tools. Servers start on first use.",
+            summary: "Give the bot and its tasks access to your enabled MCP servers, even when Tools is off. Servers start on first use."
         ) {
             Toggle("", isOn: $appState.serverOptions.telegram.useMCP)
                 .labelsHidden()
@@ -2824,7 +2947,7 @@ private struct MessagingSectionContent: View {
                 }
             }
             .labelsHidden()
-            .frame(width: 200).font(.app(.body))
+            .frame(width: 200, alignment: .trailing).font(.app(.body))
         }
 
         // Allow-list / lock control.
@@ -2931,7 +3054,8 @@ private struct UpdatesSectionContent: View {
     var body: some View {
         SettingsRow(
             title: "Check for updates automatically",
-            explainer: "Checks the GitHub releases page once a day and shows an update banner in the menu bar tray when a newer version ships. No data beyond the version request leaves this Mac."
+            explainer: "Checks the GitHub releases page once a day and shows an update banner in the menu bar tray when a newer version ships. No data beyond the version request leaves this Mac.",
+            summary: "Check GitHub once a day and notify you when an update is available."
         ) {
             Toggle("", isOn: Binding(
                 get: { updates.autoCheckEnabled },

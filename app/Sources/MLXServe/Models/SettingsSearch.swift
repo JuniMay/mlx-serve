@@ -83,3 +83,38 @@ enum SettingsSearch {
         }
     }
 }
+
+/// Counts remain section-scoped even when Form combines sibling preferences.
+struct SettingsVisibleRows: Equatable {
+    private var counts: [SettingsCategory?: Int] = [:]
+
+    static func row(in category: SettingsCategory?) -> Self {
+        var result = Self()
+        result.counts[category] = 1
+        return result
+    }
+
+    mutating func merge(_ other: Self) {
+        counts.merge(other.counts, uniquingKeysWith: +)
+    }
+
+    func count(in category: SettingsCategory) -> Int { counts[category, default: 0] }
+    var total: Int { counts.values.reduce(0, +) }
+}
+
+struct GenerationDefaultsSearch {
+    let fields: [GenerationField]
+    let showsBulkControls: Bool
+    var hasContent: Bool { showsBulkControls || !fields.isEmpty }
+
+    init(query: String, fields: [GenerationField] = GenerationField.allCases, inheritance: String) {
+        showsBulkControls = SettingsSearch.tokens(query).isEmpty
+        self.fields = fields.filter {
+            SettingsSearch.matches(query: query, in: Self.text(for: $0, inheritance: inheritance))
+        }
+    }
+
+    static func text(for field: GenerationField, inheritance: String) -> [String] {
+        [field.title, field.parameterName, field.help, inheritance, "Force", "Ignore client override"]
+    }
+}

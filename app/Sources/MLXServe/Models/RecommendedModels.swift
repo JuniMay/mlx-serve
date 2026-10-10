@@ -545,13 +545,12 @@ extension Array where Element == RecommendedModelPick {
     }
 }
 
-/// The hover card over the two capability bars: which bar is which, and the
-/// score behind it — the bars alone cannot say either.
+/// Visible comparative ratings include their scale and source.
 enum CapabilityTip {
     static func lines(for pick: RecommendedModelPick) -> [String] {
         [
-            "Intelligence: \(pick.intelligence)" + (pick.intelligenceIsEstimated ? " (our estimate)" : ""),
-            "Speed: \(pick.speed)" + (pick.speedIsWithMtp ? " (with its built-in draft head)" : ""),
+            "Intelligence: \(pick.intelligence)/100" + (pick.intelligenceIsEstimated ? " (our estimate)" : " (AA Index, rescaled)"),
+            "Speed: \(pick.speed)/100" + (pick.speedIsWithMtp ? " (relative estimate, with built-in draft head)" : " (relative estimate)"),
         ]
     }
 }

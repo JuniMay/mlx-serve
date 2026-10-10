@@ -1,7 +1,6 @@
 import Foundation
 
-/// What an empty conversation says above its composer, and whether it offers
-/// the discovery chips underneath.
+/// What an empty conversation says above its composer.
 enum ChatGreeting {
     static var plainHeading: String { L10n.text("How can I help you today?") }
     /// Outranks the brief: it is the one thing that must be acted on first.
@@ -14,10 +13,5 @@ enum ChatGreeting {
     /// What this agent is FOR — the line that tells you what to ask it.
     static func subtitle(agentBrief: String?, serverRunning: Bool) -> String? {
         serverRunning ? agentBrief?.trimmedNonEmpty : serverStopped
-    }
-
-    /// An external bridge (Telegram) is read-only and never offered them.
-    static func showsDiscoveryChips(hasAgent: Bool, isExternalBridge: Bool) -> Bool {
-        !hasAgent && !isExternalBridge
     }
 }

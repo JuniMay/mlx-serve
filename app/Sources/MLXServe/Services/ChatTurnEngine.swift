@@ -49,6 +49,7 @@ struct TurnLedger {
         var liveTokens: Int = 0
         /// The user switched Tools off while this turn ran.
         var toolsRevoked = false
+        var allToolsRevoked = false
     }
 
     private(set) var turns: [UUID: Turn] = [:]
@@ -91,6 +92,19 @@ struct TurnLedger {
 
     func toolsRevoked(session: UUID) -> Bool {
         turns[session]?.toolsRevoked ?? false
+    }
+
+    mutating func revokeAllTools(session: UUID) {
+        turns[session]?.toolsRevoked = true
+        turns[session]?.allToolsRevoked = true
+    }
+
+    func allToolsRevoked(session: UUID) -> Bool {
+        turns[session]?.allToolsRevoked ?? false
+    }
+
+    func owns(session: UUID, token: UUID) -> Bool {
+        turns[session]?.token == token
     }
 
     /// Turns whose session no longer exists (the ghost-turn class): deleting
@@ -190,12 +204,13 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
                                         approval: @escaping (APIClient.ToolCall) async -> Bool) {
         // Read before `endTurn` drops the turn that carries it.
         let revoked = ledger.toolsRevoked(session: sessionId)
+        let allRevoked = ledger.allToolsRevoked(session: sessionId)
         guard endTurn(sessionId: sessionId, token: token),
               session(sessionId) != nil,
               Self.canRunTurn(serverRunning: server.status == .running, apple: appState.useAppleModel),
               let note = steering.take(for: sessionId) else { return }
         runTurn(sessionId: sessionId, userText: note, images: nil, videos: nil, audio: nil,
-                config: config.revokingTools(revoked), approval: approval)
+                config: config.revokingTools(revoked).revokingAllTools(allRevoked), approval: approval)
     }
 
     /// The turn table: token-identified turn per session (see `TurnLedger`)
@@ -350,7 +365,7 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
                 reasoningEffort: r.reasoningEffort,
                 voice: r.voiceOverride,
                 wakePhrase: r.wakePhrase
-            )
+            ).revokingAllTools(r.plainChat)
         }
 
         /// The wire value for `reasoning_effort`, gated on the turn's EFFECTIVE
@@ -405,6 +420,16 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
             guard revoked else { return self }
             var c = self
             c.agentMode = false
+            return c
+        }
+
+        func revokingAllTools(_ revoked: Bool) -> TurnConfig {
+            guard revoked else { return self }
+            var c = self
+            c.agentMode = false
+            c.mcpMode = false
+            c.tools = []
+            c.documentIndex = nil
             return c
         }
     }
@@ -511,6 +536,14 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
     /// tool call see it (the turn itself keeps going for MCP or a folder).
     func revokeTools(sessionId: UUID) {
         ledger.revokeTools(session: sessionId)
+    }
+
+    func revokeAllTools(sessionId: UUID) {
+        ledger.revokeAllTools(session: sessionId)
+    }
+
+    func turnToken(sessionId: UUID) -> UUID? {
+        ledger.turns[sessionId]?.token
     }
 
     /// Stop one session's in-flight turn; other sessions keep streaming.
@@ -860,15 +893,17 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
 
         tasks[sessionId] = Task { [weak self] in
             guard let self else { return }
+            guard !Task.isCancelled, self.ledger.owns(session: sessionId, token: token) else { return }
             // Lazy-spawn MCP servers if MCP mode is on. Idempotent — already-connected servers are skipped.
-            if config.mcpMode {
+            if config.mcpMode && !self.ledger.allToolsRevoked(session: sessionId) {
                 // Inherit the chat's working directory so filesystem/shell MCP servers anchor at the
                 // same dir the agent's built-in tools use. Per-entry `cwd` in mcp.json still wins.
                 self.mcpManager.defaultCwd = config.workingDirectory
                 await self.mcpManager.startEnabled()
+                guard !Task.isCancelled, self.ledger.owns(session: sessionId, token: token) else { return }
                 // Surface startup failures inline in chat — otherwise they're hidden behind the
                 // marketplace gear icon and the user just sees "MCP doesn't seem to do anything".
-                if !self.mcpManager.startErrors.isEmpty {
+                if !self.ledger.allToolsRevoked(session: sessionId), !self.mcpManager.startErrors.isEmpty {
                     let lines = self.mcpManager.startErrors
                         .sorted(by: { $0.key < $1.key })
                         .map { "• **\($0.key)**: \($0.value)" }
@@ -884,7 +919,7 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
                 }
             }
             do {
-                try await self.runAgentLoop(api: api, sessionId: sessionId, config: config,
+                try await self.runAgentLoop(api: api, sessionId: sessionId, token: token, config: config,
                                             workingDirectory: workDir, approval: approval)
             } catch is CancellationError {
                 // Stopped by user or superseded — `stop(sessionId:)` already
@@ -893,6 +928,7 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
                 self.endTurn(sessionId: sessionId, token: token)
                 return
             } catch {
+                guard !Task.isCancelled, self.ledger.owns(session: sessionId, token: token) else { return }
                 print("[ChatTurnEngine] Agent error: \(error)")
                 try? "Agent error: \(error)\n".write(toFile: NSString(string: "~/.mlx-serve/debug.log").expandingTildeInPath, atomically: true, encoding: .utf8)
                 self.appendErrorNotice(error, to: sessionId)
@@ -907,7 +943,7 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
 
     /// Agent loop: call model with tools (streaming), execute tool calls, feed results back, repeat.
     /// Stops when the model responds with content (no tool calls) or after 150 iterations.
-    private func runAgentLoop(api: APIClient, sessionId: UUID, config turnConfig: TurnConfig,
+    private func runAgentLoop(api: APIClient, sessionId: UUID, token: UUID, config turnConfig: TurnConfig,
                               workingDirectory initialWorkDir: String?,
                               approval: @escaping (APIClient.ToolCall) async -> Bool) async throws {
         var workingDirectory = initialWorkDir
@@ -939,9 +975,17 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
 
         for iteration in 0..<maxIterations {
             try Task.checkCancellation()
+            guard ledger.owns(session: sessionId, token: token) else { throw CancellationError() }
+            guard session(sessionId) != nil else { return }
+            if !appState.useAppleModel {
+                await server.ensureDefaultChatModel(selectedModelPath: appState.selectedModelPath)
+                try Task.checkCancellation()
+                guard ledger.owns(session: sessionId, token: token) else { throw CancellationError() }
+            }
             // Tools switched off mid-turn withdraw the OFFER; the system prompt
             // stays the turn's, so it never claims a folder that is not there.
             let config = turnConfig.revokingTools(ledger.toolsRevoked(session: sessionId))
+                .revokingAllTools(ledger.allToolsRevoked(session: sessionId))
 
             // Session deleted mid-turn → the turn is orphaned. Bail before
             // issuing another request: with the session gone every append
@@ -1092,9 +1136,6 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
                     messages: messages, toolsJSON: combinedToolsJSON,
                     temperature: turnTemperature(config, default: Self.agentLoopTemperature))
             } else {
-            // Headless (media-first) server → ensure the selected chat model
-            // is loaded + promoted before the alias-addressed request.
-            await server.ensureDefaultChatModel(selectedModelPath: appState.selectedModelPath)
             stream = api.streamChat(
                 port: server.port,
                 messages: messages,
@@ -1122,6 +1163,7 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
                 self.beginLiveTokenCount(for: sessionId)
                 for try await event in stream {
                     try Task.checkCancellation()
+                    guard self.ledger.owns(session: sessionId, token: token) else { throw CancellationError() }
                     switch event {
                     case .content(let text):
                         self.streamDelta(content: text, coalescer: &coalescer, to: sessionId)
@@ -1146,6 +1188,8 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
                 }
                 // Flush the trailing batch so the message content is complete
                 // before the post-stream truncation/pad checks read it back.
+                try Task.checkCancellation()
+                guard self.ledger.owns(session: sessionId, token: token) else { throw CancellationError() }
                 self.applyStreamBatch(coalescer.drain(), to: sessionId)
                 return (tcs, maxHit, cause)
             }
@@ -1156,6 +1200,8 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
                 } onCancel: {
                     streamTask.cancel()
                 }
+                try Task.checkCancellation()
+                guard ledger.owns(session: sessionId, token: token) else { throw CancellationError() }
                 receivedToolCalls = result.tcs
                 maxTokensHit = result.maxHit
                 truncationCause = result.cause
@@ -1343,7 +1389,10 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
                 // An agent that declared auto-approve skips the gate entirely —
                 // one decision, made when the agent was configured, instead of a
                 // dialog per call.
-                let approved = config.autoApprove ? true : await approval(tc)
+                let approved = ledger.allToolsRevoked(session: sessionId) || config.autoApprove
+                    ? true : await approval(tc)
+                try Task.checkCancellation()
+                guard ledger.owns(session: sessionId, token: token) else { throw CancellationError() }
                 guard approved else {
                     let denied = AgentEngine.ToolResult(
                         id: tc.id,
@@ -1366,13 +1415,15 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
                 // repetition guard applies to both, so an MCP tool can no longer
                 // loop forever (it routes to `mcpManager` internally via
                 // `MCPToolRouting`).
+                let dispatchConfig = config.revokingTools(ledger.toolsRevoked(session: sessionId))
+                    .revokingAllTools(ledger.allToolsRevoked(session: sessionId))
                 let result = await AgentEngine.executeToolCall(
                     tc, workingDirectory: &workingDirectory,
                     repetition: repetition, iteration: iteration,
                     agentMemory: appState.agentMemory,
                     mcpRouter: mcpManager,
-                    mcpEnabled: config.mcpMode,
-                    documentIndex: config.documentIndex,
+                    mcpEnabled: dispatchConfig.mcpMode,
+                    documentIndex: dispatchConfig.documentIndex,
                     createTask: { [weak self] goal, schedule in
                         await self?.createTaskFromAgent(
                             goal: goal, schedule: schedule,
@@ -1387,8 +1438,10 @@ final class ChatTurnEngine: ObservableObject, TurnRunning {
                     processRegistry: appState.processRegistry,
                     sessionId: sessionId,
                     // Re-read: Tools can go off while this round streamed.
-                    allowedTools: config.revokingTools(ledger.toolsRevoked(session: sessionId)).dispatchTools
+                    allowedTools: dispatchConfig.dispatchTools
                 )
+                try Task.checkCancellation()
+                guard ledger.owns(session: sessionId, token: token) else { throw CancellationError() }
                 roundOutputs.append(result.output)
                 if let handle = result.backgroundHandle { roundHandles.append(handle) }
 

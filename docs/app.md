@@ -2,12 +2,12 @@
 
 # MLX Core (macOS app)
 
-Menu-bar app that wraps the server with a full UI. [Download the latest release](https://github.com/ddalcu/mlx-serve/releases/latest) or `brew install --cask mlx-serve`. Since v26.8.4 it is one window with a sidebar, content and detail column: Models, Tasks, Settings and the media generators are modes of the chat window rather than separate windows.
+Menu-bar app that wraps the server with a full UI. [Download the latest release](https://github.com/ddalcu/mlx-serve/releases/latest) or `brew install --cask mlx-serve`. Chat, media generation, models, agents and tasks share one main window and a stable sidebar. Settings opens in its own resizable window from the app menu or **⌘,**.
 
 - **Model browser** — download from HuggingFace with resumable multi-connection transfers (up to 16 connections per file), auto-discovers LM Studio's existing model folder (`~/.lmstudio/settings.json`) and your Hugging Face cache (wherever `HF_HOME` / `HF_HUB_CACHE` point) so you don't re-download what's on disk, GGUF rows show a min–max RAM-estimate range. Multi-variant repos let you pick your quant, and **Settings ▸ Model Folders** chooses where downloads land.
 - **Model switching without a restart** — picking a chat model loads it into the running server and makes it the default (`POST /v1/load-model` with `"default": true` over the API).
 - **Chat interface** — multi-session chat with markdown rendering. Drop in PDFs (PDFKit-extracted) or images alongside text.
-- **Agent mode** — 10 built-in tools (shell, cwd, readFile, writeFile, editFile, searchFiles, listFiles, browse, webSearch, saveMemory) with automatic tool calling loop and a per-tool approval dialog (**Allow** / **Deny** / **Always allow this session**).
+- **Tool-enabled chat** — built-in tools for files, shell commands, web access, media, memory and tasks, with an automatic tool calling loop and a per-tool approval dialog (**Allow** / **Deny** / **Always allow this session**). Configure defaults in **Settings ▸ Tools & MCP**; use **Plain Chat** in a conversation's **Chat Mode** menu to disable its tools.
 - **Agents** — named assistants with their own personality, voice, model, tools, workspace and wake phrase, plus their own pinned sampling (temperature, top-p, top-k, penalties, reasoning budget). The app writes the persona prompt for you, and every way of starting a conversation can run as one: chat tabs, hands-free voice, scheduled tasks, Telegram, the Quick Launcher.
 - **MCP client** — curated marketplace of stdio + HTTP MCP servers (GitHub, Azure DevOps, DBHub, Docker, Kubernetes, Playwright, Slack, Notion, Filesystem, Shell) plus your own from `~/.mlx-serve/mcp.json`.
 - **Agent Sandbox** — flip one toggle and every agent shell command runs inside an isolated Linux VM built on Apple's Virtualization framework: boots in under a second, guest servers mirror to `localhost` live (an Express app on guest port 8080 is `http://localhost:8080` on your Mac), and a green shield in the toolbar shows when commands run isolated. It's a normal Linux where `apt-get install` works, with up to 4 GB of RAM committed lazily. Let the agent go wild — your Mac stays untouched.
@@ -18,18 +18,72 @@ Menu-bar app that wraps the server with a full UI. [Download the latest release]
 - **Scheduled tasks** — hand the agent a goal and a schedule in plain English ("weekdays at 8am, check my watched sites and write a briefing") and it runs unattended, with saved transcripts.
 - **Document folder RAG** — attach a folder of mixed files and ask questions about them; GPU-batched embeddings index ~500 files in ~7 s, everything in memory, nothing leaves the Mac.
 - **Editable system prompt + persistent memory** — `~/.mlx-serve/system-prompt.md` and `~/.mlx-serve/memory.md`.
-- **Prompt-based skills** — drop `.md` files into `~/.mlx-serve/skills/` with YAML frontmatter to teach the agent custom capabilities triggered by keywords, or type `/` in the chat box to pick one and run it by name in any chat, agent mode or not.
-- **Engine-aware Settings window** (Cmd+,) — every server-launch flag and per-request default, with sections that show only the knobs relevant to the engine you've loaded (MLX vs GGUF vs ds4).
+- **Prompt-based skills** — drop `.md` files into `~/.mlx-serve/skills/` with YAML frontmatter to teach the agent custom capabilities triggered by keywords, or type `/` in the chat box to pick one and run it by name in any chat, whether tools are enabled or not.
+- **Engine-aware Settings window** (⌘,) — a category sidebar and grouped controls for server-launch flags and per-request defaults, showing the options relevant to your loaded engine (MLX vs GGUF vs ds4). Short captions explain each setting; information buttons open the full details, which remain searchable along with the captions.
 - **Server management** — start/stop, live log buffer, restart-on-flag-change banner.
 - **Image / Video / Music / Speech / 3D generation** — FLUX.2, Krea-2, Mage-Flow, LTX-Video 2.3 / 2.5, MiniMax-H3, ACE-Step, MiniMax Music 3, Qwen3-TTS, Kokoro and Hunyuan3D, all native via the mlx-serve zig server.
 
+## Interaction workspaces
+
+Choose a model with **Choose Model** or **⌘L**. Supported local models open the
+workspace for their capability: chat, image, video, voice, music, sound or 3D.
+Decision models open their decision interface. Media selection keeps chat model
+selection separate and does not start generation. The model browser remains the
+place to find and download models. Network media models are available from each
+media workspace's model popover.
+
+Generation workspaces put results above a compact input dock. The dock contains
+the prompt, model picker, supported attachments and Generate or Cancel. Open
+**Generation settings** for the current model's quality, size, sampler and other
+parameters. These controls remain in a trailing inspector while input and output
+stay visible. The attachment and model popovers preserve model-specific inputs
+and download controls. Voice, Music and Sound keep their own input requirements.
+The Audio toolbar switches between these three workspaces. Prompt action menus
+provide templates and enhancement where supported.
+Changing the model within a workspace preserves its draft inputs. Model defaults
+and capability limits still apply to generation parameters.
+
+The sidebar stays in place when opening Models, Agents or Tasks. Their lists and
+page controls occupy the main pane. App-wide server, engine, tool and appearance
+preferences stay in **Settings**; parameters for the current generation stay with
+that workspace.
+
+## Chat controls and tool defaults
+
+Click the model control in the composer to open thinking settings. The first page has one **Off / Low / Medium / High** slider: Off disables thinking, and choosing an effort level enables it. Reset turns thinking off and returns the remembered effort to Low. Click the current model name to open **Select model** in the same popover, and **Back** to return. The list includes available local, LAN, provider and Apple on-device models. Opening the picker does not load a model; when the server is stopped, use **Start** in the same control to start it.
+
+**Settings ▸ Tools & MCP** controls the built-in tool and MCP defaults for new conversations. Expand the tool groups to choose which built-in tools are available, and use **Configure…** to manage MCP servers. Saved agents retain their own tool capabilities and MCP choice; individual tool exclusions can further restrict their available tools, but cannot grant a capability the agent excludes. Telegram and scheduled tasks keep their separate settings, and tool approval rules still apply.
+
+Conversations can follow Settings defaults or keep their saved tool choices. Choose **Chat Mode ▸ Use Settings Defaults** to make a conversation follow the current defaults. The menu shows whether built-in tools and MCP are available for that conversation.
+
+**Plain Chat** disables built-in tools, MCP and attached-folder search for that conversation, including conversations with saved agents. Turning it off uses the conversation's saved choices or current Settings defaults again. Thinking remains a separate preference: when an agent fixes its value, the popover names that agent and links to its settings. Apple's on-device model has no thinking or MCP support and limits built-in tools to browsing and web search.
+
+The main window uses a native title bar. Conversations show their title and a
+**Conversation actions** menu with Rename and Branch Chat. Branch Chat uses
+the latest completed conversation boundary and is unavailable during a turn.
+The sidebar and detail pane share the window toolbar.
+
+Thinking and tool headers use quiet gray text that darkens on hover or press.
+A chevron beside the label shows whether the details are expanded. The header
+stays outside the details frame, whose content scrolls within a 240-point height
+limit. Detail text follows the conversation's **Text Size** setting, including
+in the larger Reader; code and tool identifiers can retain a monospaced face.
+**Open in Reader** provides the full text, Copy and Close; Escape closes it.
+Reader and background-process Stop buttons act independently of the header.
+Plans keep approval actions outside the scrolling content.
+
+The conversation and composer share a centered reading column. Custom message
+surfaces use shared corner and spacing values; native controls keep their
+system shape. Tables use horizontal row dividers, and numbered lists align
+their text across single- and multi-digit markers.
+
 ## Image / Video / Music / Speech / 3D generation
 
-One server, five modalities — the **Image**, **Video**, **Audio** (speech + music) and **3D** Create panes run [FLUX.2](https://huggingface.co/black-forest-labs) / Krea-2 / Microsoft Mage-Flow, [LTX-Video 2.3 and 2.5](https://github.com/dgrauet/ltx-2-mlx) / [MiniMax-H3](https://huggingface.co/ddalcu/MiniMax-H3-FL2VA-MLX-Serve-8bit), [ACE-Step 1.5](https://huggingface.co/ddalcu/ACE-Step-1.5-XL-Turbo-MLX-Serve-8bit) / MiniMax Music 3, [Qwen3-TTS](https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-Base) / [Kokoro-82M](https://huggingface.co/ddalcu/Kokoro-82M-MLX-Serve), and [Hunyuan3D-2.1](https://huggingface.co/ddalcu/Hunyuan3D-2.1-MLX-Serve-8bit) natively on MLX. Click a pane, hit **Download**, generate. Drag a file onto any pane and it lands in the right slot, reference lists included. Each pane remembers your last-used model, quality, resolution, steps and seed between sessions.
+One server, five modalities — the **Image**, **Video**, **Audio** (speech + music) and **3D** Create panes run [FLUX.2](https://huggingface.co/black-forest-labs) / Krea-2 / Microsoft Mage-Flow, [LTX-Video 2.3 and 2.5](https://github.com/dgrauet/ltx-2-mlx) / [MiniMax-H3](https://huggingface.co/ddalcu/MiniMax-H3-FL2VA-MLX-Serve-8bit), [ACE-Step 1.5](https://huggingface.co/ddalcu/ACE-Step-1.5-XL-Turbo-MLX-Serve-8bit) / MiniMax Music 3, [Qwen3-TTS](https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-Base) / [Kokoro-82M](https://huggingface.co/ddalcu/Kokoro-82M-MLX-Serve), and [Hunyuan3D-2.1](https://huggingface.co/ddalcu/Hunyuan3D-2.1-MLX-Serve-8bit) natively on MLX. Choose a model in its popover. If it is unavailable, use the explicit Download action. Open the attachment popover to choose or drop supported reference files into their slots. Each pane remembers your last-used model, quality, resolution, steps and seed between sessions.
 
 The panes also list checkpoints you added yourself: anything in your model folders with a family the server can run shows under **On This Mac** with that family's controls, and the Model Browser offers community packs of those families, layout-checked before the Download button appears.
 
-You can also **generate media straight from chat**: ask for an image, a spoken line, a music track or a short clip and it renders inline in the conversation with a progress bar, using your saved settings for that modality. Attach a photo and say "make it winter" and the edit comes back in the same thread. Double-click any chat image to open it full-size in Preview.
+With the relevant media tools enabled, you can also **generate media straight from chat**: ask for an image, a spoken line, a music track or a short clip and it renders inline in the conversation with a progress bar, using bounded preview settings and supported saved defaults for that modality. Use the media workspace for editing, reference inputs and full generation parameters. Double-click any chat image to open it full-size in Preview.
 
 And it goes well beyond text-to-X:
 

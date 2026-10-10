@@ -1,11 +1,6 @@
 import Foundation
 
-/// One row of the ⌘L model switcher.
-///
-/// `tag` is a `ChatModelSelection` tag — a local path, or `lan:<id@peer>` — so
-/// the palette never decides what picking a row MEANS. That answer already
-/// lives in one place, shared with the tray and the composer's pill, and a
-/// per-surface copy is how a picker silently stops honouring a LAN selection.
+/// One model and its input/output workspace in the global model chooser.
 struct ModelPaletteRow: Identifiable, Equatable {
     let tag: String
     /// The readable name (`ModelDisplayName`), same as the pill shows.
@@ -17,17 +12,13 @@ struct ModelPaletteRow: Identifiable, Equatable {
     /// Everything a query is matched against, lowercased once at build time.
     /// Deliberately NOT the filesystem path (see `ModelPalette.filtered`).
     let searchText: String
+    var interaction: ModelInteractionRoute = .chat
 
     var id: String { tag }
 }
 
-/// The ⌘L model switcher: which models this chat can be pointed at, filtered by
-/// typing, chosen with the arrow keys.
-///
-/// It offers exactly what the composer's pill offers — same `isChatPickable`
-/// filter, same `lanModels(capability: "chat")` question, same group order —
-/// because two pickers a keystroke apart that list different models is the
-/// worse half of having two.
+/// Searchable local interaction models and remote chat models.
+/// Custom media entries require an available preset so selection names the exact model.
 enum ModelPalette {
 
     /// Heading for models shared by other Macs, spelled as the pill spells it.
@@ -44,8 +35,16 @@ enum ModelPalette {
     // MARK: - Rows
 
     static func rows(appleAvailable: Bool = false,
-                     local: [LocalModel], lan: [ModelInfo]) -> [ModelPaletteRow] {
-        let pickable = local.filter(\.isChatPickable)
+                     local: [LocalModel], lan: [ModelInfo],
+                     mediaModels: [ModelInfo] = []) -> [ModelPaletteRow] {
+        let pickable = local.filter { model in
+            guard let route = ModelInteractionRoute.resolve(model) else { return false }
+            if case .media(let modality) = route {
+                return ModelBrowserUse.mediaPresetID(modality: modality, name: model.name,
+                                                     path: model.path, models: mediaModels) != nil
+            }
+            return true
+        }
         // The pill's own duplicate rule: two rows reading identically make the
         // list a coin flip, so a shared label earns its engine in the detail.
         let dupNames = LocalModel.duplicateNames(in: pickable)
@@ -64,11 +63,15 @@ enum ModelPalette {
         return out
     }
 
+    static func hasNonChatInteraction(local: [LocalModel], mediaModels: [ModelInfo] = []) -> Bool {
+        rows(local: local, lan: [], mediaModels: mediaModels).contains { $0.interaction != .chat }
+    }
+
     private static func row(for model: LocalModel, section: String,
                             needsEngine: Bool) -> ModelPaletteRow {
-        var detail: [String] = []
-        // A GGUF repo is a shelf: the quant IS which model this row loads, so
-        // it comes first.
+        let interaction = ModelInteractionRoute.resolve(model) ?? .chat
+        var detail: [String] = [interaction.title]
+        // A GGUF row identifies one quantization within its repository.
         if let quantFile = model.quantFile {
             detail.append(model.quantLabel ?? DownloadManager.quantLabel(forFilename: quantFile))
         } else if let quant = model.quantization {
@@ -90,7 +93,8 @@ enum ModelPalette {
             // of them" failure as matching the path — and "MLX-Serve Models"
             // shares a word with most of the ids under it.
             searchText: [title, model.name, detail.joined(separator: " ")]
-                .joined(separator: " ").lowercased())
+                .joined(separator: " ").lowercased(),
+            interaction: interaction)
     }
 
     private static var appleRow: ModelPaletteRow {

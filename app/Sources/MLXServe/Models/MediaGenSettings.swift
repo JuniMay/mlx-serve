@@ -23,9 +23,7 @@ struct LoraAdapter: Codable, Equatable, Identifiable {
 /// property, so it can't be part of either struct's synthesized CodingKeys.
 private enum LegacyLoraCodingKeys: String, CodingKey { case loraPath, loraScale }
 
-/// Bounds for a drag-resizable prompt editor. The height is persisted, so a
-/// value dragged on a taller window — or a garbage one — must never come back
-/// as an editor too small to type in or taller than the pane.
+/// Clamp saved editor heights to a usable range before applying the workspace cap.
 enum PromptEditorHeight {
     static let minHeight: Double = 70
     static let maxHeight: Double = 600
@@ -258,14 +256,12 @@ struct MusicGenSettings: Codable, Equatable {
     var seed: Int = -1
     var steps: Int? = nil
     var instrumental: Bool = false
-    /// Advanced starts OPEN. Collapsed-by-default is why tempo, key, seed and
-    /// steps read as missing features — they were one unlabeled chevron away.
+    /// Decoded for settings-file compatibility; inspector visibility is view state.
     var showAdvanced: Bool = true
     /// The draft (see `AudioGenSettings.text`).
     var prompt: String = ""
     var lyrics: String = ""
-    /// Height of the lyrics editor, dragged by its handle (see the video
-    /// pane's prompt box).
+    /// Saved height of the resizable lyrics editor.
     var lyricsHeight: Double = PromptEditorHeight.defaultHeight
     var refAudioPath: String? = nil
     /// Source-audio task state (ACE-Step cover / complete), part of the draft.
@@ -302,9 +298,7 @@ extension MusicGenSettings {
 
     /// Every key optional so a blob written by an older build still decodes —
     /// a throwing decode would silently reset the pane to defaults for every
-    /// existing install. Absent keys keep the property defaults, which is also
-    /// how `showAdvanced` ends up OPEN for people upgrading from a build that
-    /// never wrote it.
+    /// existing install. Absent keys keep the property defaults.
     init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -414,7 +408,7 @@ struct VideoGenSettings: Codable, Equatable {
     /// every step pays an x0 solve plus a host copy of the previewed frames,
     /// and the picture is a linear projection of the latent, not a decode.
     var livePreview: Bool = false
-    /// Height of the drag-resizable prompt editor.
+    /// Saved prompt editor height, bounded by the workspace.
     var promptHeight: Double = PromptEditorHeight.defaultHeight
     /// The size last typed into the Custom… fields, kept across preset switches
     /// like the image pane's.
@@ -575,8 +569,7 @@ struct Model3DGenSettings: Codable, Equatable {
     var turntable: Bool = true
     /// P2 paint stage (full PBR texture). Off until validated end to end.
     var texture: Bool = false
-    /// The draft: the pane unmounts on navigation, so the photo and the
-    /// disclosure state live here or are lost on the way to Chat and back.
+    /// The source photo persists when navigation unmounts the workspace.
     var photoPath: String? = nil
     var showAdvanced: Bool = false
 

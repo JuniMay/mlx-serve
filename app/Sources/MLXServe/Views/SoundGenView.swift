@@ -19,27 +19,28 @@ struct SoundGenView: View {
     @State private var steps: Int? = nil
     @State private var seed: Int = -1
     @State private var keepResident: Bool = false
-    @State private var showAdvanced: Bool = true
     @State private var showRAMWarning = false
     @State private var hydrating = false
     @State private var didHydrate = false
 
     var body: some View {
-        HSplitView {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    modelSection
-                    promptSection
-                    durationSection
-                    advancedSection.padding(.top, 8)
-                    actionRow.padding(.top, 14)
-                }
-                .padding(16)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .frame(minWidth: 340, idealWidth: 380)
-
-            VStack(spacing: 12) {
+        GenerationWorkspace(
+            title: "Sound Effects", modelName: lanModel ?? model.name,
+            notice: generationBlockReason,
+            prompt: {
+                promptSection
+            }, model: {
+                modelSection
+            }, attachments: {
+                EmptyView()
+            }, parameters: {
+                Toggle("Keep model loaded after generating", isOn: $keepResident)
+                    .help("Keep the model in memory for the next sound.")
+                durationSection
+                parameterControls
+            }, actions: {
+                actionRow
+            }, result: {
                 previewArea
                 AudioHistoryShelf(title: "History", paths: service.recent,
                                   playingPath: clipPlayer.playingPath,
@@ -50,10 +51,7 @@ struct SoundGenView: View {
                     Label("Open output folder in Finder", systemImage: "folder").font(.app(.caption))
                 }
                 .buttonStyle(.borderless).foregroundStyle(.secondary).help(MediaStorage.soundRoot)
-            }
-            .padding(16)
-            .frame(minWidth: 280)
-        }
+            })
         .onAppear {
             if !didHydrate {
                 hydrating = true
@@ -64,6 +62,11 @@ struct SoundGenView: View {
             if server.status == .running { Task { await server.refreshModels() } }
         }
         .onDisappear { clipPlayer.stop() }
+        .onChange(of: appState.mediaModelSelection) { _, request in
+            guard let request, let selection = request.applying(to: snapshot) else { return }
+            model = selection.resolvedModel(models: server.allModels)
+            lanModel = LanPick.lanId(selection.modelId)
+        }
         .onChange(of: snapshot) { _, s in if !hydrating { s.save() } }
         .onChange(of: service.phase) { _, phase in
             if case .running = phase { clipPlayer.stop() }
@@ -94,13 +97,7 @@ struct SoundGenView: View {
                 bundleOf: { $0.bundle },
                 downloads: downloads,
                 onDownloadFinished: { appState.refreshModels() },
-                persist: { snapshot.save() },
-                accessory: AnyView(
-                    Toggle(isOn: $keepResident) {
-                        Text("Keep model loaded after generating").lineLimit(1).truncationMode(.tail)
-                    }
-                    .font(.app(.caption)).controlSize(.small)
-                    .help("On: the model stays resident so the next sound is instant. Off (default): it's unloaded to free GPU memory.")))
+                persist: { snapshot.save() })
             if lanModel == nil && !downloads.bundleReady(model.bundle) {
                 BundleDownloadBar(bundle: model.bundle, showsStartButton: false)
             }
@@ -108,29 +105,38 @@ struct SoundGenView: View {
     }
 
     private var promptSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                Text("Describe the sound").font(.app(.headline).weight(.semibold))
-                Spacer()
-                Menu {
-                    ForEach(SoundPrompt.examples, id: \.self) { p in
-                        Button { prompt = p } label: { Text(verbatim: p).font(.app(.body)) }
-                    }
-                } label: {
-                    HStack(spacing: 5) {
-                        Text("Templates").font(.app(.body))
-                        Image(systemName: "chevron.down")
-                    }
-                    .modifier(PaneChip())
-                }
-                .modifier(PaneChipMenu())
-            }
+        HStack(alignment: .top, spacing: AppLayout.compactSpacing) {
             TextEditor(text: $prompt)
+                .accessibilityLabel("Describe the sound")
                 .font(.app(.body))
                 .frame(height: 80)
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.3), lineWidth: 0.5))
-            Text("What makes it, the material, the space — e.g. \"heavy wooden door creaking open in a stone hall\".")
-                .font(.app(.caption2)).foregroundStyle(.secondary)
+                .scrollContentBackground(.hidden)
+                .help("Describe what makes the sound, its material and its surroundings, such as a heavy wooden door creaking open in a stone hall.")
+                .overlay(alignment: .topLeading) {
+                    if prompt.isEmpty {
+                        Text("Describe a sound…")
+                            .font(.app(.body))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 8)
+                            .allowsHitTesting(false)
+                    }
+                }
+            Menu {
+                Section("Templates") {
+                    ForEach(SoundPrompt.examples, id: \.self) { example in
+                        Button { prompt = example } label: { Text(verbatim: example) }
+                    }
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .padding(.top, 6)
+            .accessibilityLabel("Sound actions")
+            .help("Sound actions")
         }
     }
 
@@ -142,94 +148,104 @@ struct SoundGenView: View {
                 Spacer()
             }
             Slider(value: $durationSeconds, in: model.durationRange, step: 0.5)
+                .accessibilityLabel("Duration")
         }
     }
 
-    private var advancedSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            FoldingSectionHeader(title: "Advanced options", isExpanded: $showAdvanced)
-            if showAdvanced {
-                FlowLayout(spacing: 14, rowSpacing: 10) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Steps").font(.app(.caption))
-                        NumberField(range: model.stepsRange,
-                                    value: Binding(get: { steps ?? model.defaultSteps }, set: { steps = $0 }),
-                                    width: 52,
-                                    help: "Sampler steps, \(model.stepsRange.lowerBound)–\(model.stepsRange.upperBound). The model is distilled for \(model.defaultSteps).")
-                    }
-                    SeedField(label: "Seed", placeholder: "Random", range: -1...Int(UInt32.max), value: $seed)
+    private var parameterControls: some View {
+        VStack(alignment: .leading, spacing: AppLayout.rowSpacing) {
+            FlowLayout(spacing: 14, rowSpacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Steps").font(.app(.caption))
+                    NumberField(range: model.stepsRange,
+                                value: Binding(get: { steps ?? model.defaultSteps }, set: { steps = $0 }),
+                                width: 52,
+                                help: "Sampler steps, \(model.stepsRange.lowerBound)–\(model.stepsRange.upperBound). The model is distilled for \(model.defaultSteps).")
                 }
-                Text("Same seed + prompt + length reproduces the sound.")
-                    .font(.app(.caption2)).foregroundStyle(.secondary)
+                SeedField(label: "Seed", placeholder: "Random", range: -1...Int(UInt32.max), value: $seed)
             }
+            Text("Same seed + prompt + length reproduces the sound.")
+                .font(.app(.caption2)).foregroundStyle(.secondary)
         }
+    }
+
+    private var generationBlockReason: String? {
+        guard !service.isRunning else { return nil }
+        if lanModel == nil && !downloads.bundleReady(model.bundle) {
+            return "Download the selected model to generate sound."
+        }
+        return prompt.isBlank ? "Describe the sound you want to make." : nil
     }
 
     private var actionRow: some View {
         HStack {
             if service.isRunning {
                 Button(role: .destructive) { service.cancel() } label: {
-                    Label("Cancel", systemImage: "stop.circle").font(.app(.body)).frame(maxWidth: .infinity)
+                    Label("Cancel", systemImage: "stop.circle")
                 }
                 .buttonStyle(.bordered)
             } else {
                 Button { generate() } label: {
-                    Label("Generate", systemImage: "speaker.wave.3").font(.app(.body)).frame(maxWidth: .infinity)
+                    Label("Generate", systemImage: "speaker.wave.3")
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.return, modifiers: [.command])
-                .disabled(prompt.isBlank || (lanModel == nil && !downloads.bundleReady(model.bundle)))
+                .disabled(generationBlockReason != nil)
             }
         }
+        .controlSize(.large)
     }
 
     private var previewArea: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.15))
-            switch service.phase {
-            case .idle:
-                ContentUnavailableView("No sounds yet", systemImage: "speaker.wave.3",
-                                       description: Text("Describe a sound and press Generate.").font(.app(.body)))
-            case .running(let step, let total, let message):
-                VStack(spacing: 12) {
-                    if total == 0 {
-                        ProgressView().frame(width: 240)
-                    } else {
-                        ProgressView(value: Double(step), total: max(1, Double(total))).progressViewStyle(.linear).frame(width: 240)
-                    }
-                    Text(message).font(.app(.footnote)).foregroundStyle(.secondary)
-                }
-            case .completed(let path):
-                let playing = clipPlayer.playingPath == path
-                VStack(spacing: 12) {
-                    Image(systemName: "speaker.wave.3.fill")
-                        .font(.app(.largeTitle)).foregroundStyle(.tint)
-                        .symbolEffect(.variableColor.iterative, options: .repeat(.continuous), isActive: playing)
-                    Button { playing ? clipPlayer.stop() : clipPlayer.play(path) } label: {
-                        Label(playing ? "Stop" : "Play", systemImage: playing ? "stop.fill" : "play.fill").font(.app(.body))
-                    }
-                    .buttonStyle(.bordered)
-                    HStack(spacing: 8) {
-                        Text(URL(fileURLWithPath: path).lastPathComponent)
-                            .font(.app(.caption)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                        Button { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) } label: {
-                            Image(systemName: "folder")
+        GroupBox {
+            Group {
+                switch service.phase {
+                case .idle:
+                    ContentUnavailableView("No sounds yet", systemImage: "speaker.wave.3",
+                                           description: Text("Describe a sound and press Generate.").font(.app(.body)))
+                case .running(let step, let total, let message):
+                    VStack(spacing: AppLayout.rowSpacing) {
+                        if total == 0 {
+                            ProgressView().frame(maxWidth: 240)
+                        } else {
+                            ProgressView(value: Double(step), total: max(1, Double(total))).progressViewStyle(.linear).frame(maxWidth: 240)
                         }
-                        .buttonStyle(.borderless).help("Reveal in Finder")
+                        Text(message).font(.app(.footnote)).foregroundStyle(.secondary)
                     }
-                }
-                .padding(16)
-            case .failed(let msg):
-                ContentUnavailableView {
-                    Label("Failed", systemImage: "exclamationmark.triangle").font(.app(.body))
-                } description: {
-                    Text(msg)
-                } actions: {
-                    Button { AppActivation.openWindow(id: "serverLog", using: openWindow) } label: {
-                        Text("Show log").font(.app(.body))
+                case .completed(let path):
+                    let playing = clipPlayer.playingPath == path
+                    VStack(spacing: AppLayout.rowSpacing) {
+                        Image(systemName: "speaker.wave.3.fill")
+                            .font(.app(.largeTitle)).foregroundStyle(.tint)
+                            .symbolEffect(.variableColor.iterative, options: .repeat(.continuous), isActive: playing)
+                        Button { playing ? clipPlayer.stop() : clipPlayer.play(path) } label: {
+                            Label(playing ? "Stop" : "Play", systemImage: playing ? "stop.fill" : "play.fill").font(.app(.body))
+                        }
+                        .buttonStyle(.bordered)
+                        HStack(spacing: AppLayout.compactSpacing) {
+                            Text(URL(fileURLWithPath: path).lastPathComponent)
+                                .font(.app(.caption)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                            Button { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) } label: {
+                                Image(systemName: "folder")
+                            }
+                            .buttonStyle(.borderless).help("Reveal in Finder")
+                            .accessibilityLabel("Reveal in Finder")
+                        }
+                    }
+                    .padding(AppLayout.contentInset)
+                case .failed(let msg):
+                    ContentUnavailableView {
+                        Label("Failed", systemImage: "exclamationmark.triangle").font(.app(.body))
+                    } description: {
+                        Text(msg)
+                    } actions: {
+                        Button { AppActivation.openWindow(id: "serverLog", using: openWindow) } label: {
+                            Text("Show log").font(.app(.body))
+                        }
                     }
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -257,7 +273,6 @@ struct SoundGenView: View {
         s.steps = steps
         s.seed = seed
         s.keepResident = keepResident
-        s.showAdvanced = showAdvanced
         return s
     }
 
@@ -270,7 +285,6 @@ struct SoundGenView: View {
         steps = s.steps
         seed = s.seed
         keepResident = s.keepResident
-        showAdvanced = s.showAdvanced
     }
 }
 

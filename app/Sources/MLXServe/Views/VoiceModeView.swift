@@ -39,9 +39,9 @@ struct VoiceOrbView: View {
                 // window-level approval sheet belongs to typed chat turns.
                 if let req = controller.pendingApproval {
                     ToolApprovalSheet(request: req,
-                                      onAllow: { controller.resolve(.allow) },
-                                      onDeny: { controller.resolve(.deny) },
-                                      onAllowAll: { controller.resolve(.allow, allowAll: true) })
+                                      onAllow: { controller.resolve(.allow, requestID: req.id) },
+                                      onDeny: { controller.resolve(.deny, requestID: req.id) },
+                                      onAllowAll: { controller.resolve(.allow, allowAll: true, requestID: req.id) })
                         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
                 }
             }
@@ -154,16 +154,15 @@ struct VoiceComposerToggle: View {
                 start()
             }
         } label: {
-            Image(systemName: "waveform")
-                .font(.app(.body, weight: .medium))
-                .foregroundStyle(ownedHere ? Color.white : Color.secondary)
-                .frame(width: ChatMetrics.composerIconSize, height: ChatMetrics.composerIconSize)
-                .background(ownedHere ? Color.accentColor : Color.secondary.opacity(0.15))
-                .clipShape(Circle())
+            ComposerControlSymbol(name: "waveform")
+                .foregroundStyle(ownedHere ? Color.accentColor : Color.secondary)
         }
-        .buttonStyle(.plain)
-        .frame(width: ChatMetrics.composerControlSize, height: ChatMetrics.composerControlSize)
+        .buttonStyle(.glass)
+        .buttonBorderShape(.circle)
+        .controlSize(.regular)
         .disabled(disabled)
+        .accessibilityLabel(ownedHere ? "End voice mode" : "Start voice mode")
+        .accessibilityValue(L10n.text(ownedHere ? "On in this chat" : controller.isActive ? "On in another chat" : "Off"))
         .help(L10n.format(
             "Voice mode (%@) — talk to the model hands-free. Speech-to-text and text-to-speech run locally on your Mac; the model only handles text (and tools/thinking if enabled).",
             L10n.text(ownedHere ? "ON in this chat" : controller.isActive ? "ON in another chat — click to move it here" : "OFF")

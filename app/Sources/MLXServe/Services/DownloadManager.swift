@@ -16,6 +16,42 @@ class DownloadManager: ObservableObject {
     /// In-flight `download`/`downloadGguf` tasks keyed by repoId, so the
     /// Cancel button can interrupt them. Removed in the wrapper's `defer`.
     private var activeTasks: [String: Task<Void, Never>] = [:]
+    private enum DownloadRequest {
+        case repository(String)
+        case gguf(String, GgufQuant)
+        case variant(String, MlxVariant)
+        case bundle(MediaBundle)
+        case packFile(String, String)
+        case update(UpdateCheck)
+        case gem(DrafterGem, String)
+    }
+
+    /// Keep the chosen files and destination after failure so every surface retries the same job.
+    private var downloadRequests: [String: DownloadRequest] = [:]
+
+    func canRetry(repoId: String) -> Bool { downloadRequests[repoId] != nil }
+
+    @discardableResult
+    func retry(repoId: String, onFinish: @escaping @MainActor () -> Void) -> Bool {
+        guard downloads[repoId]?.status == .failed, let request = downloadRequests[repoId] else { return false }
+        switch request {
+        case .repository(let repo): start(repoId: repo, onFinish: onFinish)
+        case .gguf(let repo, let quant): startGguf(repoId: repo, quant: quant, onFinish: onFinish)
+        case .variant(let repo, let variant): startMlxVariant(repoId: repo, variant: variant, onFinish: onFinish)
+        case .bundle(let bundle): startBundle(bundle, onFinish: onFinish)
+        case .packFile(let repo, let file): startPackFile(repoId: repo, fileName: file, onFinish: onFinish)
+        case .update(let check): startUpdate(check, onFinish: onFinish)
+        case .gem(let gem, let dir): startGem(gem, modelDir: dir) { _ in onFinish() }
+        }
+        return true
+    }
+
+    /// Dismissing history is not cancellation: completed files and resumable partials stay on disk.
+    func dismissDownload(repoId: String) {
+        guard let state = downloads[repoId], state.status != .downloading else { return }
+        downloads.removeValue(forKey: repoId)
+        downloadRequests.removeValue(forKey: repoId)
+    }
     /// The shard paths a repo's in-flight GGUF transfer is fetching (one entry
     /// for a single-file quant, many for a sharded one), so a cancel can be
     /// scoped to that one quant instead of the whole folder (which may already
@@ -923,6 +959,7 @@ class DownloadManager: ObservableObject {
     /// runs after the inner work returns (whether completion, failure, or
     /// cancellation) so the caller can refresh model lists exactly once.
     func start(repoId: String, onFinish: @escaping @MainActor () -> Void) {
+        downloadRequests[repoId] = .repository(repoId)
         activeTasks[repoId]?.cancel()
         let task = Task { @MainActor [weak self] in
             await self?.download(repoId: repoId)
@@ -986,6 +1023,7 @@ class DownloadManager: ObservableObject {
         let key = Self.gemKey(gem)
         guard activeTasks[key] == nil else { return }
         gemFetches.insert(key)
+        downloadRequests[gem.repo] = .gem(gem, modelDir)
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
             let ok = await self.fetchGem(gem, modelDir: modelDir, alertOnFailure: true)
@@ -1100,6 +1138,7 @@ class DownloadManager: ObservableObject {
         // a pack in a non-destination root must not grow a fragment dir in the
         // destination (it shadows the real pack and the server dies loading it).
         let packDir = existingModelDir(for: repoId)
+        downloadRequests[repoId] = .packFile(repoId, fileName)
         mediaBundleRepos.insert(repoId)
         packFileFetches.insert(repoId)
         let task = Task { @MainActor [weak self] in
@@ -1121,6 +1160,7 @@ class DownloadManager: ObservableObject {
     func startUpdate(_ check: UpdateCheck, onFinish: @escaping @MainActor () -> Void) {
         let repo = check.repo, dir = check.dir
         guard activeTasks[repo] == nil else { return }
+        downloadRequests[repo] = .update(check)
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
             switch check.selection {
@@ -1228,15 +1268,25 @@ class DownloadManager: ObservableObject {
     /// disk). `onFinish` runs once after the last component settles. Stops the
     /// bundle if a component fails.
     func startBundle(_ bundle: MediaBundle, onFinish: @escaping @MainActor () -> Void) {
+        if let running = activeTasks[bundle.id] {
+            Task { @MainActor in
+                await running.value
+                onFinish()
+            }
+            return
+        }
         for comp in bundle.components { mediaBundleRepos.insert(comp.repo) }
-        activeTasks[bundle.id]?.cancel()
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
             for comp in bundle.components {
                 if Task.isCancelled { break }
-                if self.componentReady(comp) { continue }
+                if self.componentReady(comp), self.downloads[comp.repo]?.status != .failed { continue }
+                self.downloadRequests[comp.repo] = .bundle(bundle)
                 await self.download(repoId: comp.repo, selection: comp.selection)
-                if Task.isCancelled { break }
+                if Task.isCancelled {
+                    self.finalizeIfCancelled(repoId: comp.repo)
+                    break
+                }
                 if self.downloads[comp.repo]?.status == .failed { break }
             }
             self.activeTasks.removeValue(forKey: bundle.id)
@@ -1247,9 +1297,8 @@ class DownloadManager: ObservableObject {
 
     /// Cancel a bundle download and every component's in-flight transfer.
     func cancelBundle(_ bundle: MediaBundle) {
+        // The parent owns its component transfer. Cleanup runs after its file handles close.
         activeTasks[bundle.id]?.cancel()
-        activeTasks.removeValue(forKey: bundle.id)
-        for comp in bundle.components { cancel(comp.repo) }
     }
 
     /// True when every component of the bundle is present + complete on disk.
@@ -1316,6 +1365,7 @@ class DownloadManager: ObservableObject {
     /// whole-folder wipe would delete them as collateral for cancelling a
     /// second download.
     func startGguf(repoId: String, quant: GgufQuant, onFinish: @escaping @MainActor () -> Void) {
+        downloadRequests[repoId] = .gguf(repoId, quant)
         activeTasks[repoId]?.cancel()
         // Scope cancellation to this quant up front; the task augments the list
         // with the MTP dependency once it's resolved from the repo tree.
@@ -1378,6 +1428,7 @@ class DownloadManager: ObservableObject {
     /// the generic whole-folder wipe would be aimed at the parent repo, which
     /// holds nothing, leaving the interrupted variant behind.
     func startMlxVariant(repoId: String, variant: MlxVariant, onFinish: @escaping @MainActor () -> Void) {
+        downloadRequests[repoId] = .variant(repoId, variant)
         activeTasks[repoId]?.cancel()
         let dest = MlxVariantScan.localRepoId(repoId: repoId, folder: variant.folder)
         activeVariantDest[repoId] = dest
@@ -1434,6 +1485,21 @@ class DownloadManager: ObservableObject {
     /// the branch here covers the no-live-task case (already finished, or cancel
     /// fired before start).
     func cancel(_ repoId: String) {
+        switch downloadRequests[repoId] {
+        case .bundle(let bundle):
+            cancelBundle(bundle)
+            return
+        case .gem(let gem, _):
+            cancelGem(gem)
+            return
+        case .packFile:
+            cancelPackFile(repoId: repoId)
+            return
+        case .update:
+            activeTasks[repoId]?.cancel()
+            return
+        default: break
+        }
         activeTasks[repoId]?.cancel()
         if activeTasks[repoId] == nil {
             downloads.removeValue(forKey: repoId)
@@ -1713,6 +1779,8 @@ class DownloadManager: ObservableObject {
     }
 
     private func presentFailureAlert(repoId: String, message: String) {
+        // Test-pinned downloads report their failure in state without blocking on modal UI.
+        guard pinnedRoot == nil else { return }
         let modelName = repoId.components(separatedBy: "/").last ?? repoId
         let alert = NSAlert()
         alert.messageText = L10n.format("Download Failed: %@", modelName)

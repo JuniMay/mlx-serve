@@ -26,17 +26,47 @@ final class ModelPaletteTests: XCTestCase {
 
     // MARK: - What it offers
 
-    /// Same filter as the composer's pill (`isChatPickable`): a drafter, a
-    /// media checkpoint or an embeddings encoder in this list is a row that
-    /// 400s the next message.
-    func testOnlyChatPickableModelsGetARow() {
+    func testEveryReadyModelWithAnInteractionGetsARow() {
         let rows = ModelPalette.rows(local: [
             local("mlx-community/gemma-4-e4b-it-4bit"),
             local("mlx-community/gemma-4-e4b-it-assistant-bf16", type: "gemma4", kind: .drafter),
-            local("ddalcu/LTX-2.5-MLX-Serve-8bit", type: "AudioVideo"),
+            local(VideoModelPreset.ltx23Q4.bundle.primaryRepo, type: "AudioVideo"),
             local("mlx-community/bge-small-en-v1.5", type: "bert"),
         ], lan: [])
-        XCTAssertEqual(rows.map(\.tag), ["/models/mlx-community/gemma-4-e4b-it-4bit"])
+        XCTAssertEqual(rows.map(\.tag), ["/models/mlx-community/gemma-4-e4b-it-4bit",
+                                          "/models/" + VideoModelPreset.ltx23Q4.bundle.primaryRepo])
+    }
+
+    func testMediaModelsAreSearchableByTheirInteraction() {
+        let rows = ModelPalette.rows(local: [
+            local(ImageModelPreset.flux2Klein4B_Q4.bundle.primaryRepo, type: "flux2-klein-4b"),
+            local(MusicModelPreset.acestepXLTurbo8bit.bundle.primaryRepo, type: "acestep"),
+            local(AudioModelPreset.qwen3TTS06B8bit.bundle.primaryRepo, type: "qwen3_tts"),
+            local(SoundModelPreset.stableAudio3SmallSFX.bundle.primaryRepo, type: "stable_audio3"),
+        ], lan: [])
+        XCTAssertEqual(ModelPalette.filtered(rows, query: "image").map(\.interaction), [.media(.image)])
+        XCTAssertEqual(ModelPalette.filtered(rows, query: "music").map(\.interaction), [.media(.music)])
+        XCTAssertEqual(ModelPalette.filtered(rows, query: "voice").map(\.interaction), [.media(.voice)])
+        XCTAssertEqual(ModelPalette.filtered(rows, query: "sound").map(\.interaction), [.media(.sound)])
+    }
+
+    func testUnresolvedCustomMediaDoesNotSelectADifferentModel() {
+        let models = [local("local/unknown-conversion", type: "AudioVideo")]
+        let rows = ModelPalette.rows(local: models, lan: [])
+        XCTAssertTrue(rows.isEmpty)
+        XCTAssertFalse(ModelPalette.hasNonChatInteraction(local: models))
+    }
+
+    func testVoiceModeOnlyModelDoesNotFallBackToAnotherGenerationModel() {
+        let models = [local(AudioModelPreset.kokoro82M.bundle.primaryRepo, type: "kokoro")]
+        let rows = ModelPalette.rows(local: models, lan: [])
+        XCTAssertTrue(rows.isEmpty)
+        XCTAssertFalse(ModelPalette.hasNonChatInteraction(local: models))
+    }
+
+    func testGenerationSetupIsAvailableForAReadyCatalogueModel() {
+        XCTAssertTrue(ModelPalette.hasNonChatInteraction(local: [
+            local(ImageModelPreset.flux2Klein4B_Q4.bundle.primaryRepo, type: "flux2-klein-4b")]))
     }
 
     /// Local groups in `LocalModelSource.allCases` order, network last — the
