@@ -95,58 +95,28 @@ struct ModelBrowserPane: View {
 
 // MARK: - Section bar
 
-/// Section navigation shares the window toolbar's glass layer.
-private struct ModelBrowserSectionBar: View {
+/// Native section navigation in the window toolbar.
+struct ModelBrowserSectionBar: View {
     @Binding var section: ModelBrowserSection
     let badges: ModelBrowserBadgeCounts
     let isDownloading: Bool
-    @Environment(\.layoutDirection) private var layoutDirection
-    @FocusState private var focusedSection: ModelBrowserSection?
 
     var body: some View {
-        GlassEffectContainer(spacing: AppLayout.compactSpacing) {
-            ViewThatFits(in: .horizontal) {
-                sectionPills.fixedSize(horizontal: true, vertical: false)
-                sectionMenu.fixedSize(horizontal: true, vertical: false)
-            }
-        }
-    }
-
-    private var sectionPills: some View {
-        HStack(spacing: 2) {
-            ForEach(ModelBrowserSection.allCases) { item in
-                Button {
-                    section = item
-                    focusedSection = item
-                } label: {
-                    HStack(spacing: AppLayout.labelSpacing) {
-                        Text(verbatim: title(for: item))
-                        if item == .downloads, isDownloading {
-                            downloadActivity
-                        }
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: AppLayout.compactSpacing) {
+                Picker("Models section", selection: $section) {
+                    ForEach(ModelBrowserSection.allCases) { item in
+                        Text(verbatim: title(for: item)).tag(item)
                     }
-                    .font(.app(.body))
-                    .foregroundStyle(section == item ? .primary : .secondary)
-                    .padding(.horizontal, 10)
-                    .frame(minHeight: 28)
-                    .background {
-                        if section == item {
-                            Capsule().fill(.primary.opacity(0.10))
-                        }
-                    }
-                    .contentShape(Capsule())
                 }
-                .buttonStyle(.plain)
-                .focused($focusedSection, equals: item)
-                .accessibilityAddTraits(section == item ? .isSelected : [])
+                .pickerStyle(.segmented)
+                .controlSize(.large)
+                .labelsHidden()
+                if isDownloading { downloadActivity }
             }
+            .fixedSize(horizontal: true, vertical: false)
+            sectionMenu.fixedSize(horizontal: true, vertical: false)
         }
-        .padding(3)
-        .glassEffect(.regular, in: .capsule)
-        .onKeyPress(.leftArrow) { moveSelection(movingRight: false) }
-        .onKeyPress(.rightArrow) { moveSelection(movingRight: true) }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Models section")
     }
 
     private var sectionMenu: some View {
@@ -177,15 +147,6 @@ private struct ModelBrowserSectionBar: View {
         let title = L10n.text(item.title)
         return badges.badge(for: item).map { "\(title) (\($0))" } ?? title
     }
-
-    private func moveSelection(movingRight: Bool) -> KeyPress.Result {
-        let destination = ModelBrowserSectionNavigation.destination(
-            from: focusedSection ?? section, movingRight: movingRight,
-            rightToLeft: layoutDirection == .rightToLeft)
-        section = destination
-        focusedSection = destination
-        return .handled
-    }
 }
 
 private struct ModelCatalogList<Content: View>: View {
@@ -202,6 +163,81 @@ private struct ModelCatalogList<Content: View>: View {
         .contentMargins(.horizontal, 0, for: .scrollContent)
         .scrollContentBackground(.hidden)
         .buttonStyle(.bordered)
+    }
+}
+
+struct ModelCatalogTable<Header: View, Content: View>: View {
+    var onColumnWidthChange: (CGFloat) -> Void = { _ in }
+    @ViewBuilder let header: Header
+    @ViewBuilder let content: (ModelCatalogColumnMeasurement) -> Content
+    @Environment(\.layoutDirection) private var layoutDirection
+    @State private var leftInset = ModelBrowserMetrics.rowPaddingH
+    @State private var rightInset = ModelBrowserMetrics.rowPaddingH
+
+    var body: some View {
+        GeometryReader { geometry in
+            VStack(spacing: 0) {
+                header
+                    .padding(.leading, layoutDirection == .rightToLeft ? rightInset : leftInset)
+                    .padding(.trailing, layoutDirection == .rightToLeft ? leftInset : rightInset)
+                    .padding(.vertical, 6)
+                    .background(.quaternary.opacity(0.3))
+                Divider()
+                ModelCatalogList {
+                    content(ModelCatalogColumnMeasurement { bounds in
+                        let table = geometry.frame(in: .global)
+                        leftInset = max(0, bounds.minX - table.minX)
+                        rightInset = max(0, table.maxX - bounds.maxX)
+                    })
+                }
+            }
+            .onChange(of: geometry.size.width - leftInset - rightInset,
+                      initial: true) { _, width in
+                onColumnWidthChange(max(0, width))
+            }
+        }
+    }
+}
+
+struct ModelCatalogColumnMeasurement: ViewModifier {
+    struct Bounds: Equatable {
+        let minX: CGFloat
+        let maxX: CGFloat
+    }
+
+    let report: (Bounds) -> Void
+    var enabled = true
+
+    func when(_ enabled: Bool) -> Self {
+        var measurement = self
+        measurement.enabled = enabled
+        return measurement
+    }
+
+    func body(content: Content) -> some View {
+        content.onGeometryChange(for: Bounds?.self) { geometry in
+            guard enabled else { return nil }
+            // Native List cells have a hosting boundary; compare window coordinates on both sides.
+            let frame = geometry.frame(in: .global)
+            return Bounds(minX: frame.minX, maxX: frame.maxX)
+        } action: { bounds in
+            if let bounds { report(bounds) }
+        }
+    }
+}
+
+struct LocalModelColumnHeader: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("Model")
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text("Size on Disk")
+                .frame(width: 90, alignment: .trailing)
+            Text("")
+                .frame(width: ModelBrowserMetrics.localActionWidth)
+        }
+        .font(.app(.callout).weight(.semibold))
+        .foregroundStyle(.secondary)
     }
 }
 
@@ -570,7 +606,7 @@ private struct DiscoverPane: View {
     @EnvironmentObject var searchService: HFSearchService
     @EnvironmentObject var downloads: DownloadManager
 
-    /// Measured pane width → column tier. 0 until the first layout pass,
+    /// Measured list width → column tier. 0 until the first layout pass,
     /// which `ModelBrowserMetrics.tier` treats as roomy.
     @State private var paneWidth: CGFloat = 0
 
@@ -616,22 +652,20 @@ private struct DiscoverPane: View {
 
             Divider()
 
-            ColumnHeaderRow(searchService: searchService, tier: tier)
-                .padding(.horizontal, ModelBrowserMetrics.rowPaddingH)
-                .padding(.vertical, 6)
-                .background(.quaternary.opacity(0.3))
-
-            Divider()
-
             let onDiskCount = searchService.models.filter { downloads.isReady($0.id) }.count
 
-            ModelCatalogList {
+            ModelCatalogTable(onColumnWidthChange: { width in
+                paneWidth = width + ModelBrowserMetrics.rowPaddingH * 2
+            }) {
+                ColumnHeaderRow(searchService: searchService, tier: tier)
+            } content: { columns in
                 ForEach(searchService.models) { model in
                     ModelBrowserRow(
                         model: model,
                         fitness: searchService.ramFitness(for: model),
                         tier: tier
                     )
+                    .modifier(columns.when(model.id == searchService.models.first?.id))
                 }
 
                 if searchService.isLoading {
@@ -678,15 +712,6 @@ private struct DiscoverPane: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
         }
-        // Track the pane's width for the column-tier decision — same
-        // pattern as ChatView's toolbar pill density.
-        .background(
-            GeometryReader { geo in
-                Color.clear
-                    .onAppear { paneWidth = geo.size.width }
-                    .onChange(of: geo.size.width) { _, w in paneWidth = w }
-            }
-        )
     }
 }
 
@@ -728,27 +753,14 @@ private struct MyModelsPane: View {
 
             Divider()
 
-            HStack(spacing: 8) {
-                Text("Model")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Text("Size on Disk")
-                    .frame(width: 90, alignment: .trailing)
-                Text("")
-                    .frame(width: ModelBrowserMetrics.localActionWidth)
-            }
-            .font(.app(.callout).weight(.semibold))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(.quaternary.opacity(0.3))
-
-            Divider()
-
-            ModelCatalogList {
+            ModelCatalogTable {
+                LocalModelColumnHeader()
+            } content: { columns in
                 ForEach(groups) { group in
                     Section(L10n.text(group.title)) {
                         ForEach(group.models) { model in
                             LocalModelRow(model: model)
+                                .modifier(columns.when(model.id == groups.first?.models.first?.id))
                         }
                     }
                 }

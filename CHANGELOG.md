@@ -57,7 +57,7 @@ Estimated from the measured per-step cost:
 
 ### Fixes
 - New, Models, Agents and Tasks form one sidebar group above session history; conversation title bars provide Rename, Move to Group and Delete.
-- Chat and media share a native glass input dock that expands in place; Models has toolbar section pills and consistent native lists.
+- Chat and media share a native glass input dock that expands in place; Models uses native Liquid Glass tabs and aligned lists.
 - Thinking and tool details expand within one card, with integrated controls and native scrolling for long thinking text.
 - Settings groups option captions with their controls, separates generation parameters with dividers, and keeps the Nearby Macs reset beside its discovery switch.
 - Turning Tools off also disables attached-folder search, including calls waiting for approval; Reset Tool Choices restores the configured defaults.

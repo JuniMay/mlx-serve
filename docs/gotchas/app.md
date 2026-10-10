@@ -2,6 +2,16 @@
 
 Full histories: live failures, measurements, diagnosis ladders, dead ends. The distilled RULES live in the root CLAUDE.md "Rules" section — when a rule changes, update the story here too. New gotchas in this domain: add the 1-3 line rule to root, the full story here.
 
+### Native list column measurements
+
+An external column header can shift by the sidebar width when a native List
+cell reports a frame across its hosting boundary. A named coordinate space
+does not reliably cross that boundary. `ModelCatalogTable` compares the table
+and first model row in window coordinates, then stores their relative gutters.
+It maps physical gutters to leading and trailing edges for right-to-left text.
+`ModelCatalogTableTests` checks native columns with both scrollbar styles and
+renders the production heading beside a sidebar whose width changes.
+
 ### writeFile body crammed into the `append` flag; missing-content error must not claim truncation (big-file write class)
 The FOURTH failure in the big-file-write class, and the one that actually bit a user (live gemma-4-12b, 2026-06-20, captured in `chat-history.json`). Turn 1 (`{"path","content"}`) wrote fine; then on "append to it" the model emitted `{"append":"true,\n<ENTIRE file body>","path":"jfk.txt"}` — **the whole body jammed into the `append` value, with NO `content` key** — five times in a row, each rejected, until the stuck-detector gave up. Two distinct bugs:
 - **The `append:"true"` string param invites conflation.** A mid-size model merges the flag and the body into one string (`"true,\n…text…"`) instead of closing `append` and opening `content`. Fix (`AgentEngine.normalizeWriteFileArgs`, called in `executeBuiltinTool` before validation + handler): when `content` is absent/blank AND `append` is a boolean keyword FOLLOWED by a separator and more text, peel the leading `true`/`false` (flag) and move the remainder to `content`. A clean `"true"` is left alone so a genuinely missing body still errors (don't fabricate an empty file). Also tightened the schema: `append` is described as "Flag ONLY … NEVER put file text here — the body ALWAYS goes in `content`".

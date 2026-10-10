@@ -11,13 +11,18 @@ change tools, delete messages, or create branches during layout checks.
    as the content. The card opens without an animated height change. Content
    scrolls inside a frame no taller than 240 points. Scrolling
    that frame must not move the conversation while more content remains in that
-   direction. Collapse and reopen it; the header's alignment must not shift.
+   direction. Collapse and reopen it; the header's position in the window must
+   not shift. Check while following the newest content and while reading history.
 3. Choose Enlarge. The same card grows within the conversation without opening
    a sheet or replacing its content. Its header retains Copy and a Reduce
    control. Check both ends and text selection. Copy returns the complete text,
    including content outside the viewport. Reduce restores the 240-point cap
    and leaves the disclosure expanded. Native scroll indicators appear while
    scrolling and follow the system's scroll-bar preference.
+   Also begin with the conversation at the top and a visible thinking header.
+   Scroll inside its reader, then choose Enlarge and Reduce. The header and
+   outer conversation offset must stay in place; the inner reading position
+   must remain unchanged.
 4. Repeat with tool arguments/results and a plan in an isolated fixture. Long
    output must remain available. Plan approval buttons stay outside scrolling.
    Use fixture callbacks to check that Enlarge and process Stop buttons invoke
@@ -39,7 +44,7 @@ change tools, delete messages, or create branches during layout checks.
    the original appearance and text size after fixture checks.
 
 `TranscriptDetailTypographyTests`, `TranscriptDisclosureTests`,
-`TranscriptDetailViewportTests`, `MarkdownPresentationTests`,
+`TranscriptDetailViewportTests`, `TranscriptReaderPositionTests`, `MarkdownPresentationTests`,
 `MarkdownBlockBoundaryTests` and `ChatColumnMetricsTests` cover the corresponding
 geometry, content and state rules without loading a model.
 

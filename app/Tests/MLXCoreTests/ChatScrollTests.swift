@@ -256,6 +256,18 @@ final class ChatScrollTests: XCTestCase {
         XCTAssertEqual(s.handle(.contentGeometry(offsetY: 5000, contentHeight: 9400)), .none)
     }
 
+    func testReaderResizeKeepsItsHeaderInsteadOfFollowingContentBelowIt() {
+        for pinned in [false, true] {
+            var state = pinned ? ChatScrollState() : unpinned()
+            _ = state.handle(.contentGeometry(offsetY: 200, contentHeight: 3_000))
+            XCTAssertEqual(state.handle(.readerWillResize), .toOffset(200))
+            XCTAssertFalse(state.isPinnedToBottom)
+            XCTAssertEqual(state.handle(.contentGeometry(offsetY: 200, contentHeight: 3_400)), .none)
+            XCTAssertEqual(state.handle(.readerWillResize), .toOffset(200))
+            XCTAssertEqual(state.handle(.contentGeometry(offsetY: 200, contentHeight: 3_000)), .none)
+        }
+    }
+
     /// Reading history with following switched off.
     private func unpinned() -> ChatScrollState {
         var s = ChatScrollState()

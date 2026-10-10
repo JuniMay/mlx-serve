@@ -43,13 +43,19 @@ tests cover model changes without inference or disk output.
 1. Open Models and visit Recommended, Discover, My Models, Downloads and Media.
    The window title must remain Models. The section control must identify the
    selected section once, without repeating it as a second page title.
-2. Check that the five section pills appear in the window toolbar with a Liquid
-   Glass background. The Models title stays visible. The selected pill uses a
-   clear neutral highlight. Content begins directly below the toolbar, without
-   a second section-control row. Switching sections preserves the sidebar.
+2. Check that the native segmented picker appears in the window toolbar. Hold
+   its selected segment: the Liquid Glass lens must lift and enlarge. Drag across
+   the other segments, then release. The lens must follow the pointer and settle
+   on the released segment, with exactly one section selected. Repeat in both
+   directions. The Models title stays visible and the sidebar stays in place.
+   Content begins directly below the toolbar.
 3. Use the keyboard to choose sections. Narrow the window and verify that all
    five sections remain reachable through the compact menu without clipping.
    Download counts and activity must remain visible without changing selection.
+
+`ModelBrowserSectionControlTests` checks native single-selection tracking,
+section binding updates, and badge labels. The held lens and drag appearance
+require the live-window check above.
 
 ## Model lists
 
@@ -62,8 +68,11 @@ Glass belongs to the section controls; native rows present model content.
    row insets, separators and section headings. Media groups use list sections.
    Compare the first and last rows and scroll to the bottom of each list.
 2. Keep Discover and My Models column headings aligned with their rows at wide
-   and narrow window sizes. Search/filter controls and summary footers stay in
-   their own fixed rows. Model names yield space before action columns clip.
+   and narrow window sizes, with overlay and always-visible scrollbars. The
+   first column's leading edge and every fixed column's edges must match the
+   rows, including lists grouped by source. Search/filter controls and summary
+   footers stay in their own fixed rows. Model names yield space before action
+   columns clip.
 3. Open and dismiss a model card, a quant menu and a model-settings sheet.
    Check download, Use, settings, lock, deletion and Reveal affordances without
    activating downloads, model loads or deletions. A row button must invoke only
@@ -71,6 +80,16 @@ Glass belongs to the section controls; native rows present model content.
 4. In a fixture profile, check empty, loading, failed and partially downloaded
    lists. Retry and Load More must remain reachable. Check that an active
    download keeps its progress and Cancel action when changing sections.
+
+`ModelCatalogTableTests` measures the header and native list columns at the
+minimum and wide detail widths, with grouped and ungrouped rows in both layout
+directions beside a sidebar. It also renders the production My Models heading
+and compares its text edge with the row after the parent moves at a fixed table
+width. Run it in
+separate test processes with `MODEL_CATALOG_SCROLLER_STYLE=overlay` and
+`MODEL_CATALOG_SCROLLER_STYLE=legacy` to cover both native scrollbar styles.
+The fixture sets a volatile preference for its process and preserves saved
+user preferences. The default full-suite run uses the current scrollbar style.
 
 ## My Models action alignment
 

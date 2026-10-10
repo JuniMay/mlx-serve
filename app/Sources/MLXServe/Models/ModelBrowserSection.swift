@@ -1,6 +1,6 @@
 import Foundation
 
-/// The Model Browser's sidebar destinations.
+/// Sections in the Models browser.
 enum ModelBrowserSection: String, CaseIterable, Identifiable, Hashable {
     /// Every curated Gemma 4 / Qwen 3.5-3.6 checkpoint, grouped by family and
     /// explained in plain English — the friendly front door for someone who
@@ -56,7 +56,7 @@ enum ModelBrowserSection: String, CaseIterable, Identifiable, Hashable {
     }
 }
 
-/// Sidebar badge counts. A zero count shows no badge at all rather than a "0".
+/// Counts for the Models section picker. Zero counts have no badge.
 struct ModelBrowserBadgeCounts: Equatable {
     let myModels: Int
     /// Downloading *or* failed — both want the user's attention, and both are
@@ -65,10 +65,7 @@ struct ModelBrowserBadgeCounts: Equatable {
     /// Media (image/audio/video/music) bundles fully on disk.
     let mediaReady: Int
 
-    /// The live counts, from the two objects that hold them. ONE place, because
-    /// the sidebar renders the badges and the panes render what they count — a
-    /// second copy of this arithmetic is how a badge starts disagreeing with the
-    /// list it sits next to.
+    /// The section picker and its lists use the same count definitions.
     static func live(localModelCount: Int,
                      activeDownloadCount: Int,
                      mediaReadyCount: Int) -> ModelBrowserBadgeCounts {

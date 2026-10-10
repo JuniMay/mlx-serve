@@ -39,9 +39,11 @@ enum ChatScrollEvent: Equatable {
     /// `geometryChanged`; only a resize in progress reads it.
     case contentGeometry(offsetY: CGFloat, contentHeight: CGFloat)
     /// Content the reader is looking at the BOTTOM edge of is about to change
-    /// height: a long turn folding, a thinking block closing, an edit field
-    /// replacing the bubble, earlier rows appearing above the first one.
+    /// height: a long turn folding, an edit field replacing the bubble,
+    /// earlier rows appearing above the first one.
     case rowWillResize
+    /// A reader changes height below its header; preserve the top offset and stop following the tail.
+    case readerWillResize
     /// …and has finished changing.
     case rowDidResize
 }
@@ -140,6 +142,11 @@ struct ChatScrollState: Equatable {
             guard !isPinnedToBottom else { return .none }
             resize = Resize(offsetY: offsetY, contentHeight: contentHeight)
             return .none
+
+        case .readerWillResize:
+            isPinnedToBottom = false
+            resize = nil
+            return .toOffset(max(0, offsetY))
 
         case .rowDidResize:
             resize = nil

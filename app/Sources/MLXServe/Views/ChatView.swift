@@ -2314,13 +2314,15 @@ struct ChatDetailView: View {
                                         : nil,
                                     onWillResize: { applyScroll(.rowWillResize) },
                                     onDidResize: { applyScroll(.rowDidResize) },
+                                    onReaderResize: { applyScroll(.readerWillResize) },
                                     foldStore: foldStore)
                                 .equatable()
                                 .id(m.id)
                             case .toolCall(let call, let results, let calls, let owned):
                                 ToolCallRow(call: call, results: results, calls: calls,
                                             ownedHandles: owned,
-                                            sessionId: sessionId).id(call.id)
+                                            sessionId: sessionId,
+                                            onReaderResize: { applyScroll(.readerWillResize) }).id(call.id)
                             }
                         }
                         // A property of the transcript's END, not of a row: the
@@ -4075,6 +4077,7 @@ struct MessageBubble: View {
     /// hold the reader's place through it. nil where there is no scroll view.
     var onWillResize: (() -> Void)?
     var onDidResize: (() -> Void)?
+    var onReaderResize: (() -> Void)?
     /// Survives a transcript rebuild; see `FoldStore`.
     var foldStore: FoldStore?
     /// Hover over the whole row reveals the user turn's action row; the
@@ -4119,14 +4122,9 @@ struct MessageBubble: View {
             TranscriptDetailPanel(isExpanded: thinkingExpanded) {
                 HStack(spacing: AppLayout.compactSpacing) {
                     TranscriptDisclosureButton(isExpanded: thinkingExpanded) {
-                        if thinkingExpanded {
-                            resize(animated: false) {
-                                thinkingExpanded = false
-                                thinkingEnlarged = false
-                            }
-                        } else {
-                            thinkingExpanded = true
-                        }
+                        onReaderResize?()
+                        thinkingExpanded.toggle()
+                        if !thinkingExpanded { thinkingEnlarged = false }
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "brain")
@@ -4138,7 +4136,8 @@ struct MessageBubble: View {
                         TranscriptDetailActions(textToCopy: reasoning, isEnlarged: Binding(
                             get: { thinkingEnlarged },
                             set: { value in
-                                resize(animated: false) { thinkingEnlarged = value }
+                                onReaderResize?()
+                                thinkingEnlarged = value
                             }))
                     }
                 }
@@ -4869,6 +4868,7 @@ private struct ToolCallRow: View {
     /// A handle is only an identity inside one chat
     /// (`ProcessRegistry.isAlive(handle:sessionId:)`).
     var sessionId: UUID?
+    var onReaderResize: (() -> Void)?
     @State private var expanded = false
     @State private var isEnlarged = false
     @EnvironmentObject var processRegistry: ProcessRegistry
@@ -4957,6 +4957,7 @@ private struct ToolCallRow: View {
     @ViewBuilder private var headerRow: some View {
         HStack(spacing: AppLayout.compactSpacing) {
             TranscriptDisclosureButton(isExpanded: expanded) {
+                onReaderResize?()
                 expanded.toggle()
                 if !expanded { isEnlarged = false }
             } label: {
@@ -4969,7 +4970,12 @@ private struct ToolCallRow: View {
                 RunningIndicator()
             }
             if expanded {
-                TranscriptDetailActions(textToCopy: readerText, isEnlarged: $isEnlarged)
+                TranscriptDetailActions(textToCopy: readerText, isEnlarged: Binding(
+                    get: { isEnlarged },
+                    set: { value in
+                        onReaderResize?()
+                        isEnlarged = value
+                    }))
             }
         }
     }

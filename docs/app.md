@@ -56,7 +56,7 @@ the same generation service shows that it is busy and cannot stop its work.
 New, Models, Agents and Tasks form one sidebar group above the session sections.
 They provide management views in the main pane while the sidebar stays in place.
 App-wide server, engine, tool and appearance preferences
-stay in **Settings**. Models keeps one title, with glass section pills in the window toolbar and consistent native lists across its sections. Agents and Tasks use opaque secondary lists. Custom session groups use plain headings with collapse controls; their context menus provide New Chat in Group, Rename and Delete.
+stay in **Settings**. Models keeps one title, with a native Liquid Glass segmented picker in the window toolbar and consistent native lists across its sections. Agents and Tasks use opaque secondary lists. Custom session groups use plain headings with collapse controls; their context menus provide New Chat in Group, Rename and Delete.
 
 Open terminal sessions from the app's menu-bar **Code** control. Terminal sessions
 appear alongside conversations and remain running when you switch workspaces.
@@ -84,7 +84,9 @@ Thinking and tool headers use quiet gray text that darkens on hover or press.
 A chevron beside the label expands details within one card. The card's header
 holds Copy and Enlarge controls. Details scroll within a 240-point height limit;
 Enlarge gives the same card more room within the window, and Reduce restores
-its compact height. Detail text follows the conversation's **Text Size** setting.
+its compact height. Opening and resizing a card keep its header in place.
+Resizing thinking also preserves the position within its text.
+Detail text follows the conversation's **Text Size** setting.
 Code and tool identifiers can retain a monospaced face. Thinking uses native
 selectable text with viewport layout. Scrollbars follow the system preference.
 Process Stop and plan approval controls keep their own actions.

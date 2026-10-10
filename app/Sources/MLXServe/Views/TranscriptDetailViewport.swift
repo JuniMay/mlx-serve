@@ -9,7 +9,7 @@ enum TranscriptDetailSizing {
     }
 
     @MainActor static func maximumHeight(enlarged: Bool) -> CGFloat {
-        maximumHeight(enlarged: enlarged, windowHeight: NSApp.keyWindow?.contentLayoutRect.height ?? 800)
+        maximumHeight(enlarged: enlarged, windowHeight: NSApp?.keyWindow?.contentLayoutRect.height ?? 800)
     }
 }
 

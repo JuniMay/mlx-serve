@@ -8,6 +8,13 @@ struct TranscriptDetailText: NSViewRepresentable {
     var followsTail = false
     var monospaced = false
 
+    final class Coordinator {
+        var maximumHeight: CGFloat
+        init(maximumHeight: CGFloat) { self.maximumHeight = maximumHeight }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(maximumHeight: maximumHeight) }
+
     private var font: NSFont {
         monospaced ? .monospacedSystemFont(ofSize: ChatMetrics.transcriptFontSize, weight: .regular)
                    : .systemFont(ofSize: ChatMetrics.transcriptFontSize)
@@ -53,6 +60,16 @@ struct TranscriptDetailText: NSViewRepresentable {
         let origin = scroll.contentView.bounds.origin
         let selection = view.selectedRange()
         let styleChanged = view.font != font
+        if context.coordinator.maximumHeight != maximumHeight {
+            context.coordinator.maximumHeight = maximumHeight
+            // TextKit may adjust the clip origin as its viewport grows; retain the reader's place.
+            DispatchQueue.main.async { [weak scroll] in
+                guard let scroll else { return }
+                scroll.layoutSubtreeIfNeeded()
+                scroll.contentView.scroll(to: origin)
+                scroll.reflectScrolledClipView(scroll.contentView)
+            }
+        }
 
         if changed {
             if !view.string.isEmpty, text.hasPrefix(view.string) {
