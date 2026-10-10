@@ -226,7 +226,7 @@ final class SidebarDeleteConfirmTests: XCTestCase {
     func testOtherWorkspacesCannotDeleteHiddenConversations() {
         let a = UUID(), b = UUID()
         let workspaces: [ChatWorkspace] = [
-            .models(.myModels), .agents, .tasks, .terminal(UUID()), .create(.image), .settings
+            .models(.myModels), .agents, .tasks, .terminal(UUID()), .settings
         ]
         for workspace in workspaces {
             XCTAssertNil(SidebarDeleteConfirm.target(

@@ -109,6 +109,7 @@ extension AppState {
     /// for the conversation already in progress.
     @discardableResult
     func startChat(withAgent agentId: UUID?) -> UUID {
+        interactionMedia = nil
         let id = newChatSession(agentId: agentId)
         // Model, workspace and voice all live OUTSIDE the turn — a session that
         // only carried the id would run the persona against whatever model

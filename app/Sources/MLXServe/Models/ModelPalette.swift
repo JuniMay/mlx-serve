@@ -1,6 +1,6 @@
 import Foundation
 
-/// One model and its input/output workspace in the global model chooser.
+/// One model and its capabilities in the shared model chooser.
 struct ModelPaletteRow: Identifiable, Equatable {
     let tag: String
     /// The readable name (`ModelDisplayName`), same as the pill shows.
@@ -17,7 +17,7 @@ struct ModelPaletteRow: Identifiable, Equatable {
     var id: String { tag }
 }
 
-/// Searchable local interaction models and remote chat models.
+/// Searchable local and remote interaction models.
 /// Custom media entries require an available preset so selection names the exact model.
 enum ModelPalette {
 
@@ -39,6 +39,7 @@ enum ModelPalette {
                      mediaModels: [ModelInfo] = []) -> [ModelPaletteRow] {
         let pickable = local.filter { model in
             guard let route = ModelInteractionRoute.resolve(model) else { return false }
+            guard route != .decision else { return false }
             if case .media(let modality) = route {
                 return ModelBrowserUse.mediaPresetID(modality: modality, name: model.name,
                                                      path: model.path, models: mediaModels) != nil
@@ -56,8 +57,9 @@ enum ModelPalette {
                                needsEngine: dupNames.contains(model.displayLabel)))
             }
         }
-        for peer in lan where peer.lanAdvertises("chat") {
-            out.append(row(forLan: peer))
+        for peer in lan {
+            guard let interaction = ModelInteractionRoute.resolve(peer) else { continue }
+            out.append(row(forLan: peer, interaction: interaction))
         }
         if appleAvailable { out.append(appleRow) }
         return out
@@ -105,17 +107,18 @@ enum ModelPalette {
                         searchText: "apple intelligence on-device foundation models")
     }
 
-    private static func row(forLan peer: ModelInfo) -> ModelPaletteRow {
+    private static func row(forLan peer: ModelInfo, interaction: ModelInteractionRoute) -> ModelPaletteRow {
         let title = ModelDisplayName.pretty(peer.name)
         let host = peer.lanPeer ?? ""
-        let detail = peer.provider != nil ? "Via \(host)" : host.isEmpty ? "On your network" : "On \(host)"
+        let location = peer.provider != nil ? "Via \(host)" : host.isEmpty ? "On your network" : "On \(host)"
+        let detail = interaction == .chat ? location : interaction.title + " · " + location
         return ModelPaletteRow(
             tag: ChatModelSelection.tag(localPath: "", lanChatModelId: peer.name),
             title: title,
             detail: detail,
             section: remoteSection(for: peer),
-            searchText: [title, peer.name, host]
-                .joined(separator: " ").lowercased())
+            searchText: [title, peer.name, host, detail]
+                .joined(separator: " ").lowercased(), interaction: interaction)
     }
 
     // MARK: - Filtering

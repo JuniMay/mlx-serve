@@ -884,3 +884,19 @@ The model list inherited the shorter thinking page's height and clipped rows bec
 ## Settings control alignment
 
 Trailing help buttons shifted control columns between rows. Centered inner picker frames placed short menus away from the trailing edge, and exact segmented-control widths could underreport the bezel width. Help belongs beside the title; native labeled content aligns controls, picker frames align to that edge, and segmented controls report their ideal width. `app/Tests/SettingsWindowChecks.md` covers mixed controls, wrapped labels and footer corner spacing.
+
+## Model changes preserve the interaction
+
+Selecting a video model replaced the interaction page and limited its picker to video models.
+The page switch also removed the original editor and separated generation output from session history.
+`ChatDetailView` now keeps one editor mounted while capability controls change beneath it.
+The shared picker always offers compatible chat and media models.
+`MediaInteractionHistory` binds each direct request to its originating session and retains progress and output references when the selected model changes.
+Guards: `InteractionSelectionTests` checks routing and return to chat; hosted `InteractionComposerLifetimeTests` checks editor identity, draft and layout; `MediaInteractionHistoryTests` checks result ownership and persistence.
+
+## Media options popover width
+
+Quality segments exceeded the options popover's width and pushed nearby fields outside its edges.
+A fixed outer frame did not constrain the content's minimum width or reserve the scrollbar.
+`InteractionOptionsPopover` bounds the inner column and reserves native scrollbar space.
+Image/video quality and music mode use menus. Hosted `InteractionComposerLifetimeTests` checks each media capability's native controls against the popover bounds.

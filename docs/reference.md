@@ -86,34 +86,44 @@ Settings ▸ Tools & MCP owns `ChatToolDefaults`: Tools, MCP, and per-tool switc
 `AppLayout` defines page insets, section/row spacing and shared content corners.
 Native lists, group boxes and controls use their platform geometry. Glass is
 reserved for navigation and floating controls; reading content uses semantic
-backgrounds. Chat and media input docks share `floatingInputSurface()` for their
+backgrounds. The interaction dock uses `floatingInputSurface()` for its
 insets, background, border, continuous corners and shadow. The sidebar places
 New above saved sessions and groups Models, Agents and Tasks under Manage.
 
-`GenerationWorkspace` gives Image, Video, Voice, Music, Sound and 3D a result
-canvas above a bounded input dock. Both share a centered column capped at 1,000
-points. Model and reference controls live in measured, height-capped popovers.
-The toolbar opens generation parameters in a native trailing inspector, closed
-initially. The primary action and missing-input/model notices stay in the dock.
-Empty canvases show a muted symbol and instruction. Chat and media share
-`ComposerControlsRow`, `ComposerActionButton`, the input surface and
-`GrowingTextEditor`. Media editors grow within a line cap and scroll thereafter;
-their Return key inserts a newline while Command-Return invokes Generate.
-The editor preserves reference selections and reflows when its width changes. Each modality
-retains its capability gates, request builders, progress,
-output handling and saved defaults. Recording Stop remains visible when the
-reference popover closes. Hosted `GenerationWorkspaceTests` cover aligned canvas
-and dock edges at narrow and wide sizes, control visibility, and long-input
-growth and shrinkage.
+`ChatDetailView` owns the transcript and input dock for chat, image, video, voice,
+music, sound and 3D models. Model changes preserve that view and its prompt.
+The selected capability supplies attachments, parameter controls and submission
+behavior. Model, reference and parameter controls use bounded popovers. The
+shared `GrowingTextEditor` grows within a line cap, scrolls thereafter and
+reflows when its width changes. For media requests, Return inserts a newline
+and Command-Return invokes Generate. Each modality retains its capability
+gates, request builders, generation service and saved defaults.
 
-`ModelInteractionRoute` maps available local models to chat, a media modality,
-or the decision interface. The global `ModelPalette` searches their names and
-capabilities. Media picks use `AppState.selectMediaModel`, persist the selected
-preset and publish `MediaModelSelectionRequest` for an already-mounted workspace.
-They do not enter the chat loader or start generation. The conversation's
-model/thinking picker uses the same capability routes. Remote media selection stays in
-each media model picker. Unresolved custom media presets remain in the model
-browser until discovery can identify their controls.
+`MediaInteractionHistory` observes the six app-owned media services. Submission
+reserves a modality for its originating session and returns a token. A pending
+reservation shows preparation progress and prevents another session from taking
+ownership. Capability controls call the token's `begin(actualPrompt)` immediately
+before `generate`, including after memory confirmation or an adapter download.
+Discarding or cancelling a reservation invalidates late callbacks. The prompt is
+appended when the service starts running; a dismissed confirmation adds no turn.
+Progress stays tied to its session after model or conversation changes. Composer
+actions use that ownership to expose Stop only in the originating conversation.
+Completion stores a `ChatMediaRef` in the existing chat history; errors and
+cancellation become assistant notices. Progress updates do not write history to
+disk. Generation services retain their current tasks and request paths.
+`MediaInteractionHistoryTests` covers pending ownership, finalized prompts,
+delayed callbacks, output persistence, cancellation and errors without inference.
+
+`ModelInteractionRoute` classifies local models by their supported interaction.
+The shared `ModelPalette` searches chat and media model names and capabilities.
+Decision models open their structured interface explicitly from the model browser.
+Media picks use `AppState.selectMediaModel`, persist the selected
+preset and publish `MediaModelSelectionRequest` for the capability controls.
+They keep the conversation page mounted and do not enter the chat loader or
+start generation. The dock's model/thinking picker uses the same capability
+routes and retains access to chat models while a media model is selected.
+Unresolved custom media presets remain in the model browser until discovery can
+identify their controls.
 
 `ChatWindowPresentation` resolves conversation titles and completed branch
 boundaries. The main window uses a unified native toolbar. `chatColumn(width:)`

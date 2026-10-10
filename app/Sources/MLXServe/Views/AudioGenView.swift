@@ -2,49 +2,10 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
-/// Audio workspaces keep their model-specific inputs and share one compact selector.
-struct AudioGenView: View {
-    enum Tab: String, CaseIterable {
-        case voice = "Voice"
-        case music = "Music"
-        case sound = "Sound Effects"
-    }
-
-    /// Keep the selected audio family when the workspace closes or the app restarts.
-    /// Localize labels without changing their persisted raw values.
-    @AppStorage("audioGenTab") private var tab: Tab = .voice
-
-    var body: some View {
-        Self.workspace(selection: $tab) {
-            switch tab {
-            case .voice: VoiceGenView()
-            case .music: MusicGenView()
-            case .sound: SoundGenView()
-            }
-        }
-    }
-
-    static func workspace<Content: View>(selection: Binding<Tab>, @ViewBuilder content: () -> Content) -> some View {
-        content()
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Menu {
-                        Picker("Audio type", selection: selection) {
-                            ForEach(Tab.allCases, id: \.self) { tab in
-                                Text(L10n.text(tab.rawValue)).tag(tab)
-                            }
-                        }
-                    } label: {
-                        Text(L10n.text(selection.wrappedValue.rawValue))
-                    }
-                    .labelStyle(.titleOnly)
-                    .fixedSize()
-                    .accessibilityLabel("Audio type")
-                    .accessibilityValue(L10n.text(selection.wrappedValue.rawValue))
-                    .help("Audio type")
-                }
-            }
-    }
+enum AudioInteractionKind: String, CaseIterable {
+    case voice = "Voice"
+    case music = "Music"
+    case sound = "Sound Effects"
 }
 
 /// The style prompt a track was made from, read back out of the `<track>.txt`
@@ -147,16 +108,19 @@ enum VoiceGenInputs {
 }
 
 /// Speech uses a text input, an optional reference voice, and an output player.
-struct VoiceGenView: View {
+struct VoiceInteractionControls: View {
     @EnvironmentObject var service: AudioGenService
     @EnvironmentObject var server: ServerManager
-    @Environment(\.openWindow) private var openWindow
     @EnvironmentObject var downloads: DownloadManager
     @EnvironmentObject var appState: AppState
 
     @StateObject private var recorder = AudioRecorder()
 
-    @State private var text: String = ""
+    @Binding var text: String
+
+    init(prompt: Binding<String>) {
+        _text = prompt
+    }
     @State private var model: AudioModelPreset = .qwen3TTS06B8bit
     /// Selected network model's routing id (`<model>@<peer>`); nil = local.
     @State private var lanModel: String? = nil
@@ -179,18 +143,23 @@ struct VoiceGenView: View {
     @State private var showRAMWarning: Bool = false
     @State private var ramWarningMessage: String = ""
     @State private var pendingRequest: AudioGenRequest? = nil
+    @State private var pendingSubmission: MediaInteractionSubmission? = nil
     // The app-wide singleton, not a per-view instance — see the matching note
     // in MusicGenView: a private player left playing when this view unmounts
     // on tab navigation is a leaked NSSound nothing can stop.
     @ObservedObject private var clipPlayer = AudioClipPlayer.shared
     /// Keep the model resident after generating (default off → unload).
     @State private var keepResident: Bool = false
-    /// Hydration guard — see ImageGenView for the full rationale.
+    /// Suppresses persistence while saved parameters are restored.
     @State private var hydrating: Bool = false
     @State private var didHydrate: Bool = false
 
     var body: some View {
         readyView
+        .onChange(of: showRAMWarning) { _, showing in
+            if !showing { discardPendingSubmission() }
+        }
+        .onDisappear { discardPendingSubmission() }
         .onAppear {
             if !didHydrate {
                 hydrating = true
@@ -228,13 +197,14 @@ struct VoiceGenView: View {
     }
 
     private var readyView: some View {
-        GenerationWorkspace(
-            title: "Voice", modelName: lanModel ?? model.name,
+        MediaInteractionControls(
+            placeholder: "Enter the words you want to hear…", notice: dictationError ?? generationBlockReason,
             hasAttachments: VoiceGenInputs.showsReference(model),
             attachmentCount: VoiceGenInputs.showsReference(model) && refAudioURL != nil ? 1 : 0,
-            notice: generationBlockReason,
-            prompt: {
-                textSection
+            isRunning: service.isRunning, canSubmit: generationBlockReason == nil,
+            submit: tryGenerate,
+            attachments: {
+                if VoiceGenInputs.showsReference(model) { referenceSection }
                 if recorder.isRecording {
                     HStack {
                         Label("Recording reference voice…", systemImage: "microphone.fill")
@@ -244,29 +214,24 @@ struct VoiceGenView: View {
                             .buttonStyle(.bordered)
                     }
                 }
-            }, model: {
-                modelSection
-            }, attachments: {
-                if VoiceGenInputs.showsReference(model) { referenceSection }
             }, parameters: {
+                modelDownload
                 keepResidentToggle
                 parameterControls
-            }, actions: {
-                actionRow
-            }, result: {
-                previewArea
                 AudioHistoryShelf(
                     title: "History", paths: service.recent,
                     playingPath: clipPlayer.playingPath,
                     onPlay: { play($0) }, onStop: { stopPlayback() })
                 outputFolderLink
-            })
+            }, promptActions: { dictationButton })
         .alert("Model exceeds your Mac's RAM", isPresented: $showRAMWarning) {
-            Button(role: .cancel) { pendingRequest = nil } label: { Text("Cancel")
+            Button(role: .cancel) { discardPendingSubmission() } label: { Text("Cancel")
                 .font(.app(.body)) }
             Button(role: .destructive) {
-                if let req = pendingRequest { service.generate(req, server: server) }
+                guard let req = pendingRequest, let submission = pendingSubmission else { return }
                 pendingRequest = nil
+                pendingSubmission = nil
+                startGeneration(req, submission: submission)
             } label: { Text("Generate Anyway")
                 .font(.app(.body)) }
         } message: {
@@ -275,22 +240,6 @@ struct VoiceGenView: View {
     }
 
     // MARK: - Sections
-
-    private var textSection: some View {
-        VStack(alignment: .leading, spacing: AppLayout.labelSpacing) {
-            GenerationSectionHeader(title: "Text to speak") {
-                dictationButton
-            }
-            ComposerPromptEditor(text: $text, placeholder: "Enter the words you want to hear…",
-                                 isRunning: service.isRunning,
-                                 canSubmit: generationBlockReason == nil,
-                                 onSubmit: tryGenerate, onCancel: service.cancel)
-                .accessibilityLabel("Text to speak")
-            if let err = dictationError {
-                Text(err).font(.app(.caption2)).foregroundStyle(.orange)
-            }
-        }
-    }
 
     // MARK: - Dictation
 
@@ -352,11 +301,10 @@ struct VoiceGenView: View {
         dictating = false
     }
 
-    private var modelSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            modelChooser
+    private var modelDownload: some View {
+        Group {
             if lanModel == nil && !downloads.bundleReady(model.bundle) {
-                BundleDownloadBar(bundle: model.bundle, showsStartButton: false)
+                BundleDownloadBar(bundle: model.bundle)
             }
         }
     }
@@ -368,24 +316,6 @@ struct VoiceGenView: View {
         }
         .font(.app(.body))
         .help("On: the model stays resident so the next generation is instant. Off (default): it's unloaded to free GPU memory.")
-    }
-
-    private var modelChooser: some View {
-        MediaModelChooser.pane(
-            all: AudioModelPreset.all,
-            onThisMac: CustomMediaModels.audioPresets(from: server.allModels),
-            // "speech", not "audio": see ModelInfo.lanAdvertises — a peer's
-            // music model advertises "audio" too.
-            capability: "speech",
-            selected: $model, lanModel: $lanModel,
-            capabilityOf: { $0.capabilityLabel },
-            resolveCustom: { [models = server.allModels] in
-                CustomMediaModels.audioPreset(for: $0, from: models)
-            },
-            bundleOf: { $0.bundle },
-            downloads: downloads,
-            onDownloadFinished: { appState.refreshModels() },
-            persist: persist)
     }
 
     private var referenceSection: some View {
@@ -498,98 +428,14 @@ struct VoiceGenView: View {
         return text.isBlank ? "Enter the words you want to hear." : nil
     }
 
-    private var actionRow: some View {
-        HStack {
-            if service.isRunning {
-                ComposerActionButton(isRunning: true, label: "Cancel") { service.cancel() }
-            } else {
-                ComposerActionButton(isRunning: false, label: "Generate") { tryGenerate() }
-                .keyboardShortcut(.return, modifiers: [.command])
-                .disabled(generationBlockReason != nil)
-            }
-        }
-    }
-
-    private var previewArea: some View {
-        Group {
-            switch service.phase {
-            case .idle:
-                VStack(spacing: AppLayout.rowSpacing) {
-                    Image(systemName: "waveform").font(.app(.title2))
-                    Text("Enter the words you want to hear.").font(.app(.body))
-                }
-                .foregroundStyle(.secondary)
-            case .running(let step, let total, let message):
-                VStack(spacing: AppLayout.rowSpacing) {
-                    // Audio length is unknown until the model stops (total==0)
-                    // → indeterminate bar; encode/decode stages are determinate.
-                    if total == 0 {
-                        ProgressView().frame(maxWidth: 240)
-                    } else {
-                        ProgressView(value: Double(step), total: max(1, Double(total)))
-                            .progressViewStyle(.linear).frame(maxWidth: 240)
-                    }
-                    Text(message).font(.app(.footnote)).foregroundStyle(.secondary)
-                }
-            case .completed(let path):
-                completedPreview(path: path)
-            case .failed(let msg):
-                ContentUnavailableView {
-                    Label("Failed", systemImage: "exclamationmark.triangle").font(.app(.body))
-                } description: {
-                    Text(msg)
-                } actions: {
-                    Button { showLogWindow() } label: { Text("Show log")
-                        .font(.app(.body)) }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private func completedPreview(path: String) -> some View {
-        // One control, two states: pausing left the shelf lit under a clip
-        // that had stopped making sound, so there is no pause any more.
-        let playing = clipPlayer.playingPath == path
-        return VStack(spacing: AppLayout.rowSpacing) {
-            Image(systemName: "waveform.circle.fill")
-                .font(.system(size: 64)).foregroundStyle(.tint)
-                .symbolEffect(.variableColor.iterative.dimInactiveLayers.reversing,
-                              options: .repeat(.continuous), isActive: playing)
-            Button {
-                playing ? clipPlayer.stop() : clipPlayer.play(path)
-            } label: {
-                Label(playing ? "Stop" : "Play", systemImage: playing ? "stop.fill" : "play.fill").font(.app(.body))
-            }
-            .buttonStyle(.bordered)
-            // The name and the way to reach the file belong together, centred
-            // under the clip they describe.
-            HStack(spacing: AppLayout.compactSpacing) {
-                Text(URL(fileURLWithPath: path).lastPathComponent)
-                    .font(.app(.caption)).foregroundStyle(.secondary)
-                    .lineLimit(1).truncationMode(.middle)
-                Button {
-                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
-                } label: { Image(systemName: "folder") }
-                .buttonStyle(.borderless).help("Reveal in Finder")
-                .accessibilityLabel("Reveal in Finder")
-            }
-        }
-        .padding(AppLayout.contentInset)
-    }
-
     private var outputFolderLink: some View {
         Button {
-            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: MediaStorage.audiosRoot)])
+            NSWorkspace.shared.activateFileViewerSelecting(
+                [URL(fileURLWithPath: MediaStorage.audiosRoot)])
         } label: {
-            Label("Open output folder in Finder", systemImage: "folder").font(.app(.caption))
+            Label("Open output folder in Finder", systemImage: "folder")
         }
         .buttonStyle(.borderless)
-        .foregroundStyle(.secondary)
-        .labelStyle(.iconOnly)
-        .accessibilityLabel("Open output folder in Finder")
-        .help("Open output folder in Finder")
-        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
     // MARK: - Reference actions
@@ -662,7 +508,6 @@ struct VoiceGenView: View {
         speed = s.speed
         temperature = s.temperature
         keepResident = s.keepResident
-        text = s.text
         refText = s.refText
         // The clip is a temp transcode; only restore it while it still exists.
         refAudioURL = s.refAudioPath.flatMap { FileManager.default.fileExists(atPath: $0) ? URL(fileURLWithPath: $0) : nil }
@@ -686,8 +531,18 @@ struct VoiceGenView: View {
 
     // MARK: - Generate
 
-    private func tryGenerate() {
+    private func discardPendingSubmission() {
+        pendingSubmission?.discard()
+        pendingSubmission = nil
+        pendingRequest = nil
+    }
+
+    private func tryGenerate(_ submission: MediaInteractionSubmission) {
         stopDictation() // the open mic would pick up the played result
+        guard !service.isRunning, generationBlockReason == nil else {
+            submission.discard()
+            return
+        }
         // A clip the pane is no longer showing must not still shape the
         // request: the same predicate decides both.
         let clones = VoiceGenInputs.showsReference(model)
@@ -707,13 +562,16 @@ struct VoiceGenView: View {
         if total < needed {
             ramWarningMessage = "This model needs about \(needed) GB of RAM, but your Mac has \(total) GB total. It may run very slowly or fail. Continue?"
             pendingRequest = req
+            pendingSubmission = submission
             showRAMWarning = true
             return
         }
+        startGeneration(req, submission: submission)
+    }
+
+    private func startGeneration(_ req: AudioGenRequest, submission: MediaInteractionSubmission) {
+        guard submission.begin(req.text) else { return }
         service.generate(req, server: server)
     }
 
-    private func showLogWindow() {
-        AppActivation.openWindow(id: "serverLog", using: openWindow)
-    }
 }

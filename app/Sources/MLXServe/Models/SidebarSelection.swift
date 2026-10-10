@@ -12,7 +12,6 @@ enum SidebarSelection {
 
 enum SidebarItem: Hashable {
     case models, agents, tasks
-    case create(GenExperiment)
     case chat(UUID)
     case terminal(UUID)
 

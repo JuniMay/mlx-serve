@@ -233,7 +233,7 @@ enum ThinkingDuration {
 
 /// A generated media file attached to a message BY REFERENCE.
 struct ChatMediaRef: Codable, Equatable, Identifiable {
-    enum Kind: String, Codable { case image, audio, video }
+    enum Kind: String, Codable { case image, audio, video, model3D }
 
     var kind: Kind
     var path: String

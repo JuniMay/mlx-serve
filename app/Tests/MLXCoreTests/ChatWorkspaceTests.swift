@@ -288,17 +288,4 @@ final class ChatWorkspaceTests: XCTestCase {
             """)
     }
 
-    /// Create mode lost its sidebar page list when the Chats/Models/Create
-    /// switcher went — it is reached from the chat's discovery chips and the
-    /// tray now. What must still hold is that every generator in the shared
-    /// catalogue has a page to land on: `showCreate(.video)` with no video case
-    /// would switch the window to a blank column.
-    func testEveryGeneratorStillHasAPage() throws {
-        let chat = try source("Sources/MLXServe/Views/ChatView.swift")
-        for view in ["ImageGenView()", "VideoGenView()", "AudioGenView()", "Model3DGenView()"] {
-            XCTAssertTrue(chat.contains(view), "create mode must host \(view)")
-        }
-        XCTAssertEqual(GenExperiment.allCases.count, 4,
-                       "a fifth generator needs a case in ChatDetailView.createPane")
-    }
 }

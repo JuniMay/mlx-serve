@@ -56,19 +56,6 @@ final class ComposerEscapeTests: XCTestCase {
                        + "and the tool-approval Deny); a new one races them for Escape")
     }
 
-    func testTheComposerStopsThisSessionsTurn() {
-        // Stopping is per-session: other tabs may be generating and Escape in
-        // this one must not reach across.
-        let source = chatViewSource
-        guard let range = source.range(of: "private var composerField: some View {") else {
-            return XCTFail("composerField is gone — has the composer been renamed?")
-        }
-        let body = String(source[range.lowerBound...].prefix(900))
-        XCTAssertTrue(body.contains("onCancel:"), "the composer field must pass an onCancel")
-        XCTAssertTrue(body.contains("stopGeneration()"),
-                      "onCancel routes through stopGeneration(), the same call the stop disc makes")
-    }
-
     func testTheStopDiscAndEscapeShareOneCall() {
         // Two ways to stop must not become two implementations of stopping.
         let source = chatViewSource

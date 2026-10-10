@@ -4,21 +4,19 @@ import AVKit
 import AVFoundation
 import UniformTypeIdentifiers
 
-/// Video generation workspace. Model capabilities determine its frame,
-/// audio, reference, and sampling controls.
-struct VideoGenView: View {
+/// Video capabilities supply frame, reference, and sampling controls.
+struct VideoInteractionControls: View {
     @EnvironmentObject var service: VideoGenService
     @EnvironmentObject var server: ServerManager
-    @Environment(\.openWindow) private var openWindow
     @EnvironmentObject var downloads: DownloadManager
     @EnvironmentObject var appState: AppState
 
-    @State private var prompt: String = ""
+    @Binding var prompt: String
     @State private var showEnhance = false
     /// The editor's caret or selection, for dropping a reference marker where
     /// the user is typing. nil until the editor has had focus.
-    @State private var promptSelection: TextSelection? = nil
-    @State private var promptFocused = false
+    @Binding var promptSelection: TextSelection?
+    @Binding var promptFocused: Bool
     @State private var showAdvanced: Bool = false
     @State private var showMediaInputs: Bool = true
     @State private var model: VideoModelPreset = .ltx23Q4
@@ -77,7 +75,7 @@ struct VideoGenView: View {
     @State private var showRAMWarning: Bool = false
     @State private var ramWarningMessage: String = ""
     @State private var pendingRequest: VideoGenRequest? = nil
-    @State private var player: AVPlayer?
+    @State private var pendingSubmission: MediaInteractionSubmission? = nil
     /// Keep the model resident after generating (default off → unload).
     @State private var keepResident: Bool = false
     @State private var bestQuality: Bool = false
@@ -86,7 +84,7 @@ struct VideoGenView: View {
     @State private var livePreview: Bool = false
     /// Turbo distillation LoRA (H3 fl2va): 4-step sampling, recipe off.
     @State private var turbo: Bool = false
-    /// Hydration guard — see ImageGenView for the full rationale.
+    /// Suppresses persistence while saved parameters are restored.
     @State private var hydrating: Bool = false
     @State private var didHydrate: Bool = false
     /// True while a drag carrying a file hovers the first-frame section —
@@ -100,11 +98,6 @@ struct VideoGenView: View {
     /// wells to share a row. False until its first `onGeometryChange`, which
     /// stacks them for one frame — the narrow answer either way.
     @State private var keyframesSideBySide: Bool = false
-    /// Whether the form is wide enough for the Quality tiers as segments.
-    /// Measured on the section, never judged by `ViewThatFits`: a segmented
-    /// picker accepts any width and squeezes, so it always "fits".
-    @State private var qualityFitsSegments: Bool = true
-
     /// Set when `hydrate` dropped a reference whose file is gone: the tiles
     /// after it renumbered, so a prompt that names them now points elsewhere.
     /// Cleared by the first edit to the prompt or to the references — either
@@ -115,6 +108,10 @@ struct VideoGenView: View {
 
     var body: some View {
         readyView
+        .onChange(of: showRAMWarning) { _, showing in
+            if !showing { discardPendingSubmission() }
+        }
+        .onDisappear { discardPendingSubmission() }
         .onAppear {
             if !didHydrate {
                 hydrating = true
@@ -144,11 +141,7 @@ struct VideoGenView: View {
         // The two size fields are separate because they do more than persist.
         .onChange(of: customWidthText) { _, _ in guard !hydrating else { return }; clampFramesToRAM() }
         .onChange(of: customHeightText) { _, _ in guard !hydrating else { return }; clampFramesToRAM() }
-        .onChange(of: service.phase) { _, phase in
-            if case .completed(let path) = phase {
-                player = AVPlayer(url: URL(fileURLWithPath: path))
-                player?.play()
-            }
+        .onChange(of: service.phase) { _, _ in
             // Load/unload just happened (or a cancel left the model resident)
             // — reflect it in the residency row right away.
             let repo = model.repo
@@ -176,26 +169,32 @@ struct VideoGenView: View {
     }
 
     private var readyView: some View {
-        GenerationWorkspace(title: "Video", modelName: lanModel ?? model.name,
-                            hasAttachments: true, attachmentCount: inputAttachmentCount,
-                            notice: generationNotice,
-                            prompt: { promptSection }, model: { modelSection },
-                            attachments: { mediaInputsSection }, parameters: {
-            clipSizeSection
-            qualitySection
-            framesSection
-            advancedBody
-            keepResidentToggle
-        }, actions: { actionRow }, result: {
-            previewArea
-            outputFolderLink
-        })
+        MediaInteractionControls(
+            placeholder: "Describe a video…", notice: generationNotice,
+            hasAttachments: true, attachmentCount: inputAttachmentCount,
+            isRunning: service.isRunning, canSubmit: canGenerate,
+            submit: tryGenerate,
+            attachments: { mediaInputsSection }, parameters: {
+                modelDownload
+                clipSizeSection
+                qualitySection
+                framesSection
+                advancedBody
+                keepResidentToggle
+                residencyRow
+                if let timeEstimate {
+                    Text(L10n.text(timeEstimate)).font(.app(.caption)).foregroundStyle(.secondary)
+                }
+                outputFolderLink
+            }, promptActions: { promptActions })
         .alert("Model exceeds your Mac's RAM", isPresented: $showRAMWarning) {
-            Button(role: .cancel) { pendingRequest = nil } label: { Text("Cancel")
+            Button(role: .cancel) { discardPendingSubmission() } label: { Text("Cancel")
                 .font(.app(.body)) }
             Button(role: .destructive) {
-                if let req = pendingRequest { service.generate(req, server: server) }
+                guard let req = pendingRequest, let submission = pendingSubmission else { return }
                 pendingRequest = nil
+                pendingSubmission = nil
+                startGeneration(req, submission: submission)
             } label: { Text("Generate Anyway")
                 .font(.app(.body)) }
         } message: {
@@ -214,7 +213,7 @@ struct VideoGenView: View {
 
     private var generationNotice: String? {
         if lanModel == nil && !downloads.bundleReady(model.bundle) {
-            return "Download the selected model using the model control."
+            return "Download the selected model in interaction settings."
         }
         if !customSizeValid { return "Choose a supported canvas size in generation settings." }
         if !payloadFits {
@@ -225,49 +224,25 @@ struct VideoGenView: View {
 
     private var canGenerate: Bool { !prompt.isBlank && generationNotice == nil }
 
-    private var promptSection: some View {
-        VStack(alignment: .leading, spacing: AppLayout.labelSpacing) {
-            if let hint = promptHint { promptWarning(hint) }
-            VideoPromptInput(format: model.promptFormat, editor: {
-                ComposerPromptEditor(text: $prompt, placeholder: "Describe a video…",
-                                     selection: $promptSelection, focused: $promptFocused,
-                                     isRunning: service.isRunning,
-                                     canSubmit: canGenerate,
-                                     onSubmit: tryGenerate, onCancel: service.cancel)
-                    .accessibilityLabel("Prompt")
-            }, actions: {
-                Menu {
-                    Button("Enhance…") { showEnhance = true }.disabled(prompt.isBlank)
-                    templatesMenu
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .padding(.top, 6)
-                .accessibilityLabel("Prompt actions")
-                .help("Prompt actions")
-            })
+    private var promptActions: some View {
+        Menu {
+            Button("Enhance…") { showEnhance = true }.disabled(prompt.isBlank)
+            templatesMenu
+            if let promptHint {
+                Divider()
+                Text(L10n.text(promptHint))
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
         }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .accessibilityLabel("Prompt actions")
+        .help("Prompt actions")
     }
 
-    /// The warning wraps independently of the prompt actions; help carries the detail.
-    private func promptWarning(_ hint: String) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: "info.triangle.fill")
-            Text("Prompt not optimal. Look at templates or prompt tips.")
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .font(.app(.caption))
-        .foregroundStyle(.orange)
-        .help(L10n.text(hint))
-    }
-
-    /// Soft caption under the prompt field. Per-BACKEND: LTX's "4–8 sentences"
-    /// is advice for a different engine on an H3 model, where the thing the
-    /// user cannot guess is the section labels. Pure logic in
-    /// `H3PromptExamples` so it is testable.
+    /// Each video family accepts a different prompt format.
     private var promptHint: String? {
         H3PromptExamples.hint(for: model.promptFormat, prompt: prompt)
     }
@@ -302,15 +277,10 @@ struct VideoGenView: View {
         .modifier(PaneChipMenu())
     }
 
-    /// Best-per-capability up front, everything else behind "Other Models", and
-    /// the Download button ON the model — see `MediaModelChooser`. The transfer
-    /// bar, the residency line and the residency SETTING all belong to the
-    /// model, not to the clip, so they sit with it.
-    private var modelSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            modelChooser
+    private var modelDownload: some View {
+        Group {
             if lanModel == nil && !downloads.bundleReady(model.bundle) {
-                BundleDownloadBar(bundle: model.bundle, showsStartButton: false)
+                BundleDownloadBar(bundle: model.bundle)
             }
         }
     }
@@ -323,26 +293,6 @@ struct VideoGenView: View {
         .font(.app(.caption))
         .controlSize(.small)
         .help("On: the model stays resident so the next generation is instant. Off (default): it's unloaded to free GPU memory.")
-    }
-
-    private var modelChooser: some View {
-        MediaModelChooser.pane(
-            all: VideoModelPreset.all,
-            onThisMac: CustomMediaModels.videoPresets(from: server.allModels),
-            capability: "video",
-            selected: $model, lanModel: $lanModel,
-            capabilityOf: { $0.capabilityLabel },
-            resolveCustom: { [models = server.allModels] in
-                CustomMediaModels.videoPreset(for: $0, from: models)
-            },
-            bundleOf: { $0.bundle },
-            downloads: downloads,
-            onDownloadFinished: {
-                appState.refreshModels()
-                speechPreset = Self.resolveSpeechPreset()
-            },
-            persist: persist,
-            status: AnyView(residencyRow))
     }
 
     /// What the switcher shows. `custom` exists only while it is SELECTED, so
@@ -364,12 +314,6 @@ struct VideoGenView: View {
             chainWindows: chainWindows, preferring: quality)
     }
 
-    /// What five segments need: the four tier names plus Custom, at the
-    /// segmented control's own per-segment padding. "Super Quality" is the
-    /// wide one, and shortening it is not on the table — the tiers are named
-    /// the same in every Create pane.
-    private static let qualitySegmentsMinWidth: CGFloat = 380
-
     /// Reads the DERIVED tier and writes by applying one. Custom is unwritable
     /// by construction, so the guard is a formality rather than a policy.
     private var qualitySelection: Binding<QualitySelection> {
@@ -385,24 +329,16 @@ struct VideoGenView: View {
     private var qualitySection: some View {
         VStack(alignment: .leading, spacing: AppLayout.labelSpacing) {
             Text("Quality").font(.app(.headline).weight(.semibold))
-            // Measured, not `ViewThatFits`: see `qualityFitsSegments`. Five
-            // segments degrade to a menu rather than shortening the tier names
-            // this pane shares with every other Create pane.
-            qualityPicker(segmented: qualityFitsSegments)
+            qualityPicker
             Text(qualityHint)
                 .font(.app(.caption))
                 .foregroundStyle(.secondary)
         }
-        // Measure the SECTION at the column's width, never the picker: the
-        // menu variant is `fixedSize` and would never re-fit.
         .frame(maxWidth: .infinity, alignment: .leading)
-        .onGeometryChange(for: Bool.self) { $0.size.width >= Self.qualitySegmentsMinWidth }
-            action: { qualityFitsSegments = $0 }
     }
 
-    @ViewBuilder
-    private func qualityPicker(segmented: Bool) -> some View {
-        let picker = Picker("Quality", selection: qualitySelection) {
+    private var qualityPicker: some View {
+        Picker("Quality", selection: qualitySelection) {
             ForEach(QualityPreset.allCases) { q in
                 Text(L10n.text(q.label)).font(.app(.body)).tag(QualitySelection.preset(q))
             }
@@ -410,12 +346,7 @@ struct VideoGenView: View {
                 Text("Custom").font(.app(.body)).tag(QualitySelection.custom)
             }
         }
-        .labelsHidden().font(.app(.body))
-        if segmented {
-            picker.pickerStyle(.segmented)
-        } else {
-            picker.pickerStyle(.menu).fixedSize()
-        }
+        .labelsHidden().font(.app(.body)).pickerStyle(.menu)
     }
 
     /// The pipeline the request will RUN: audio-to-video is two-stage only, so
@@ -1156,7 +1087,6 @@ struct VideoGenView: View {
         }
     }
 
-
     /// Files attached across all three reference lists.
     private var refFilesAttached: Int {
         refImageURLs.count + refVideoURLs.count + refAudioURLs.count
@@ -1825,103 +1755,14 @@ struct VideoGenView: View {
     /// picker's centre line. Frames is exempt: a section title spaces it.
     private static let steppedSliderTrackDrop: CGFloat = 3
 
-    private var actionRow: some View {
-        Group {
-            if service.isRunning {
-                ComposerActionButton(isRunning: true, label: "Cancel") { service.cancel() }
-            } else {
-                ComposerActionButton(isRunning: false, label: "Generate") { tryGenerate() }
-                .keyboardShortcut(.return, modifiers: [.command])
-                .disabled(!canGenerate)
-                .help(timeEstimate.map { estimate in
-                    L10n.text(estimate) + "\n" + L10n.text("Estimated from measured runs and this Mac's GPU. Actual time varies with what else is using the GPU.")
-                } ?? L10n.text("Generate"))
-            }
-        }
-    }
-
-    private var previewArea: some View {
-        Group {
-            switch service.phase {
-            case .idle:
-                VStack(spacing: AppLayout.rowSpacing) {
-                    Image(systemName: "film").font(.app(.title2))
-                    Text("Enter a prompt and press Generate.").font(.app(.body))
-                }
-                .foregroundStyle(.secondary)
-            case .running(let step, let total, let message):
-                VStack(spacing: AppLayout.rowSpacing) {
-                    if let img = service.livePreview {
-                        Image(nsImage: img)
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(maxHeight: 220)
-                            .clipShape(RoundedRectangle(cornerRadius: AppLayout.surfaceRadius, style: .continuous))
-                    }
-                    ProgressView(value: Double(step), total: max(1, Double(total)))
-                        .progressViewStyle(.linear)
-                        .frame(maxWidth: 240)
-                    Text(message).font(.app(.footnote)).foregroundStyle(.secondary)
-                    Text(service.startedAt, style: .timer)
-                        .font(.app(.footnote)).monospacedDigit().foregroundStyle(.secondary)
-                }
-            case .completed(let path):
-                completedPreview(path: path)
-            case .cancelled:
-                ContentUnavailableView("Cancelled", systemImage: "stop.circle", description: Text("Generation was cancelled.").font(.app(.body)))
-            case .failed(let msg):
-                ContentUnavailableView {
-                    Label("Failed", systemImage: "exclamationmark.triangle").font(.app(.body))
-                } description: {
-                    Text(msg)
-                } actions: {
-                    Button { showLogWindow() } label: { Text("Show log")
-                        .font(.app(.body)) }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private func completedPreview(path: String) -> some View {
-        VStack(spacing: AppLayout.compactSpacing) {
-            if let player {
-                AVPlayerViewRepresentable(player: player)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipShape(RoundedRectangle(cornerRadius: AppLayout.surfaceRadius, style: .continuous))
-            }
-            HStack(spacing: AppLayout.compactSpacing) {
-                Text(URL(fileURLWithPath: path).lastPathComponent)
-                    .font(.app(.caption))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Spacer()
-                Button {
-                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
-                } label: { Image(systemName: "folder") }
-                .buttonStyle(.borderless)
-                .help("Reveal in Finder")
-                .accessibilityLabel("Reveal in Finder")
-            }
-        }
-    }
-
     private var outputFolderLink: some View {
         Button {
             NSWorkspace.shared.activateFileViewerSelecting(
-                [URL(fileURLWithPath: MediaStorage.videosRoot)]
-            )
+                [URL(fileURLWithPath: MediaStorage.videosRoot)])
         } label: {
             Label("Open output folder in Finder", systemImage: "folder")
-                .font(.app(.caption))
         }
-        .labelStyle(.iconOnly)
         .buttonStyle(.borderless)
-        .foregroundStyle(.secondary)
-        .accessibilityLabel("Open output folder in Finder")
-        .help("Open output folder in Finder")
-        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
     // MARK: - Sticky settings
@@ -1977,7 +1818,6 @@ struct VideoGenView: View {
         // references are restored whatever the model, as they survive a
         // preset switch in session (the request gates them); audio follows
         // `applyModelDefaults`, which clears it on a backend without input.
-        prompt = s.prompt
         showMediaInputs = s.showMediaInputs
         showAdvanced = s.showAdvanced
         firstFrameImageURL = Self.existingFile(s.firstFramePath)
@@ -2132,7 +1972,17 @@ struct VideoGenView: View {
     /// total. macOS's "available" reading is misleading on unified memory
     /// (idle apps get paged out under pressure) — using it as a hard gate
     /// blocked legitimate runs, so we let the user override.
-    private func tryGenerate() {
+    private func discardPendingSubmission() {
+        pendingSubmission?.discard()
+        pendingSubmission = nil
+        pendingRequest = nil
+    }
+
+    private func tryGenerate(_ submission: MediaInteractionSubmission) {
+        guard !service.isRunning, canGenerate else {
+            submission.discard()
+            return
+        }
         let req = VideoGenRequest(
             model: model,
             prompt: prompt,
@@ -2182,21 +2032,35 @@ struct VideoGenView: View {
         if total < needed {
             ramWarningMessage = "This model needs about \(needed) GB of RAM, but your Mac has \(total) GB total. It may run very slowly or fail. Continue?"
             pendingRequest = req
+            pendingSubmission = submission
             showRAMWarning = true
             return
         }
 
-        // Belt-and-braces with the toggle's own fetch: turbo can be persisted
-        // ON from a previous session, or the fetch it started can still be in
-        // flight. `startTurboLora` attaches to a running transfer rather than
-        // starting a second one, so both paths converge on one download.
-        if turboFetchDecision == .fetch {
-            downloads.startTurboLora(repoId: model.repo) {
+        startGeneration(req, submission: submission)
+    }
+
+    private func startGeneration(_ req: VideoGenRequest, submission: MediaInteractionSubmission) {
+        let service = service
+        let server = server
+        let modelDir = ServerManager.resolveModelDir(repo: req.model.repo)
+        let needsTurbo = TurboLoraFetch.decide(
+            turboRequested: req.turbo,
+            backendSupportsTurbo: req.model.supportsTurbo,
+            isRemote: req.lanModelId != nil,
+            fileOnDisk: TurboLoraFetch.isOnDisk(modelDir: modelDir)) == .fetch
+        if needsTurbo {
+            downloads.startTurboLora(repoId: req.model.repo) {
+                guard TurboLoraFetch.isOnDisk(modelDir: ServerManager.resolveModelDir(repo: req.model.repo)) else {
+                    submission.discard()
+                    return
+                }
+                guard submission.begin(req.prompt) else { return }
                 service.generate(req, server: server)
             }
             return
         }
-
+        guard submission.begin(req.prompt) else { return }
         service.generate(req, server: server)
     }
 
@@ -2211,22 +2075,4 @@ struct VideoGenView: View {
         )
     }
 
-    private func showLogWindow() {
-        AppActivation.openWindow(id: "serverLog", using: openWindow)
-    }
-}
-
-/// Keeps the editor and its prompt actions together inside the input dock.
-struct VideoPromptInput<Editor: View, Actions: View>: View {
-    let format: VideoPromptFormat
-    @ViewBuilder var editor: Editor
-    @ViewBuilder var actions: Actions
-
-    var body: some View {
-        HStack(alignment: .top, spacing: AppLayout.compactSpacing) {
-            editor
-                .help(L10n.text(H3PromptExamples.placeholder(for: format)))
-            actions
-        }
-    }
 }

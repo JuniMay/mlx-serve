@@ -15,7 +15,7 @@ final class WorkspaceSplitViewTests: XCTestCase {
         try await settle(hosting)
         XCTAssertEqual(probe.sidebarCreations, 1)
 
-        for workspace: ChatWorkspace in [.create(.image), .models(.myModels), .agents, .tasks, .conversation] {
+        for workspace: ChatWorkspace in [.models(.myModels), .agents, .tasks, .conversation] {
             probe.workspace = workspace
             try await settle(hosting)
             XCTAssertEqual(probe.sidebarCreations, 1, "Navigation to \(workspace) replaced the sidebar.")

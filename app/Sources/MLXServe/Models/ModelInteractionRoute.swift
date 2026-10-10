@@ -1,6 +1,6 @@
 import Foundation
 
-/// The workspace that can accept a model's inputs and display its outputs.
+/// The inputs and outputs supported by an interaction model.
 enum ModelInteractionRoute: Equatable {
     case chat
     case media(MediaModality)
@@ -13,6 +13,23 @@ enum ModelInteractionRoute: Equatable {
         if let modality = MediaModality(modelType: model.modelType) { return .media(modality) }
         if isDecisionModelType(model.modelType) { return .decision }
         return model.isChatPickable ? .chat : nil
+    }
+
+    static func resolve(_ model: ModelInfo) -> ModelInteractionRoute? {
+        guard model.lanPeer != nil else { return nil }
+        if model.lanAdvertises("chat") { return .chat }
+        let name = LanPick.base(of: model.name)
+        guard model.architecture != "kokoro", name != AudioModelPreset.kokoro82M.id else { return nil }
+        let capabilities: [(MediaModality, String)] = [(.image, "image"), (.video, "video"),
+            (.voice, "speech"), (.music, "music"), (.sound, "sound"), (.mesh, "3d")]
+        for (modality, capability) in capabilities where model.lanAdvertises(capability) {
+            let known = ModelBrowserUse.mediaPresetID(modality: modality, name: name, path: "") != nil
+            let supported = model.architecture != "kokoro"
+                && MediaModality(modelType: model.architecture) == modality
+                && CustomMediaModels.bundle(arch: model.architecture, repoId: name) != nil
+            if known || supported { return .media(modality) }
+        }
+        return nil
     }
 
     var title: String {

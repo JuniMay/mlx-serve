@@ -7,6 +7,35 @@ import XCTest
 /// the `ServerOptions` / `MediaBundle` persistence contract.
 final class MediaGenSettingsTests: XCTestCase {
 
+    func testNetworkModelSelectionsKeepTheirExactCapabilities() {
+        var image = ImageGenSettings()
+        image.modelId = "lan:" + ImageModelPreset.flux2Klein9BBase_Q4.id + "@studio"
+        XCTAssertEqual(image.resolvedModel, .flux2Klein9BBase_Q4)
+
+        var voice = AudioGenSettings()
+        voice.modelId = "lan:" + AudioModelPreset.qwen3TTS17B8bit.id + "@studio"
+        XCTAssertEqual(voice.resolvedModel, .qwen3TTS17B8bit)
+
+        var music = MusicGenSettings()
+        music.modelId = "lan:" + MusicModelPreset.miniMaxMusic3_8bit.id + "@studio"
+        XCTAssertEqual(music.resolvedModel, .miniMaxMusic3_8bit)
+
+        var soundInfo = ModelInfo(name: "custom/sound@studio", quantBits: 4, layers: 1,
+                                  hiddenSize: 1, vocabSize: 1, contextLength: 0, modelMaxTokens: 0)
+        soundInfo.lanPeer = "studio"
+        soundInfo.architecture = "stable_audio3"
+        var sound = SoundGenSettings()
+        sound.modelId = "lan:" + soundInfo.name
+        XCTAssertEqual(sound.resolvedModel(models: [soundInfo]).id, "custom/sound")
+
+        var meshInfo = soundInfo
+        meshInfo.name = "custom/mesh@studio"
+        meshInfo.architecture = "hunyuan3d"
+        var mesh = Model3DGenSettings()
+        mesh.modelId = "lan:" + meshInfo.name
+        XCTAssertEqual(mesh.resolvedModel(models: [meshInfo]).id, "custom/mesh")
+    }
+
     // MARK: - Round-trip encode/decode equality
 
     func testImageSettingsRoundTrips() throws {

@@ -6,8 +6,6 @@ enum ChatWorkspace: Equatable {
     case conversation
     /// The model browser, on one of its sections.
     case models(ModelBrowserSection)
-    /// A media workspace from the shared generation catalog.
-    case create(GenExperiment)
     /// Scheduled and on-demand agent tasks.
     case tasks
     /// The agent list and editor.

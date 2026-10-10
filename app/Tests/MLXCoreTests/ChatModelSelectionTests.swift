@@ -269,6 +269,20 @@ final class ChatServerStartControlTests: XCTestCase {
 /// `chatModelId` would have sent the turn to it. The picker's LIST was already
 /// chat-only — the resolution underneath it was not.
 final class ChatModelResolutionTests: XCTestCase {
+    private var savedLANSelection: Any?
+
+    override func setUp() {
+        savedLANSelection = UserDefaults.standard.object(forKey: "lanChatModelId")
+        UserDefaults.standard.removeObject(forKey: "lanChatModelId")
+    }
+
+    override func tearDown() {
+        if let savedLANSelection {
+            UserDefaults.standard.set(savedLANSelection, forKey: "lanChatModelId")
+        } else {
+            UserDefaults.standard.removeObject(forKey: "lanChatModelId")
+        }
+    }
 
     private func info(_ id: String, _ caps: [String], loaded: Bool = true) -> ModelInfo {
         APIClient.parseModelInfo(["id": id, "capabilities": caps, "loaded": loaded])

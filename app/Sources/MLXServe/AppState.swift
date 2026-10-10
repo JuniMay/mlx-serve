@@ -232,6 +232,7 @@ class AppState: ObservableObject {
     lazy var musicGen = MusicGenService()
     lazy var soundGen = SoundGenService()
     lazy var model3dGen = Model3DGenService()
+    lazy var mediaInteractions = MediaInteractionHistory(appState: self)
     @Published var autoStartServer: Bool {
         didSet { UserDefaults.standard.set(autoStartServer, forKey: "autoStartServer") }
     }
@@ -334,6 +335,7 @@ class AppState: ObservableObject {
     /// the thing that opens it is a menu command with no view to talk to.
     @Published var modelPalettePresented = false
     @Published var mediaModelSelection: MediaModelSelectionRequest?
+    @Published var interactionMedia: MediaModality?
 
     /// Open the model switcher — the ONE way in, same shape as `showModels()`:
     /// it must both raise the picker AND bring the chat window forward, or ⌘L
@@ -352,6 +354,7 @@ class AppState: ObservableObject {
     /// each had its own copy of "clear the LAN id, then set the path", which is
     /// the per-surface-copy class the tag semantics were centralised to avoid.
     func applyChatModelPick(_ tag: String) {
+        interactionMedia = nil
         switch ChatModelSelection.action(for: tag) {
         case .selectApple:
             server.lanChatModelId = nil
@@ -463,9 +466,21 @@ class AppState: ObservableObject {
         chatWorkspace = .models(section)
     }
 
-    /// Open a media workspace and bring the main window forward.
+    /// Select the saved model for a media capability in the current interaction.
     func showCreate(_ experiment: GenExperiment = .image) {
-        chatWorkspace = .create(experiment)
+        let modality: MediaModality
+        switch experiment {
+        case .image: modality = .image
+        case .video: modality = .video
+        case .model3d: modality = .mesh
+        case .audio:
+            switch AudioInteractionKind(rawValue: UserDefaults.standard.string(forKey: "audioGenTab") ?? "") ?? .voice {
+            case .voice: modality = .voice
+            case .music: modality = .music
+            case .sound: modality = .sound
+            }
+        }
+        selectMediaModel(modality: modality, name: "", presetID: savedMediaModelID(for: modality))
         pendingChatOpenTick += 1
     }
 
@@ -509,7 +524,7 @@ class AppState: ObservableObject {
         return (dir as NSString).appendingPathComponent("chat-history.json")
     }()
 
-    init() {
+    init(startServices: Bool = true) {
         // Defaults to ON when the key is absent — `UserDefaults.bool` would
         // read a never-set key as false, which is why a fresh install used to
         // download a model and then sit there with the server stopped. Safe with
@@ -544,6 +559,7 @@ class AppState: ObservableObject {
         self.chatToolDefaults = ChatToolDefaults.load()
         self.defaultAgentId = UserDefaults.standard.string(forKey: "defaultAgentId")
             .flatMap(UUID.init(uuidString:))
+        guard startServices else { return }
         server.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
@@ -793,7 +809,7 @@ class AppState: ObservableObject {
     @discardableResult
     func useModelAndAwaitReady(atPath path: String) async -> Bool {
         let statusBefore = server.status
-        selectedModelPath = path
+        applyChatModelPick(path)
         switch Self.useModelStartAction(forStatusBefore: statusBefore) {
         case .startExplicitly:
             server.start(modelPath: path, options: serverOptions)
@@ -925,6 +941,7 @@ class AppState: ObservableObject {
             AttachmentStore.remove(path)
         }
         for id in ids {
+            mediaInteractions.cancel(sessionId: id)
             processRegistry.killSession(id)
             documentIndexes[id]?.cancel()
             documentIndexes.removeValue(forKey: id)

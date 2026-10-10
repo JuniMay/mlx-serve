@@ -8,10 +8,7 @@ import SwiftUI
 /// encoder — all surfaced here as one action.
 struct BundleDownloadBar: View {
     let bundle: MediaBundle
-    /// When false the bar reports progress and failures but offers no START
-    /// button — the Create panes moved that onto the model row itself
-    /// (`MediaModelChooser`), so having one here too put two ways to fetch the
-    /// same model on screen at once, one of them beside Generate.
+    /// Use false when the surrounding view already supplies the download action.
     var showsStartButton: Bool = true
     @EnvironmentObject var downloads: DownloadManager
     @EnvironmentObject var appState: AppState

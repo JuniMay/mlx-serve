@@ -112,8 +112,9 @@ extension ImageGenSettings {
     /// `/v1/models` list — a custom id with the list unavailable (server
     /// down) falls back like any unknown id.
     func resolvedModel(models: [ModelInfo]) -> ImageModelPreset {
-        ImageModelPreset.all.first { $0.id == modelId }
-            ?? CustomMediaModels.imagePreset(for: modelId, from: models)
+        let id = LanPick.modelID(modelId)
+        return ImageModelPreset.all.first { $0.id == id }
+            ?? CustomMediaModels.imagePreset(for: id, from: models)
             ?? .flux2Klein4B_Q4
     }
 
@@ -221,8 +222,9 @@ extension AudioGenSettings {
     var resolvedModel: AudioModelPreset { resolvedModel(models: []) }
 
     func resolvedModel(models: [ModelInfo]) -> AudioModelPreset {
-        AudioModelPreset.all.first { $0.id == modelId }
-            ?? CustomMediaModels.audioPreset(for: modelId, from: models)
+        let id = LanPick.modelID(modelId)
+        return AudioModelPreset.all.first { $0.id == id }
+            ?? CustomMediaModels.audioPreset(for: id, from: models)
             ?? .qwen3TTS06B8bit
     }
 
@@ -291,8 +293,9 @@ extension MusicGenSettings {
     var resolvedModel: MusicModelPreset { resolvedModel(models: []) }
 
     func resolvedModel(models: [ModelInfo]) -> MusicModelPreset {
-        MusicModelPreset.all.first { $0.id == modelId }
-            ?? CustomMediaModels.musicPreset(for: modelId, from: models)
+        let id = LanPick.modelID(modelId)
+        return MusicModelPreset.all.first { $0.id == id }
+            ?? CustomMediaModels.musicPreset(for: id, from: models)
             ?? .acestepXLTurbo8bit
     }
 
@@ -354,8 +357,9 @@ struct SoundGenSettings: Codable, Equatable {
     }
 
     func resolvedModel(models: [ModelInfo]) -> SoundModelPreset {
-        SoundModelPreset.all.first { $0.id == modelId }
-            ?? CustomMediaModels.soundPreset(for: modelId, from: models)
+        let id = LanPick.modelID(modelId)
+        return SoundModelPreset.all.first { $0.id == id }
+            ?? CustomMediaModels.soundPreset(for: id, from: models)
             ?? .stableAudio3SmallSFX
     }
 
@@ -593,8 +597,9 @@ extension Model3DGenSettings {
     var resolvedModel: Model3DModelPreset { resolvedModel(models: []) }
 
     func resolvedModel(models: [ModelInfo]) -> Model3DModelPreset {
-        Model3DModelPreset.all.first { $0.id == modelId }
-            ?? CustomMediaModels.meshPreset(for: modelId, from: models)
+        let id = LanPick.modelID(modelId)
+        return Model3DModelPreset.all.first { $0.id == id }
+            ?? CustomMediaModels.meshPreset(for: id, from: models)
             ?? .hunyuan3d21_8bit
     }
 

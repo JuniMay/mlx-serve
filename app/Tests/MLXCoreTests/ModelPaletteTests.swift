@@ -64,6 +64,12 @@ final class ModelPaletteTests: XCTestCase {
         XCTAssertFalse(ModelPalette.hasNonChatInteraction(local: models))
     }
 
+    func testDecisionToolsDoNotReplaceTheCurrentInteraction() {
+        let decision = local("decision/laya", type: "laya")
+        XCTAssertEqual(ModelInteractionRoute.resolve(decision), .decision)
+        XCTAssertTrue(ModelPalette.rows(local: [decision], lan: []).isEmpty)
+    }
+
     func testGenerationSetupIsAvailableForAReadyCatalogueModel() {
         XCTAssertTrue(ModelPalette.hasNonChatInteraction(local: [
             local(ImageModelPreset.flux2Klein4B_Q4.bundle.primaryRepo, type: "flux2-klein-4b")]))
@@ -83,13 +89,24 @@ final class ModelPaletteTests: XCTestCase {
                         ModelPalette.networkSection])
     }
 
-    /// A peer entry that does not advertise chat is somebody else's image
-    /// model — the same `lanModels(capability:)` question the pill asks.
-    func testANetworkRowMustAdvertiseChat() {
-        var media = lan("ltx@studio", peer: "studio")
+    func testNetworkVideoAndChatShareOneModelList() {
+        let videoID = VideoModelPreset.minimaxH3.repo + "@studio"
+        var media = lan(videoID, peer: "studio")
         media.capabilities = ["video"]
+        media.architecture = "minimax_h3"
         let rows = ModelPalette.rows(local: [], lan: [lan("qwen3-8b@studio", peer: "studio"), media])
-        XCTAssertEqual(rows.map(\.tag), ["lan:qwen3-8b@studio"])
+        XCTAssertEqual(rows.map(\.tag), ["lan:qwen3-8b@studio", "lan:" + videoID])
+        XCTAssertEqual(rows.map(\.interaction), [.chat, .media(.video)])
+        XCTAssertEqual(ModelPalette.filtered(rows, query: "video").map(\.tag), ["lan:" + videoID])
+    }
+
+    func testLocalVideoSelectionLeavesChatModelsAvailableInTheSameList() {
+        let video = local(VideoModelPreset.minimaxH3.repo, type: "minimax_h3")
+        let chat = local("qwen/qwen3", type: "qwen3")
+        let rows = ModelPalette.rows(local: [video, chat], lan: [])
+        let selected = ModelPalette.selection(in: rows, current: video.path)
+        XCTAssertEqual(ModelPalette.tag(at: selected, in: rows), video.path)
+        XCTAssertEqual(rows.first(where: { $0.tag == chat.path })?.interaction, .chat)
     }
 
     // MARK: - What a pick means

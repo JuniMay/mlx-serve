@@ -506,7 +506,7 @@ struct ChatView: View {
                                                 workspace: appState.chatWorkspace,
                                                 welcomePresented: appState.showWelcome,
                                                 palettePresented: appState.modelPalettePresented,
-                                                otherInteractionAvailable: ModelPalette.hasNonChatInteraction(
+                                                otherInteractionAvailable: appState.interactionMedia != nil || ModelPalette.hasNonChatInteraction(
                                                     local: appState.localModels, mediaModels: server.allModels))
             },
             set: { _ in })) {
@@ -543,8 +543,6 @@ struct ChatView: View {
                 set: { appState.selectModelSection($0) }))
         case .terminal(let id):
             TerminalPane(sessionId: id)
-        case .create(let experiment):
-            createPane(experiment)
         case .conversation, .settings:
             if let sessionId = appState.activeChatId,
                appState.chatSessions.contains(where: { $0.id == sessionId }) {
@@ -566,26 +564,11 @@ struct ChatView: View {
                 agentName: appState.agents.agent(id: session?.agentId)?.name)
             return ChatSessionTitle.isPlaceholder(title) ? L10n.text(title) : title
         case .models: return L10n.text("Models")
-        case .create(let experiment): return L10n.text(experiment.title)
         case .tasks: return L10n.text("Tasks")
         case .agents: return L10n.text("Agents")
         case .settings: return L10n.text("Settings")
         case .terminal(let id):
             return appState.terminals.sessions.session(id)?.displayName ?? L10n.text("Terminal")
-        }
-    }
-
-    /// Each generation capability keeps its own inputs, results, and parameters.
-    @ViewBuilder
-    private func createPane(_ experiment: GenExperiment) -> some View {
-        switch experiment {
-        case .image:   ImageGenView().environmentObject(appState.imageGen)
-        case .video:   VideoGenView().environmentObject(appState.videoGen)
-        case .audio:   AudioGenView()
-                           .environmentObject(appState.audioGen)
-                           .environmentObject(appState.musicGen)
-                           .environmentObject(appState.soundGen)
-        case .model3d: Model3DGenView().environmentObject(appState.model3dGen)
         }
     }
 
@@ -1027,7 +1010,6 @@ struct ChatSidebar: View {
         Binding(get: {
             switch appState.chatWorkspace {
             case .models: return [.models]
-            case .create(let experiment): return [.create(experiment)]
             case .agents: return [.agents]
             case .tasks: return [.tasks]
             case .terminal(let id): return [.terminal(id)]
@@ -1043,7 +1025,6 @@ struct ChatSidebar: View {
                 case .models: appState.showModels()
                 case .agents: appState.showAgents()
                 case .tasks: appState.showTasks()
-                case .create(let experiment): appState.showCreate(experiment)
                 case .terminal(let id): showTerminal(id)
                 case .chat: break
                 }
@@ -1755,6 +1736,9 @@ struct ChatDetailView: View {
     // on the row stack, which is what forces the rebuild.
     @AppStorage(InterfacePrefKey.textSize) private var interfaceTextSize = ChatTextSize.medium.rawValue
     @State private var inputText = ""
+    @State private var inputSelection: TextSelection?
+    @State private var showingMediaAttachments = false
+    @State private var showingMediaParameters = false
     /// Where ↑/↓ have walked back to in this chat's own history. Per-tab state
     /// like everything else here — `ChatDetailView` is REUSED across tabs, so a
     /// walk left running would resume in someone else's conversation. Stale
@@ -1804,11 +1788,6 @@ struct ChatDetailView: View {
     }
     @State private var composerHeight: CGFloat = 36
     @State private var inputAreaHeight: CGFloat = 120
-    // The composer's "create mode" (the chip rewired the composer into a
-    // generator) is GONE: a media chip navigates to the Create pane, exactly
-    // like the Tools menu. In-chat media generation is the agent tools' job
-    // (`generate_image` & co.) — one way to drive a generator from a chat,
-    // not two.
     // Issue #227: built once per messages change, not per body pass. Rebuilding
     // inside the ForEach handed SwiftUI a fresh array on every layout pass and
     // the LazyVStack could spin forever.
@@ -2211,11 +2190,10 @@ struct ChatDetailView: View {
         }
     }
 
-    /// A conversation with nothing in it yet. Rendered instead of an empty
-    /// scroll view so the composer sits under a greeting in the middle of the
-    /// window rather than pinned to the bottom of a blank page.
+    /// Pending media work belongs in the transcript before its first progress event.
     private var isEmptyConversation: Bool {
         (session?.messages.isEmpty ?? true) && composerState != .generatingHere
+            && appState.mediaInteractions.progress(for: sessionId).isEmpty
     }
 
     /// Which reply Cmd+R / the footer's Regenerate button targets — the
@@ -2242,7 +2220,7 @@ struct ChatDetailView: View {
                 .font(.app(.largeTitle, weight: .semibold))
                 .foregroundStyle(.primary)
             if let subtitle = ChatGreeting.subtitle(agentBrief: activeAgent?.brief,
-                                                    serverRunning: canAnswer) {
+                                                    serverRunning: canAnswer || appState.interactionMedia != nil) {
                 Text(L10n.text(subtitle))
                     .font(.app(.callout))
                     .foregroundStyle(.secondary)
@@ -2304,7 +2282,8 @@ struct ChatDetailView: View {
                                     // steer what comes next (Continue, or the
                                     // following turn), so nothing is dropped
                                     // and nothing re-runs.
-                                    onEdit: session?.isExternalBridge == true ? nil : { newText in
+                                    onEdit: session?.isExternalBridge == true || appState.interactionMedia != nil
+                                        || !(m.media ?? []).isEmpty ? nil : { newText in
                                         if m.role == .user {
                                             editAndResend(messageId: m.id, newText: newText)
                                         } else {
@@ -2313,7 +2292,7 @@ struct ChatDetailView: View {
                                                                           newText: newText)
                                         }
                                     },
-                                    onRegenerate: (m.role == .assistant && m.id == lastAssistantMessageId)
+                                    onRegenerate: (canRegenerate && m.role == .assistant && m.id == lastAssistantMessageId)
                                         ? { regenerateLastResponse() }
                                         : nil,
                                     // Only the last message: a continuation
@@ -2366,6 +2345,18 @@ struct ChatDetailView: View {
                         // a window that looks frozen. Only in the chat whose turn
                         // ASKED for it — with concurrent turns, ownership rides
                         // `mediaProgressSessionId`, not just "is generating".
+                        ForEach(appState.mediaInteractions.progress(for: sessionId)) { progress in
+                            VStack(alignment: .leading, spacing: 8) {
+                                MediaProgressCard(progress: progress)
+                                if progress.modality == .video {
+                                    InteractionVideoPreview(service: appState.videoGen)
+                                }
+                                Button("Stop generating") {
+                                    appState.mediaInteractions.cancel(modality: progress.modality, sessionId: sessionId)
+                                }
+                                .buttonStyle(.borderless)
+                            }
+                        }
                         if composerState == .generatingHere,
                            chatEngine.mediaProgressSessionId == sessionId,
                            let progress = chatEngine.mediaProgress {
@@ -2441,14 +2432,14 @@ struct ChatDetailView: View {
                 .id("transcript-\(sessionId)-\(interfaceTextSize)")
             }   // end else (non-empty conversation)
 
-            if isEmptyConversation {
-                inputArea
-            }
-            // The top spacer's sibling — see the empty-state branch above.
             if isEmptyConversation { Spacer(minLength: 0) }
         }
-        .overlay(alignment: .bottom) {
-            if !isEmptyConversation { inputArea }
+        .background { mediaCapabilityControls }
+        .overlayPreferenceValue(MediaInteractionPreferenceKey.self) { media in
+            VStack {
+                Spacer(minLength: 0)
+                inputArea(media: media)
+            }
         }
         // Cmd+R — regenerate the last reply. A zero-size hidden button rather
         // than a window-level `.commands` entry: it needs THIS tab's session
@@ -2463,6 +2454,7 @@ struct ChatDetailView: View {
                 .opacity(0)
         )
         .onDrop(of: [.image, .pdf, .audio, .movie], isTargeted: nil) { providers in
+            guard appState.interactionMedia == nil else { return false }
             for provider in providers {
                 if provider.hasItemConformingToTypeIdentifier(UTType.pdf.identifier) {
                     provider.loadFileRepresentation(forTypeIdentifier: UTType.pdf.identifier) { url, _ in
@@ -2583,7 +2575,7 @@ struct ChatDetailView: View {
             // PDF, or folder, attach it (same as the attach button / drag-drop)
             // and swallow the paste; plain text still pastes into the field.
             pasteMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-                guard inputFocused,
+                guard inputFocused, appState.interactionMedia == nil,
                       event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
                       event.charactersIgnoringModifiers == "v"
                 else { return event }
@@ -2669,7 +2661,7 @@ struct ChatDetailView: View {
         } action: { columnWidth = $0 }
     }
 
-    private var inputArea: some View {
+    private func inputArea(media: MediaInteractionConfiguration?) -> some View {
         VStack(spacing: 4) {
           if session?.isExternalBridge == true {
             // Archived bridge transcripts remain readable and can be branched.
@@ -2684,6 +2676,7 @@ struct ChatDetailView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
           } else {
+            if appState.interactionMedia == nil {
             // Pending attachment thumbnails (images + PDFs + videos + audio)
             if !pendingImages.isEmpty || !pendingPDFs.isEmpty || !pendingVideos.isEmpty || !pendingAudio.isEmpty {
                 AttachmentPreviewRow(images: $pendingImages, pdfs: $pendingPDFs, videos: $pendingVideos, audio: $pendingAudio)
@@ -2715,13 +2708,14 @@ struct ChatDetailView: View {
             if let note = steeringNote {
                 SteeringNoteRow(note: note, onPause: { pauseSteeringNote() })
             }
+            }
 
             // One rounded container, two rows: the input on top with the
             // full width of the column, its controls beneath — inside the
             // same border, so they read as belonging to it.
             VStack(alignment: .leading, spacing: AppLayout.compactSpacing) {
-                composerField
-                composerControls
+                composerField(media: media)
+                composerControls(media: media)
             }
             .floatingInputSurface()
             // "/" skill menu — FLOATS over the transcript rather than
@@ -2732,7 +2726,7 @@ struct ChatDetailView: View {
             // Not an NSPopover — that takes first responder, and the menu
             // has to stay open while you keep typing.
             .overlay(alignment: .topLeading) {
-                if !slashMatches.isEmpty {
+                if appState.interactionMedia == nil && !slashMatches.isEmpty {
                     SlashSkillMenu(matches: slashMatches,
                                    selection: min(slashSelection, max(0, slashMatches.count - 1)),
                                    onPick: { pickSlashSkill($0) })
@@ -2756,30 +2750,38 @@ struct ChatDetailView: View {
         composerState == .generatingHere ? "Type a note; Return sends it at the next step" : "Ask me anything…"
     }
 
-    private var composerField: some View {
+    private func composerField(media: MediaInteractionConfiguration?) -> some View {
         GrowingTextEditor(text: $inputText,
                           isFocused: $inputFocused,
                           measuredHeight: $composerHeight,
-                          isIdle: composerState == .idle,
-                          canSteer: true,
-                          onSend: { sendMessage() },
+                          selection: $inputSelection,
+                          maxLines: 8,
+                          isIdle: media.map { mediaActivity($0) == .idle && $0.canSubmit } ?? (composerState == .idle),
+                          canSteer: appState.interactionMedia == nil,
+                          returnInsertsNewline: appState.interactionMedia != nil,
+                          onSend: { submitInteraction(media: media) },
                           // Escape stops the reply being written. Handled here
                           // rather than as a hidden `.cancelAction` button so
                           // the edit bubble and the approval sheet keep the key
                           // while they are up (ComposerKey.onEscape).
                           onCancel: {
+                              if let media, let modality = appState.interactionMedia {
+                                  guard mediaActivity(media).canCancel else { return false }
+                                  appState.mediaInteractions.cancel(modality: modality, sessionId: sessionId)
+                                  return true
+                              }
                               switch ComposerKey.onEscape(isGenerating: composerState == .generatingHere) {
                               case .stop: stopGeneration(); return true
                               case .pass: return false
                               }
                           },
                           onArrow: { direction, caretAtStart, caretAtEnd in
-                              recallHistory(direction, caretAtStart: caretAtStart, caretAtEnd: caretAtEnd)
+                              appState.interactionMedia == nil
+                                  && recallHistory(direction, caretAtStart: caretAtStart, caretAtEnd: caretAtEnd)
                           },
-                          onKeyCommand: { handleSlashKey($0) })
+                          onKeyCommand: { appState.interactionMedia == nil && handleSlashKey($0) })
             .composerTextField(height: composerHeight,
-                               placeholder: inputText.isEmpty ? composerPlaceholder : nil)
-            .disabled(!canAnswer)
+                               placeholder: inputText.isEmpty ? (media?.placeholder ?? composerPlaceholder) : nil)
             // Escape closes the menu for the text as it stands; the next
             // keystroke is a new query, so it opens again.
             .onChange(of: inputText) { _, _ in
@@ -2789,13 +2791,94 @@ struct ChatDetailView: View {
     }
 
     /// Keep mode labels readable when the detail column narrows.
-    private var composerControls: some View {
+    private func composerControls(media: MediaInteractionConfiguration?) -> some View {
         ComposerControlsRow {
-            composerModes
+            if let media {
+                Button { showingMediaAttachments.toggle() } label: {
+                    ComposerControlSymbol(name: "plus")
+                }
+                .buttonStyle(.glass).buttonBorderShape(.circle).controlSize(.regular)
+                .disabled(!media.hasAttachments)
+                .accessibilityLabel("Attachments")
+                .accessibilityValue("\(media.attachmentCount) attached")
+                .popover(isPresented: $showingMediaAttachments) {
+                    InteractionOptionsPopover { media.attachments }
+                }
+            } else {
+                composerModes
+            }
         } model: {
-            composerModel
+            HStack(spacing: 6) {
+                composerModel
+                if let media {
+                    Button { showingMediaParameters.toggle() } label: {
+                        ComposerControlSymbol(name: "slider.horizontal.3")
+                    }
+                    .buttonStyle(.glass).buttonBorderShape(.circle).controlSize(.regular)
+                    .accessibilityLabel("Model settings")
+                    .popover(isPresented: $showingMediaParameters) {
+                        InteractionOptionsPopover {
+                            if let notice = media.notice {
+                                Text(L10n.text(notice)).font(.app(.callout)).foregroundStyle(.secondary)
+                            }
+                            media.accessories
+                            media.parameters
+                        }
+                    }
+                }
+            }
         } actions: {
-            composerActions
+            if let media {
+                let activity = mediaActivity(media)
+                ComposerActionButton(isRunning: activity.canCancel,
+                                     label: activity.canCancel ? "Stop generating" : "Generate") {
+                    if activity.canCancel, let modality = appState.interactionMedia {
+                        appState.mediaInteractions.cancel(modality: modality, sessionId: sessionId)
+                    } else { submitInteraction(media: media) }
+                }
+                .disabled(activity == .busyElsewhere || (activity == .idle && !media.canSubmit))
+                .help(activity == .busyElsewhere ? "This model is already generating."
+                      : media.notice ?? "Generate with the selected model (Command-Return)")
+            } else {
+                composerActions
+            }
+        }
+    }
+
+    private func mediaActivity(_ media: MediaInteractionConfiguration) -> MediaComposerActivity {
+        guard let modality = appState.interactionMedia else { return .idle }
+        return appState.mediaInteractions.composerState(
+            modality: modality, sessionId: sessionId, serviceIsRunning: media.isRunning)
+    }
+
+    private func submitInteraction(media: MediaInteractionConfiguration?) {
+        guard let modality = appState.interactionMedia else { sendMessage(); return }
+        guard let media, media.canSubmit, mediaActivity(media) == .idle,
+              let submission = appState.prepareMediaInteraction(modality, sessionId: sessionId, prompt: inputText) else { return }
+        media.submit(submission)
+    }
+
+    @ViewBuilder
+    private var mediaCapabilityControls: some View {
+        switch appState.interactionMedia {
+        case .image:
+            ImageInteractionControls(prompt: $inputText, promptSelection: $inputSelection,
+                                     promptFocused: $inputFocused)
+                .environmentObject(appState.imageGen)
+        case .video:
+            VideoInteractionControls(prompt: $inputText, promptSelection: $inputSelection,
+                                     promptFocused: $inputFocused)
+                .environmentObject(appState.videoGen)
+        case .voice:
+            VoiceInteractionControls(prompt: $inputText).environmentObject(appState.audioGen)
+        case .music:
+            MusicInteractionControls(prompt: $inputText).environmentObject(appState.musicGen)
+        case .sound:
+            SoundInteractionControls(prompt: $inputText).environmentObject(appState.soundGen)
+        case .mesh:
+            Model3DInteractionControls().environmentObject(appState.model3dGen)
+        case nil:
+            EmptyView()
         }
     }
 
@@ -3547,7 +3630,7 @@ struct ChatDetailView: View {
     /// can answer" — every composer gate asks THIS, or the composer locks on a
     /// model that was ready to reply.
     private var canAnswer: Bool {
-        ChatTurnEngine.canRunTurn(serverRunning: server.status == .running,
+        appState.interactionMedia == nil && ChatTurnEngine.canRunTurn(serverRunning: server.status == .running,
                                   apple: appState.useAppleModel)
     }
 
@@ -3557,12 +3640,15 @@ struct ChatDetailView: View {
     private var canRegenerate: Bool {
         canAnswer && composerState != .generatingHere
             && session?.isExternalBridge != true
-            && (session?.messages.contains { $0.role == .user } ?? false)
+            && InteractionTurnActions.canReplayChat(messages: session?.messages ?? [],
+                                                   activeMedia: appState.interactionMedia)
     }
 
     /// Whether the reply at the end of this transcript can be finished off.
     private var canContinue: Bool {
-        ContinueReply.isEligible(session?.messages ?? [],
+        InteractionTurnActions.canReplayChat(messages: session?.messages ?? [],
+                                             activeMedia: appState.interactionMedia)
+            && ContinueReply.isEligible(session?.messages ?? [],
                                  serverRunning: server.status == .running,
                                  busy: composerState != .idle,
                                  engine: server.chatModelInfo?.engine)

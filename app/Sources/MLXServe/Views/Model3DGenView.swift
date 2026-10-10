@@ -5,14 +5,11 @@ import ModelIO
 import SceneKit.ModelIO
 import UniformTypeIdentifiers
 
-/// A photo produces a mesh preview; quality and texture controls live in the inspector.
-struct Model3DGenView: View {
+/// Mesh generation uses a reference photo and model-specific parameters.
+struct Model3DInteractionControls: View {
     @EnvironmentObject var service: Model3DGenService
     @EnvironmentObject var server: ServerManager
-    @Environment(\.openWindow) private var openWindow
     @EnvironmentObject var downloads: DownloadManager
-    /// For the model row's Download button (`MediaModelChooser`) — a completed
-    /// transfer has to re-scan the models directory.
     @EnvironmentObject var appState: AppState
 
     @State private var photoURL: URL? = nil
@@ -29,7 +26,8 @@ struct Model3DGenView: View {
     @State private var showRAMWarning: Bool = false
     @State private var ramWarningMessage: String = ""
     @State private var pendingRequest: Model3DGenRequest? = nil
-    /// Hydration guard — see ImageGenView for the full rationale.
+    @State private var pendingSubmission: MediaInteractionSubmission? = nil
+    /// Suppresses persistence while saved parameters are restored.
     @State private var hydrating: Bool = false
     @State private var didHydrate: Bool = false
     /// True while a drag carrying a file hovers the photo section — drives its
@@ -38,6 +36,10 @@ struct Model3DGenView: View {
 
     var body: some View {
         readyView
+        .onChange(of: showRAMWarning) { _, showing in
+            if !showing { discardPendingSubmission() }
+        }
+        .onDisappear { discardPendingSubmission() }
         .onAppear {
             if !didHydrate {
                 hydrating = true
@@ -58,31 +60,28 @@ struct Model3DGenView: View {
     }
 
     private var readyView: some View {
-        GenerationWorkspace(
-            title: "3D", modelName: lanModel ?? model.name,
-            notice: generationBlockReason,
-            prompt: {
-                photoSection
-            }, model: {
-                modelSection
-            }, attachments: {
-                EmptyView()
-            }, parameters: {
+        MediaInteractionControls(
+            placeholder: "Attach an image; this model does not use text…",
+            notice: generationBlockReason
+                ?? "This model creates 3D objects from an attached image; text is not used.",
+            hasAttachments: true, attachmentCount: photoURL == nil ? 0 : 1,
+            isRunning: service.isRunning, canSubmit: generationBlockReason == nil,
+            submit: tryGenerate,
+            attachments: { photoSection }, parameters: {
+                modelDownload
                 keepResidentToggle
                 parameterControls
-            }, actions: {
-                actionRow
-            }, result: {
-                previewArea
                 historyShelf
                 outputFolderLink
-            })
+            }, promptActions: { EmptyView() })
         .alert("Model exceeds your Mac's RAM", isPresented: $showRAMWarning) {
-            Button(role: .cancel) { pendingRequest = nil } label: { Text("Cancel")
+            Button(role: .cancel) { discardPendingSubmission() } label: { Text("Cancel")
                 .font(.app(.body)) }
             Button(role: .destructive) {
-                if let req = pendingRequest { service.generate(req, server: server) }
+                guard let req = pendingRequest, let submission = pendingSubmission else { return }
                 pendingRequest = nil
+                pendingSubmission = nil
+                startGeneration(req, submission: submission)
             } label: { Text("Generate Anyway")
                 .font(.app(.body)) }
         } message: {
@@ -92,11 +91,10 @@ struct Model3DGenView: View {
 
     // MARK: - Sections
 
-    private var modelSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            modelChooser
+    private var modelDownload: some View {
+        Group {
             if lanModel == nil && !downloads.bundleReady(model.bundle) {
-                if model.isLocalOnly { convertHint } else { BundleDownloadBar(bundle: model.bundle, showsStartButton: false) }
+                if model.isLocalOnly { convertHint } else { BundleDownloadBar(bundle: model.bundle) }
             }
         }
     }
@@ -108,22 +106,6 @@ struct Model3DGenView: View {
         }
         .font(.app(.body))
         .help("On: the model stays resident so the next generation is instant. Off (default): it's unloaded to free GPU memory.")
-    }
-
-    private var modelChooser: some View {
-        MediaModelChooser.pane(
-            all: Model3DModelPreset.all,
-            onThisMac: CustomMediaModels.meshPresets(from: server.allModels),
-            capability: "3d",
-            selected: $model, lanModel: $lanModel,
-            capabilityOf: { $0.capabilityLabel },
-            resolveCustom: { [models = server.allModels] in
-                CustomMediaModels.meshPreset(for: $0, from: models)
-            },
-            bundleOf: { $0.bundle },
-            downloads: downloads,
-            onDownloadFinished: { appState.refreshModels() },
-            persist: persist)
     }
 
     private var photoSection: some View {
@@ -236,18 +218,6 @@ struct Model3DGenView: View {
         return photoURL == nil ? "Choose a photo to generate a mesh." : nil
     }
 
-    private var actionRow: some View {
-        HStack {
-            if service.isRunning {
-                ComposerActionButton(isRunning: true, label: "Cancel") { service.cancel() }
-            } else {
-                ComposerActionButton(isRunning: false, label: "Generate") { tryGenerate() }
-                .keyboardShortcut(.return, modifiers: [.command])
-                .disabled(generationBlockReason != nil)
-            }
-        }
-    }
-
     private var convertHint: some View {
         VStack(alignment: .leading, spacing: 5) {
             Label("Weights not found", systemImage: "wrench.and.screwdriver")
@@ -259,71 +229,14 @@ struct Model3DGenView: View {
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))
     }
 
-    private var previewArea: some View {
-        Group {
-            switch service.phase {
-            case .idle:
-                VStack(spacing: AppLayout.rowSpacing) {
-                    Image(systemName: "cube.transparent").font(.app(.title2))
-                    Text("Choose a photo to create a 3D model.").font(.app(.body))
-                }
-                .foregroundStyle(.secondary)
-            case .running(let step, let total, let message):
-                VStack(spacing: 12) {
-                    ProgressView(value: Double(step), total: max(1, Double(total)))
-                        .progressViewStyle(.linear).frame(width: 240)
-                    Text(message).font(.app(.footnote)).foregroundStyle(.secondary)
-                }
-            case .completed(let path):
-                completedPreview(path: path)
-            case .failed(let msg):
-                ContentUnavailableView {
-                    Label("Failed", systemImage: "exclamationmark.triangle").font(.app(.body))
-                } description: {
-                    Text(msg)
-                } actions: {
-                    Button { showLogWindow() } label: { Text("Show log")
-                        .font(.app(.body)) }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private func completedPreview(path: String) -> some View {
-        VStack(spacing: 8) {
-            Model3DSceneView(url: URL(fileURLWithPath: path), animate: turntable)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: AppLayout.surfaceRadius, style: .continuous))
-            HStack(spacing: 10) {
-                Toggle("Animate", isOn: $turntable)
-                    .toggleStyle(.switch).font(.app(.caption))
-                    .help("Idle motion: the model turns on a turntable with a gentle breathing pulse.")
-                Spacer()
-                Text(URL(fileURLWithPath: path).lastPathComponent)
-                    .font(.app(.caption)).foregroundStyle(.secondary)
-                    .lineLimit(1).truncationMode(.middle)
-                Button {
-                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
-                } label: { Image(systemName: "folder") }
-                .buttonStyle(.borderless).help("Reveal in Finder")
-            }
-        }
-        .padding(AppLayout.contentInset)
-    }
-
     private var outputFolderLink: some View {
         Button {
-            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: MediaStorage.models3dRoot)])
+            NSWorkspace.shared.activateFileViewerSelecting(
+                [URL(fileURLWithPath: MediaStorage.models3dRoot)])
         } label: {
-            Label("Open output folder in Finder", systemImage: "folder").font(.app(.caption))
+            Label("Open output folder in Finder", systemImage: "folder")
         }
         .buttonStyle(.borderless)
-        .foregroundStyle(.secondary)
-        .labelStyle(.iconOnly)
-        .accessibilityLabel("Open output folder in Finder")
-        .help("Open output folder in Finder")
-        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
     // MARK: - History shelf
@@ -340,7 +253,7 @@ struct Model3DGenView: View {
                                 path: path,
                                 isCurrent: service.phase == .completed(path: path)
                             ) {
-                                service.showHistoryItem(path)
+                                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
                             }
                         }
                     }
@@ -399,8 +312,21 @@ struct Model3DGenView: View {
 
     // MARK: - Generate
 
-    private func tryGenerate() {
-        guard let photoURL else { return }
+    private func discardPendingSubmission() {
+        pendingSubmission?.discard()
+        pendingSubmission = nil
+        pendingRequest = nil
+    }
+
+    private func tryGenerate(_ submission: MediaInteractionSubmission) {
+        guard !service.isRunning, generationBlockReason == nil else {
+            submission.discard()
+            return
+        }
+        guard let photoURL else {
+            submission.discard()
+            return
+        }
         let req = Model3DGenRequest(
             model: model,
             photoPath: photoURL.path,
@@ -417,15 +343,18 @@ struct Model3DGenView: View {
         if total < needed {
             ramWarningMessage = "This model needs about \(needed) GB of RAM, but your Mac has \(total) GB total. It may run very slowly or fail. Continue?"
             pendingRequest = req
+            pendingSubmission = submission
             showRAMWarning = true
             return
         }
+        startGeneration(req, submission: submission)
+    }
+
+    private func startGeneration(_ req: Model3DGenRequest, submission: MediaInteractionSubmission) {
+        guard submission.begin("Create a 3D object from \(URL(fileURLWithPath: req.photoPath).lastPathComponent).") else { return }
         service.generate(req, server: server)
     }
 
-    private func showLogWindow() {
-        AppActivation.openWindow(id: "serverLog", using: openWindow)
-    }
 }
 
 // MARK: - History thumbnail cell
@@ -463,7 +392,8 @@ private struct Model3DHistoryThumb: View {
             )
         }
         .buttonStyle(.plain)
-        .help((path as NSString).lastPathComponent)
+        .help("Reveal " + (path as NSString).lastPathComponent + " in Finder")
+        .accessibilityLabel("Reveal " + (path as NSString).lastPathComponent + " in Finder")
         .task(id: path) {
             let thumb = Model3DGenService.thumbnailPath(for: path)
             let url = URL(fileURLWithPath: thumb)

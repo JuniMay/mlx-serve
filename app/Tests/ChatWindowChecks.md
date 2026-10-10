@@ -25,7 +25,9 @@ send anything in personal conversations during layout checks.
    that focus and selection remain visible.
 7. Verify that model selection appears in the input dock. Open its model list
    and verify that chat and media models identify their capabilities. A media
-   selection opens its corresponding workspace without generating output.
+   selection keeps the same transcript and editor without generating output.
+   Choose MiniMax-H3, then choose a chat model from the same control. Both choices
+   must retain the conversation and shared draft without changing the page layout.
 8. Open Tools & MCP. Verify that Tools, MCP, and Plain Chat are switches and
    remain left aligned. Plain Chat disables both tool switches. Dismiss without
    changing a personal conversation's saved settings.

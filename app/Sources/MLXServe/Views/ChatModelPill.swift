@@ -49,14 +49,18 @@ struct ChatModelPill: View {
         return tail.isEmpty ? full : String(tail)
     }
 
-    private var lanChatModels: [ModelInfo] { server.lanModels(capability: "chat") }
     private var pickableModels: [LocalModel] { appState.localModels.filter(\.isChatPickable) }
+    private var isMedia: Bool { appState.interactionMedia != nil }
+    private var hasThinkingControls: Bool { !isMedia && thinkingControls != nil }
 
     /// The name and the in-flight state, decided in ONE pure place shared with
     /// the tray's rules (`ChatModelSelection.pillState`) — a per-surface copy is
     /// how one picker starts naming a model the other doesn't.
     private var pill: ChatModelPillState {
-        ChatModelSelection.pillState(lanChatModelId: server.lanChatModelId,
+        if let name = appState.interactionModelName {
+            return ChatModelPillState(name: name, isLoading: false)
+        }
+        return ChatModelSelection.pillState(lanChatModelId: server.lanChatModelId,
                                      apple: appState.useAppleModel,
                                      residentName: server.chatModelInfo?.name,
                                      loadingPath: appState.loadingModelPath,
@@ -77,15 +81,11 @@ struct ChatModelPill: View {
     }
 
     private var selection: String {
-        ChatModelSelection.tag(localPath: appState.selectedModelPath,
-                               lanChatModelId: server.lanChatModelId,
-                               apple: appState.useAppleModel)
+        appState.interactionModelTag
     }
 
     private var modelRows: [ModelPaletteRow] {
-        ModelPalette.rows(appleAvailable: AppleFoundationChat.availability.isAvailable,
-                          local: appState.localModels, lan: lanChatModels,
-                          mediaModels: server.allModels)
+        appState.interactionModelRows
     }
 
     /// A live transfer THIS CHAT is waiting on, if any. The pill is where the
@@ -130,7 +130,7 @@ struct ChatModelPill: View {
     }
 
     private var activeDownload: DownloadManager.DownloadState? {
-        guard server.lanChatModelId == nil else { return nil }
+        guard !isMedia, server.lanChatModelId == nil else { return nil }
         return Self.chatDownload(in: downloads.downloads,
                                  mediaRepos: downloads.mediaBundleRepos,
                                  selectedModelPath: appState.selectedModelPath,
@@ -145,12 +145,12 @@ struct ChatModelPill: View {
     var body: some View {
         if compact {
             HStack(spacing: 0) {
-                if let contextControl {
+                if !isMedia, let contextControl {
                     contextControl
                     Divider().frame(height: 16)
                 }
                 modelButton
-                if startControl != .hidden, let onStart {
+                if !isMedia, startControl != .hidden, let onStart {
                     Divider().frame(height: 16)
                     Button(action: onStart) {
                         HStack(spacing: 5) {
@@ -186,7 +186,7 @@ struct ChatModelPill: View {
     private var modelButton: some View {
         let pill = self.pill
         return Button {
-            showingModels = thinkingControls == nil || selection.isEmpty
+            showingModels = !hasThinkingControls || selection.isEmpty
             typedPrefix = ""
             isPresented.toggle()
         } label: {
@@ -199,13 +199,13 @@ struct ChatModelPill: View {
                         .frame(maxWidth: compact ? Self.compactNameWidth : Self.maxNameWidth,
                                alignment: .leading)
                         .fixedSize(horizontal: false, vertical: true)
-                    if let reasoningLabel {
+                    if !isMedia, let reasoningLabel {
                         Text(L10n.text(reasoningLabel))
                             .font(.app(.body))
                             .foregroundStyle(.secondary)
                             .fixedSize()
                     }
-                    if reasoningLocked {
+                    if !isMedia, reasoningLocked {
                         Image(systemName: "lock.fill")
                             .font(.app(.caption2))
                             .foregroundStyle(.secondary)
@@ -227,7 +227,7 @@ struct ChatModelPill: View {
                         Image(systemName: "arrow.down.circle.fill")
                             .font(.app(.subheadline))
                             .foregroundStyle(Color.accentColor)
-                    } else if startControl == .hidden {
+                    } else if !isMedia, startControl == .hidden {
                         Circle()
                             .fill(statusColor)
                             .frame(width: 6, height: 6)
@@ -255,13 +255,13 @@ struct ChatModelPill: View {
             .contentShape(Rectangle())
         }
         .fixedSize()
-        .accessibilityLabel(thinkingControls == nil ? "Model" : "Model and thinking")
-        .accessibilityValue([ModelDisplayName.pretty(pill.name), reasoningLabel.map(L10n.text)]
+        .accessibilityLabel(hasThinkingControls ? "Model and thinking" : "Model")
+        .accessibilityValue([ModelDisplayName.pretty(pill.name), isMedia ? nil : reasoningLabel.map(L10n.text)]
             .compactMap { $0 }.joined(separator: ", "))
-        .accessibilityHint(thinkingHint ?? "")
+        .accessibilityHint(isMedia ? "" : thinkingHint ?? "")
         .help(pill.isLoading
               ? L10n.format("Loading %@…", ModelDisplayName.pretty(pill.name))
-              : L10n.text("Choose a model and configure thinking."))
+              : L10n.text(hasThinkingControls ? "Choose a model and configure thinking." : "Choose a model."))
         .popover(isPresented: $isPresented, arrowEdge: .top) {
             VStack(alignment: .leading, spacing: 12) {
                 if showingModels {
@@ -319,7 +319,7 @@ struct ChatModelPill: View {
     private var modelPicker: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
-                if thinkingControls != nil {
+                if hasThinkingControls {
                     Button { showingModels = false } label: {
                         Label("Back", systemImage: "chevron.left")
                             .labelStyle(.iconOnly)
@@ -357,7 +357,7 @@ struct ChatModelPill: View {
                             proxy.scrollTo(tag, anchor: .center)
                         } else {
                             focusedModel = nil
-                            focusedNavigation = thinkingControls == nil ? .manage : .back
+                            focusedNavigation = hasThinkingControls ? .back : .manage
                         }
                     }
                 }
@@ -376,7 +376,7 @@ struct ChatModelPill: View {
             .focused($focusedNavigation, equals: .manage)
         }
         .onKeyPress(.leftArrow) {
-            guard thinkingControls != nil else { return .ignored }
+            guard hasThinkingControls else { return .ignored }
             showingModels = false
             return .handled
         }

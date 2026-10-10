@@ -2,16 +2,13 @@ import SwiftUI
 import AppKit
 
 /// Music keeps style and lyrics beside the result, with model-specific sources and options.
-struct MusicGenView: View {
+struct MusicInteractionControls: View {
     @EnvironmentObject var service: MusicGenService
     @EnvironmentObject var server: ServerManager
-    @Environment(\.openWindow) private var openWindow
     @EnvironmentObject var downloads: DownloadManager
-    /// For the model row's Download button (`MediaModelChooser`) — a completed
-    /// transfer has to re-scan the models directory.
     @EnvironmentObject var appState: AppState
 
-    @State private var prompt: String = ""
+    @Binding var prompt: String
     @State private var lyrics: String = ""
     @State private var model: MusicModelPreset = .acestepXLTurbo8bit
     /// Selected network model's routing id (`<model>@<peer>`); nil = local.
@@ -33,6 +30,7 @@ struct MusicGenView: View {
     @State private var showRAMWarning: Bool = false
     @State private var ramWarningMessage: String = ""
     @State private var pendingRequest: MusicGenRequest? = nil
+    @State private var pendingSubmission: MediaInteractionSubmission? = nil
     // The app-wide singleton, not a per-view instance: this view unmounts on
     // navigation (see the tab-persistence note on AudioGenView), and a
     // private player left playing when that happens is a leaked NSSound with
@@ -60,12 +58,16 @@ struct MusicGenView: View {
     @State private var trackClasses: [String] = []
     /// Keep the model resident after generating (default off → unload).
     @State private var keepResident: Bool = false
-    /// Hydration guard — see ImageGenView for the full rationale.
+    /// Suppresses persistence while saved parameters are restored.
     @State private var hydrating: Bool = false
     @State private var didHydrate: Bool = false
 
     var body: some View {
         readyView
+        .onChange(of: showRAMWarning) { _, showing in
+            if !showing { discardPendingSubmission() }
+        }
+        .onDisappear { discardPendingSubmission() }
         .onAppear {
             if !didHydrate {
                 hydrating = true
@@ -130,46 +132,37 @@ struct MusicGenView: View {
     private func stopPlayback() { clipPlayer.stop() }
 
     private var readyView: some View {
-        GenerationWorkspace(
-            title: "Music", modelName: lanModel ?? model.name,
+        MediaInteractionControls(
+            placeholder: "Describe the genre, mood and instruments…", notice: generationBlockReason,
             hasAttachments: model.supportsSourceAudio || model.supportsReferenceAudio,
             attachmentCount: (sourceTask && srcAudioURL != nil ? 1 : 0)
                 + (model.supportsReferenceAudio && refAudioURL != nil ? 1 : 0),
-            notice: generationBlockReason,
-            prompt: {
-                promptSection
-                lyricsSection
-                if sourceTask, let source = srcAudioURL {
-                    Label(source.lastPathComponent, systemImage: "waveform")
-                        .font(.app(.caption)).foregroundStyle(.secondary)
-                        .lineLimit(1).truncationMode(.middle)
-                }
-            }, model: {
-                modelSection
-            }, attachments: {
+            isRunning: service.isRunning, canSubmit: generationBlockReason == nil,
+            submit: tryGenerate,
+            attachments: {
                 if model.supportsSourceAudio { modeSection }
                 if sourceTask { sourceSection }
                 if model.supportsReferenceAudio { referenceSection }
             }, parameters: {
+                modelDownload
+                lyricsSection
                 keepResidentToggle
                 if sourceTask { sourceControls } else { durationSection }
                 advancedBody
-            }, actions: {
-                actionRow
-            }, result: {
-                previewArea
                 AudioHistoryShelf(
                     title: "History", paths: service.recent,
                     playingPath: clipPlayer.playingPath,
                     onPlay: { play($0) }, onStop: { stopPlayback() })
                 outputFolderLink
-            })
+            }, promptActions: { promptActions })
         .alert("Model exceeds your Mac's RAM", isPresented: $showRAMWarning) {
-            Button(role: .cancel) { pendingRequest = nil } label: { Text("Cancel")
+            Button(role: .cancel) { discardPendingSubmission() } label: { Text("Cancel")
                 .font(.app(.body)) }
             Button(role: .destructive) {
-                if let req = pendingRequest { service.generate(req, server: server, downloads: downloads) }
+                guard let req = pendingRequest, let submission = pendingSubmission else { return }
                 pendingRequest = nil
+                pendingSubmission = nil
+                startGeneration(req, submission: submission)
             } label: { Text("Generate Anyway")
                 .font(.app(.body)) }
         } message: {
@@ -179,30 +172,18 @@ struct MusicGenView: View {
 
     // MARK: - Sections
 
-    private var promptSection: some View {
-        VStack(alignment: .leading, spacing: AppLayout.labelSpacing) {
-            HStack {
-                Text("Style").font(.app(.body).weight(.medium))
-                Spacer()
-                Menu {
-                    Button("Enhance…") { rewriteKind = .style }.disabled(prompt.isBlank)
-                    styleExamplesMenu
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .accessibilityLabel("Style actions")
-                .help("Style actions")
-            }
-            ComposerPromptEditor(text: $prompt, placeholder: "Describe the genre, mood and instruments…",
-                                 maxLines: 4, isRunning: service.isRunning,
-                                 canSubmit: generationBlockReason == nil,
-                                 onSubmit: tryGenerate, onCancel: service.cancel)
-                .accessibilityLabel("Style prompt")
-                .help("Describe genre, mood and instruments, such as upbeat synthwave with driving bass and dreamy pads.")
+    private var promptActions: some View {
+        Menu {
+            Button("Enhance…") { rewriteKind = .style }.disabled(prompt.isBlank)
+            styleExamplesMenu
+        } label: {
+            Image(systemName: "ellipsis.circle")
         }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .accessibilityLabel("Style actions")
+        .help("Style actions")
     }
 
     private var lyricsSection: some View {
@@ -234,10 +215,9 @@ struct MusicGenView: View {
                         .font(.app(.caption)).foregroundStyle(.secondary)
                 }
             } else {
-                ComposerPromptEditor(text: $lyrics, placeholder: "Add lyrics…",
-                                     maxLines: 6, isRunning: service.isRunning,
-                                     canSubmit: generationBlockReason == nil,
-                                     onSubmit: tryGenerate, onCancel: service.cancel)
+                TextField("Add lyrics…", text: $lyrics, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .lineLimit(6...12)
                     .accessibilityLabel("Lyrics")
                     .help(model.requiresLyrics
                           ? L10n.format("This model sings your lyrics. Put section tags on their own lines: %@", MusicOptions.sectionTagHint)
@@ -257,14 +237,12 @@ struct MusicGenView: View {
     private var modeSection: some View {
         VStack(alignment: .leading, spacing: AppLayout.labelSpacing) {
             Picker("Mode", selection: $task) {
-                // The Cover segment declares a missing tokenizer in its OWN
-                // label, so the reason is readable before the mode is even
-                // selected — the whole point of #269.
+                // Name a missing tokenizer before the user selects Cover.
                 ForEach(MusicTask.allCases, id: \.self) { t in
                     Text(L10n.text(CoverWeightsFetch.modeLabel(t, decision: t == .cover ? coverWeights : .ready))).tag(t)
                 }
             }
-            .labelsHidden().pickerStyle(.segmented)
+            .labelsHidden().pickerStyle(.menu)
             Text(L10n.text(
                  task == .cover
                  ? "Re-sings an existing track in the style you describe: melody and structure stay, the caption and lyrics decide the rest."
@@ -554,13 +532,10 @@ struct MusicGenView: View {
         refAudioURL = nil
     }
 
-    private var modelSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            modelChooser
+    private var modelDownload: some View {
+        Group {
             if lanModel == nil && !downloads.bundleReady(model.bundle) {
-                // Local-only models have no HF download yet — steer the user to
-                // the on-device conversion instead of a Download button.
-                if model.isLocalOnly { convertHint } else { BundleDownloadBar(bundle: model.bundle, showsStartButton: false) }
+                if model.isLocalOnly { convertHint } else { BundleDownloadBar(bundle: model.bundle) }
             }
         }
     }
@@ -572,22 +547,6 @@ struct MusicGenView: View {
         }
         .font(.app(.body))
         .help("On: the model stays resident so the next generation is instant. Off (default): it's unloaded to free GPU memory.")
-    }
-
-    private var modelChooser: some View {
-        MediaModelChooser.pane(
-            all: MusicModelPreset.all,
-            onThisMac: CustomMediaModels.musicPresets(from: server.allModels),
-            capability: "music",
-            selected: $model, lanModel: $lanModel,
-            capabilityOf: { $0.capabilityLabel },
-            resolveCustom: { [models = server.allModels] in
-                CustomMediaModels.musicPreset(for: $0, from: models)
-            },
-            bundleOf: { $0.bundle },
-            downloads: downloads,
-            onDownloadFinished: { appState.refreshModels() },
-            persist: persist)
     }
 
     private var durationSection: some View {
@@ -759,18 +718,6 @@ struct MusicGenView: View {
         return sourceTask && srcAudioURL == nil ? "Attach source audio with the plus button." : nil
     }
 
-    private var actionRow: some View {
-        HStack {
-            if service.isRunning {
-                ComposerActionButton(isRunning: true, label: "Cancel") { service.cancel() }
-            } else {
-                ComposerActionButton(isRunning: false, label: "Generate") { tryGenerate() }
-                .keyboardShortcut(.return, modifiers: [.command])
-                .disabled(generationBlockReason != nil)
-            }
-        }
-    }
-
     private var convertHint: some View {
         VStack(alignment: .leading, spacing: 5) {
             Label("Weights not found", systemImage: "wrench.and.screwdriver")
@@ -783,102 +730,14 @@ struct MusicGenView: View {
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))
     }
 
-    private var previewArea: some View {
-        Group {
-            switch service.phase {
-            case .idle:
-                VStack(spacing: AppLayout.rowSpacing) {
-                    Image(systemName: "music.note").font(.app(.title2))
-                    Text("Describe the music you want to create.").font(.app(.body))
-                }
-                .foregroundStyle(.secondary)
-            case .running(let step, let total, let message):
-                VStack(spacing: AppLayout.rowSpacing) {
-                    if total == 0 {
-                        ProgressView().frame(maxWidth: 240)
-                    } else {
-                        ProgressView(value: Double(step), total: max(1, Double(total)))
-                            .progressViewStyle(.linear).frame(maxWidth: 240)
-                    }
-                    Text(message).font(.app(.footnote)).foregroundStyle(.secondary)
-                }
-            case .completed(let path):
-                completedPreview(path: path)
-            case .failed(let msg):
-                ContentUnavailableView {
-                    Label("Failed", systemImage: "exclamationmark.triangle").font(.app(.body))
-                } description: {
-                    Text(msg)
-                } actions: {
-                    Button { showLogWindow() } label: { Text("Show log")
-                        .font(.app(.body)) }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private func completedPreview(path: String) -> some View {
-        // One control, two states: pausing left the shelf lit under a clip
-        // that had stopped making sound, so there is no pause any more.
-        let playing = clipPlayer.playingPath == path
-        return VStack(spacing: AppLayout.rowSpacing) {
-            trackGlyph(playing: playing)
-            Button {
-                playing ? clipPlayer.stop() : clipPlayer.play(path)
-            } label: {
-                Label(playing ? "Stop" : "Play", systemImage: playing ? "stop.fill" : "play.fill").font(.app(.body))
-            }
-            .buttonStyle(.bordered)
-            // The name and the way to reach the file belong together, centred
-            // under the track they describe.
-            HStack(spacing: AppLayout.compactSpacing) {
-                Text(URL(fileURLWithPath: path).lastPathComponent)
-                    .font(.app(.caption)).foregroundStyle(.secondary)
-                    .lineLimit(1).truncationMode(.middle)
-                Button {
-                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
-                } label: { Image(systemName: "folder") }
-                .buttonStyle(.borderless).help("Reveal in Finder")
-                .accessibilityLabel("Reveal in Finder")
-            }
-        }
-        .padding(AppLayout.contentInset)
-    }
-
-    /// There is no note-in-a-circle symbol, so the disc is drawn and the note
-    /// is PUNCHED out of it: `.destinationOut` clears what it covers, which
-    /// needs the stack to composite as one layer first. The hole is what
-    /// bounces.
-    private func trackGlyph(playing: Bool) -> some View {
-        ZStack {
-            Circle()
-                .fill(.tint)
-                .frame(width: 64, height: 64)
-            Image(systemName: "music.note.list")
-                .font(.app(.largeTitle))
-                .blendMode(.destinationOut)
-                .symbolEffect(.bounce.down.byLayer, options: .repeat(.continuous), isActive: playing)
-        }
-        .compositingGroup()
-    }
-
-    private func showLogWindow() {
-        AppActivation.openWindow(id: "serverLog", using: openWindow)
-    }
-
     private var outputFolderLink: some View {
         Button {
-            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: MediaStorage.musicRoot)])
+            NSWorkspace.shared.activateFileViewerSelecting(
+                [URL(fileURLWithPath: MediaStorage.musicRoot)])
         } label: {
-            Label("Open output folder in Finder", systemImage: "folder").font(.app(.caption))
+            Label("Open output folder in Finder", systemImage: "folder")
         }
         .buttonStyle(.borderless)
-        .foregroundStyle(.secondary)
-        .labelStyle(.iconOnly)
-        .accessibilityLabel("Open output folder in Finder")
-        .help("Open output folder in Finder")
-        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
     // MARK: - Sticky settings
@@ -896,7 +755,6 @@ struct MusicGenView: View {
         seed = s.seed
         steps = s.steps
         instrumental = s.instrumental
-        prompt = s.prompt
         lyrics = s.lyrics
         refAudioURL = s.refAudioPath.flatMap { FileManager.default.fileExists(atPath: $0) ? URL(fileURLWithPath: $0) : nil }
         task = s.task
@@ -933,7 +791,6 @@ struct MusicGenView: View {
     }
 
     private func persist() { stickySnapshot.save() }
-
 
     // MARK: - Examples
 
@@ -1016,7 +873,17 @@ struct MusicGenView: View {
 
     // MARK: - Generate
 
-    private func tryGenerate() {
+    private func discardPendingSubmission() {
+        pendingSubmission?.discard()
+        pendingSubmission = nil
+        pendingRequest = nil
+    }
+
+    private func tryGenerate(_ submission: MediaInteractionSubmission) {
+        guard !service.isRunning, generationBlockReason == nil else {
+            submission.discard()
+            return
+        }
         let req = MusicGenRequest(
             model: model,
             prompt: prompt,
@@ -1044,9 +911,15 @@ struct MusicGenView: View {
         if total < needed {
             ramWarningMessage = "This model needs about \(needed) GB of RAM, but your Mac has \(total) GB total. It may run very slowly or fail. Continue?"
             pendingRequest = req
+            pendingSubmission = submission
             showRAMWarning = true
             return
         }
+        startGeneration(req, submission: submission)
+    }
+
+    private func startGeneration(_ req: MusicGenRequest, submission: MediaInteractionSubmission) {
+        guard submission.begin(req.prompt) else { return }
         service.generate(req, server: server, downloads: downloads)
     }
 }

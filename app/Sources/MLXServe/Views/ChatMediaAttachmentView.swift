@@ -46,6 +46,7 @@ struct ChatMediaAttachmentView: View {
             case .audio: ChatAudioAttachment(ref: ref)
             case .video: ChatVideoAttachment(ref: ref)
             case .image: ChatImageAttachment(ref: ref)
+            case .model3D: ChatModel3DAttachment(ref: ref)
             }
         }
     }
@@ -58,6 +59,24 @@ struct ChatMediaAttachmentView: View {
             .padding(.vertical, 8)
             .background(.quaternary.opacity(0.4))
             .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private struct ChatModel3DAttachment: View {
+    let ref: ChatMediaRef
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppLayout.compactSpacing) {
+            Model3DSceneView(url: URL(fileURLWithPath: ref.path), animate: false)
+                .frame(maxWidth: ChatMetrics.generatedMediaMaxWidth)
+                .frame(height: 280)
+                .clipShape(RoundedRectangle(cornerRadius: ChatMetrics.bubbleCornerRadius))
+            ChatMediaCaption(ref: ref)
+            Button("Open 3D Model", systemImage: "arrow.up.right.square") {
+                NSWorkspace.shared.open(URL(fileURLWithPath: ref.path))
+            }
+            .buttonStyle(.borderless)
+        }
     }
 }
 
@@ -237,33 +256,68 @@ private struct ChatVideoAttachment: View {
     }
 }
 
-/// The in-flight media generation, under the tool-call row that started it.
-///
-/// Determinate when the engine reports a total, indeterminate when it doesn't
-/// (TTS length is model-determined). The elapsed clock is a
-/// `TimelineView(.periodic)` — NOT a repeating animation or a Timer: a
-/// `repeatForever` animation is what wedges the tray popover (see `VoicePulse`).
+struct InteractionVideoPreview: View {
+    @ObservedObject var service: VideoGenService
+
+    var body: some View {
+        if let preview = service.livePreview {
+            Image(nsImage: preview)
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: 420, maxHeight: 240, alignment: .leading)
+                .clipShape(RoundedRectangle(cornerRadius: ChatMetrics.bubbleCornerRadius))
+                .accessibilityLabel("Video generation preview")
+        }
+    }
+}
+
+/// A periodic timeline keeps the elapsed clock from driving a repeating animation.
 struct MediaProgressCard: View {
-    let progress: MediaGenProgress
+    private let title: String
+    private let icon: String
+    private let fraction: Double?
+    private let detailText: String
+    private let startedAt: Date
+
+    init(progress: MediaGenProgress) {
+        title = progress.title
+        icon = progress.kind.icon
+        fraction = progress.fraction
+        detailText = progress.detailText
+        startedAt = progress.startedAt
+    }
+
+    init(progress: MediaInteractionProgress) {
+        title = progress.title
+        icon = progress.icon
+        fraction = progress.fraction
+        detailText = progress.detailText
+        startedAt = progress.startedAt
+    }
+
+    private func elapsedText(now: Date) -> String {
+        let seconds = max(0, Int(now.timeIntervalSince(startedAt)))
+        return String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
-                    Image(systemName: progress.kind.icon)
+                    Image(systemName: icon)
                         .font(.app(.callout))
                         .foregroundStyle(.tint)
-                    Text(L10n.text(progress.title))
+                    Text(L10n.text(title))
                         .font(.app(.caption).weight(.semibold))
                     Spacer(minLength: 8)
-                    TimelineView(.periodic(from: progress.startedAt, by: 1)) { context in
-                        Text(progress.elapsedText(now: context.date))
+                    TimelineView(.periodic(from: startedAt, by: 1)) { context in
+                        Text(elapsedText(now: context.date))
                             .font(.app(.caption2).monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
                 }
                 Group {
-                    if let fraction = progress.fraction {
+                    if let fraction {
                         ProgressView(value: fraction)
                     } else {
                         ProgressView()
@@ -272,7 +326,7 @@ struct MediaProgressCard: View {
                 }
                 .frame(maxWidth: .infinity)
 
-                Text(L10n.text(progress.detailText))
+                Text(L10n.text(detailText))
                     .font(.app(.caption2))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)

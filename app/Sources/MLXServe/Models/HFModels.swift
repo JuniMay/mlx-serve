@@ -148,8 +148,7 @@ enum MediaModality: CaseIterable {
         }
     }
 
-    /// The top-level create page. Music has no `GenExperiment` case of its own
-    /// — it is a tab inside Audio — so it shares `.audio` with voice.
+    /// The media family used by menu commands and model badges.
     var experiment: GenExperiment {
         switch self {
         case .image: return .image
@@ -159,8 +158,8 @@ enum MediaModality: CaseIterable {
         }
     }
 
-    /// Which tab of the Audio pane, or nil where the question does not apply.
-    var audioTab: AudioGenView.Tab? {
+    /// The saved audio capability for audio-generation commands.
+    var audioTab: AudioInteractionKind? {
         switch self {
         case .voice: return .voice
         case .music: return .music

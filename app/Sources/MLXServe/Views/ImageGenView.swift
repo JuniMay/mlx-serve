@@ -2,21 +2,20 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
-/// Image generation workspace with model-specific controls.
-struct ImageGenView: View {
+/// Image capabilities and request controls for the interaction composer.
+struct ImageInteractionControls: View {
     @EnvironmentObject var service: ImageGenService
     @EnvironmentObject var server: ServerManager
-    @Environment(\.openWindow) private var openWindow
     @EnvironmentObject var downloads: DownloadManager
     @EnvironmentObject var appState: AppState
 
-    @State private var prompt: String = ""
+    @Binding var prompt: String
     @State private var showEnhance = false
     /// Selection and focus are read by the image tiles: a click on one drops
     /// its name where the caret is, or on the end when the editor is not
     /// the one being typed into.
-    @State private var promptSelection: TextSelection? = nil
-    @State private var promptFocused = false
+    @Binding var promptSelection: TextSelection?
+    @Binding var promptFocused: Bool
     @State private var showAdvanced: Bool = false
     @State private var model: ImageModelPreset = .flux2Klein4B_Q4
     /// Selected network model's routing id (`<model>@<peer>`); nil = local.
@@ -33,6 +32,7 @@ struct ImageGenView: View {
     @State private var showRAMWarning: Bool = false
     @State private var ramWarningMessage: String = ""
     @State private var pendingRequest: ImageGenRequest? = nil
+    @State private var pendingSubmission: MediaInteractionSubmission? = nil
     /// Keep the model resident after generating (default off → unload to free
     /// GPU memory). On → the next generation reuses it instantly.
     @State private var keepResident: Bool = false
@@ -71,8 +71,6 @@ struct ImageGenView: View {
     /// True while a drag carrying a file is hovering the source-image section
     /// — drives that section's dashed-border highlight and the well's fill.
     @State private var isDropTargeted: Bool = false
-    /// Whether the Quality segments fit the column; a menu below that.
-    @State private var qualityFitsSegments: Bool = true
     /// A saved picture was gone on open and the rest renumbered, so the
     /// prompt's "image n" may now name another picture. Cleared by the first
     /// edit to either.
@@ -80,6 +78,10 @@ struct ImageGenView: View {
 
     var body: some View {
         readyView
+        .onChange(of: showRAMWarning) { _, showing in
+            if !showing { discardPendingSubmission() }
+        }
+        .onDisappear { discardPendingSubmission() }
         .onAppear {
             if !didHydrate {
                 hydrating = true
@@ -118,27 +120,29 @@ struct ImageGenView: View {
     }
 
     private var readyView: some View {
-        GenerationWorkspace(title: "Image", modelName: lanModel ?? model.name,
-                            hasAttachments: takesSourceImage,
-                            attachmentCount: (initImageURL == nil ? 0 : 1)
-                                + (effectiveEditMode ? refImageURLs.count : 0),
-                            notice: generationNotice,
-                            prompt: { promptSection }, model: { modelSection },
-                            attachments: { sourceImageSection }, parameters: {
-            qualitySection
-            canvasSection
-            advancedSection
-            keepResidentToggle
-        }, actions: { actionRow }, result: {
-            previewArea
-            outputFolderLink
-        })
+        MediaInteractionControls(
+            placeholder: "Describe an image…", notice: generationNotice,
+            hasAttachments: takesSourceImage,
+            attachmentCount: (initImageURL == nil ? 0 : 1)
+                + (effectiveEditMode ? refImageURLs.count : 0),
+            isRunning: service.isRunning, canSubmit: canGenerate,
+            submit: tryGenerate,
+            attachments: { sourceImageSection }, parameters: {
+                modelDownload
+                qualitySection
+                canvasSection
+                advancedSection
+                keepResidentToggle
+                outputFolderLink
+            }, promptActions: { promptActions })
         .alert("Model exceeds your Mac's RAM", isPresented: $showRAMWarning) {
-            Button(role: .cancel) { pendingRequest = nil } label: { Text("Cancel")
+            Button(role: .cancel) { discardPendingSubmission() } label: { Text("Cancel")
                 .font(.app(.body)) }
             Button(role: .destructive) {
-                if let req = pendingRequest { service.generate(req, server: server) }
+                guard let req = pendingRequest, let submission = pendingSubmission else { return }
                 pendingRequest = nil
+                pendingSubmission = nil
+                startGeneration(req, submission: submission)
             } label: { Text("Generate Anyway")
                 .font(.app(.body)) }
         } message: {
@@ -154,7 +158,7 @@ struct ImageGenView: View {
 
     private var generationNotice: String? {
         if lanModel == nil && !downloads.bundleReady(model.bundle) {
-            return "Download the selected model using the model control."
+            return "Download the selected model in interaction settings."
         }
         if !customSizeValid { return "Choose a supported canvas size in generation settings." }
         if !condWeightsValid { return "Check the layer weights in generation settings." }
@@ -163,27 +167,18 @@ struct ImageGenView: View {
 
     private var canGenerate: Bool { !prompt.isBlank && generationNotice == nil }
 
-    private var promptSection: some View {
-        HStack(alignment: .top, spacing: AppLayout.compactSpacing) {
-            ComposerPromptEditor(text: $prompt, placeholder: "Describe an image…",
-                                 selection: $promptSelection, focused: $promptFocused,
-                                 isRunning: service.isRunning,
-                                 canSubmit: canGenerate,
-                                 onSubmit: tryGenerate, onCancel: service.cancel)
-                .accessibilityLabel("Prompt")
-            Menu {
-                Button("Enhance…") { showEnhance = true }.disabled(prompt.isBlank)
-                templatesMenu
-            } label: {
-                Image(systemName: "ellipsis.circle")
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .padding(.top, 6)
-            .accessibilityLabel("Prompt actions")
-            .help("Prompt actions")
+    private var promptActions: some View {
+        Menu {
+            Button("Enhance…") { showEnhance = true }.disabled(prompt.isBlank)
+            templatesMenu
+        } label: {
+            Image(systemName: "ellipsis.circle")
         }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .accessibilityLabel("Prompt actions")
+        .help("Prompt actions")
     }
 
     /// Edit templates expose the model's supported operations.
@@ -389,33 +384,12 @@ struct ImageGenView: View {
         }
     }
 
-    /// Best-per-capability up front, everything else behind "Other Models", and
-    /// the Download button ON the model — see `MediaModelChooser`. The transfer
-    /// bar belongs to the model, not to the output, so it sits with it rather
-    /// than beside Generate.
-    private var modelSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            modelChooser
+    private var modelDownload: some View {
+        Group {
             if lanModel == nil && !downloads.bundleReady(model.bundle) {
-                BundleDownloadBar(bundle: model.bundle, showsStartButton: false)
+                BundleDownloadBar(bundle: model.bundle)
             }
         }
-    }
-
-    private var modelChooser: some View {
-        MediaModelChooser.pane(
-            all: ImageModelPreset.all,
-            onThisMac: CustomMediaModels.imagePresets(from: server.allModels),
-            capability: "image",
-            selected: $model, lanModel: $lanModel,
-            capabilityOf: { $0.capabilityLabel },
-            resolveCustom: { [models = server.allModels] in
-                CustomMediaModels.imagePreset(for: $0, from: models)
-            },
-            bundleOf: { $0.bundle },
-            downloads: downloads,
-            onDownloadFinished: { appState.refreshModels() },
-            persist: persist)
     }
 
     private var keepResidentToggle: some View {
@@ -442,17 +416,12 @@ struct ImageGenView: View {
         } else {
             VStack(alignment: .leading, spacing: AppLayout.labelSpacing) {
                 Text("Quality").font(.app(.rowTitle).weight(.semibold))
-                // Measured, not `ViewThatFits`: the menu variant is `fixedSize`
-                // and would never re-fit. Five segments degrade to a menu
-                // rather than shortening the tier names the Create panes share.
-                qualityPicker(segmented: qualityFitsSegments)
+                qualityPicker
                 Text(L10n.text(qualityHint))
                     .font(.app(.caption))
                     .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .onGeometryChange(for: Bool.self) { $0.size.width >= Self.qualitySegmentsMinWidth }
-                action: { qualityFitsSegments = $0 }
         }
     }
 
@@ -469,10 +438,6 @@ struct ImageGenView: View {
         ImageQualityMatch.match(steps: steps, model: model, preferring: quality)
     }
 
-    /// The four tier names plus Custom at the segmented control's own
-    /// padding; the Video pane's value.
-    private static let qualitySegmentsMinWidth: CGFloat = 380
-
     /// Reads the DERIVED tier and writes by applying one.
     private var qualitySelection: Binding<QualitySelection> {
         Binding(
@@ -484,9 +449,8 @@ struct ImageGenView: View {
             })
     }
 
-    @ViewBuilder
-    private func qualityPicker(segmented: Bool) -> some View {
-        let picker = Picker("Quality", selection: qualitySelection) {
+    private var qualityPicker: some View {
+        Picker("Quality", selection: qualitySelection) {
             ForEach(QualityPreset.allCases) { q in
                 Text(L10n.text(q.label)).font(.app(.body)).tag(QualitySelection.preset(q))
             }
@@ -494,12 +458,7 @@ struct ImageGenView: View {
                 Text("Custom").font(.app(.body)).tag(QualitySelection.custom)
             }
         }
-        .labelsHidden()
-        if segmented {
-            picker.pickerStyle(.segmented)
-        } else {
-            picker.pickerStyle(.menu).fixedSize()
-        }
+        .labelsHidden().pickerStyle(.menu)
     }
 
     /// The steps the request will carry, so Custom reads its own number.
@@ -884,88 +843,14 @@ struct ImageGenView: View {
         }
     }
 
-    private var actionRow: some View {
-        Group {
-            if service.isRunning {
-                ComposerActionButton(isRunning: true, label: "Cancel") { service.cancel() }
-            } else {
-                ComposerActionButton(isRunning: false, label: "Generate") { tryGenerate() }
-                .keyboardShortcut(.return, modifiers: [.command])
-                .disabled(!canGenerate)
-            }
-        }
-    }
-
-    private var previewArea: some View {
-        Group {
-            switch service.phase {
-            case .idle:
-                VStack(spacing: AppLayout.rowSpacing) {
-                    Image(systemName: "photo").font(.app(.title2))
-                    Text("Enter a prompt and press Generate.").font(.app(.body))
-                }
-                .foregroundStyle(.secondary)
-            case .running(let step, let total, let message):
-                VStack(spacing: AppLayout.rowSpacing) {
-                    ProgressView(value: Double(step), total: max(1, Double(total)))
-                        .progressViewStyle(.linear)
-                        .frame(maxWidth: 240)
-                    Text(message).font(.app(.footnote)).foregroundStyle(.secondary)
-                }
-            case .completed(let path):
-                completedPreview(path: path)
-            case .failed(let msg):
-                ContentUnavailableView {
-                    Label("Failed", systemImage: "exclamationmark.triangle").font(.app(.body))
-                } description: {
-                    Text(msg)
-                } actions: {
-                    Button { showLogWindow() } label: { Text("Show log")
-                        .font(.app(.body)) }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private func completedPreview(path: String) -> some View {
-        VStack(spacing: AppLayout.compactSpacing) {
-            MediaImageView(url: URL(fileURLWithPath: path), maxPixel: 3072,
-                           contentMode: .fit)
-                .clipShape(RoundedRectangle(cornerRadius: AppLayout.surfaceRadius, style: .continuous))
-            // The name and the ways to reach the file belong together, centred
-            // under the picture they describe.
-            HStack(spacing: AppLayout.compactSpacing) {
-                Text(URL(fileURLWithPath: path).lastPathComponent)
-                    .font(.app(.caption))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Button {
-                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
-                } label: { Image(systemName: "folder") }
-                .buttonStyle(.borderless)
-                .help("Reveal in Finder")
-                .accessibilityLabel("Reveal in Finder")
-            }
-        }
-    }
-
     private var outputFolderLink: some View {
         Button {
             NSWorkspace.shared.activateFileViewerSelecting(
-                [URL(fileURLWithPath: MediaStorage.imagesRoot)]
-            )
+                [URL(fileURLWithPath: MediaStorage.imagesRoot)])
         } label: {
             Label("Open output folder in Finder", systemImage: "folder")
-                .font(.app(.caption))
         }
-        .labelStyle(.iconOnly)
         .buttonStyle(.borderless)
-        .foregroundStyle(.secondary)
-        .accessibilityLabel("Open output folder in Finder")
-        .help("Open output folder in Finder")
-        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
     // MARK: - Sticky settings
@@ -999,7 +884,6 @@ struct ImageGenView: View {
         condWeightsText = s.condWeightsText
         guidanceScale = s.guidanceScale
         loras = s.loras
-        prompt = s.prompt
         negativePrompt = s.negativePrompt
         showAdvanced = s.showAdvanced
         // A file may have moved since last session — drop stale entries.
@@ -1076,7 +960,17 @@ struct ImageGenView: View {
     /// can override. Available-RAM was misleading: macOS aggressively pages
     /// out idle apps under unified-memory pressure, so a "5 GB free" reading
     /// rarely means the system can't allocate the working set.
-    private func tryGenerate() {
+    private func discardPendingSubmission() {
+        pendingSubmission?.discard()
+        pendingSubmission = nil
+        pendingRequest = nil
+    }
+
+    private func tryGenerate(_ submission: MediaInteractionSubmission) {
+        guard !service.isRunning, canGenerate else {
+            submission.discard()
+            return
+        }
         let req = ImageGenRequest(
             model: model,
             prompt: prompt,
@@ -1107,14 +1001,17 @@ struct ImageGenView: View {
         if total < needed {
             ramWarningMessage = "This model needs about \(needed) GB of RAM, but your Mac has \(total) GB total. It may run very slowly or fail. Continue?"
             pendingRequest = req
+            pendingSubmission = submission
             showRAMWarning = true
             return
         }
 
+        startGeneration(req, submission: submission)
+    }
+
+    private func startGeneration(_ req: ImageGenRequest, submission: MediaInteractionSubmission) {
+        guard submission.begin(req.prompt) else { return }
         service.generate(req, server: server)
     }
 
-    private func showLogWindow() {
-        AppActivation.openWindow(id: "serverLog", using: openWindow)
-    }
 }

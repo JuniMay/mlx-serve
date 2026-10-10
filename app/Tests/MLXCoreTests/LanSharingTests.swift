@@ -39,10 +39,6 @@ final class LanSharingTests: XCTestCase {
         XCTAssertEqual(LanPick.base(of: "no-peer-suffix"), "no-peer-suffix")
     }
 
-    // The LAN-pick-adopts-its-preset rule (the H3-sent-LTX-shapes class) moved
-    // with the picker: `MediaModelChooserTests.testLanPickAdoptsCatalogThen-
-    // CustomFamilyPreset` pins it on the live `onSelectLan` path.
-
     @MainActor
     func testLanModelsFilterByBadgeAndCapability() {
         let mgr = ServerManager()

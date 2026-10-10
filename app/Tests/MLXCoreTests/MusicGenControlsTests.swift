@@ -159,11 +159,11 @@ final class MusicGenControlsTests: XCTestCase {
         // it on; @AppStorage needs a stable raw value to do that, and the
         // stored strings are a persistence contract — renaming the display
         // text must not silently reset everyone to Voice.
-        XCTAssertEqual(AudioGenView.Tab.voice.rawValue, "Voice")
-        XCTAssertEqual(AudioGenView.Tab.music.rawValue, "Music")
-        XCTAssertEqual(AudioGenView.Tab(rawValue: "Music"), .music)
-        XCTAssertNil(AudioGenView.Tab(rawValue: "music"))
-        XCTAssertEqual(AudioGenView.Tab.allCases.first, .voice)
+        XCTAssertEqual(AudioInteractionKind.voice.rawValue, "Voice")
+        XCTAssertEqual(AudioInteractionKind.music.rawValue, "Music")
+        XCTAssertEqual(AudioInteractionKind(rawValue: "Music"), .music)
+        XCTAssertNil(AudioInteractionKind(rawValue: "music"))
+        XCTAssertEqual(AudioInteractionKind.allCases.first, .voice)
     }
 }
 

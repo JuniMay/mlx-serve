@@ -12,7 +12,7 @@ Menu-bar app that wraps the server with a full UI. [Download the latest release]
 - **MCP client** — curated marketplace of stdio + HTTP MCP servers (GitHub, Azure DevOps, DBHub, Docker, Kubernetes, Playwright, Slack, Notion, Filesystem, Shell) plus your own from `~/.mlx-serve/mcp.json`.
 - **Agent Sandbox** — run agent shell commands in a Linux VM through Apple's Virtualization framework. Workspace folders are shared with the guest, so changes there affect the real files on your Mac. With guest networking enabled, listening guest ports are available through localhost. The direct-distribution build can also run host commands; the App Store build requires guest execution.
 - **Hands-free Voice Mode** — on-device speech recognition, spoken replies, interruption and agent tools from the menu bar. Replies use the macOS system voice by default. Settings ▸ Voice also offers Kokoro voices and Qwen3-TTS voice cloning. A new installation has no wake phrase: choose one or turn off **Require Wake Phrase** before starting. Agents can supply their own phrase.
-- **LAN Sharing** — share chosen models with the other Macs in your house and use theirs: peers appear automatically, shared models show up in the tray and every generation pane as "model · peer", and requests stream to the Mac that hosts the weights — chat, image, speech, music, video, and 3D alike, with models loading on demand on the host. Configure publishing in Settings ▸ LAN Sharing and discovery in Settings ▸ Providers ▸ Nearby Macs. Prompts sent to a shared model run on and are visible to the hosting Mac.
+- **LAN Sharing** — share chosen models with the other Macs in your house and use theirs: peers appear automatically, shared models show up in model selectors as "model · peer", and requests stream to the Mac that hosts the weights — chat, image, speech, music, video, and 3D alike, with models loading on demand on the host. Configure publishing in Settings ▸ LAN Sharing and discovery in Settings ▸ Providers ▸ Nearby Macs. Prompts sent to a shared model run on and are visible to the hosting Mac.
 - **Scheduled tasks** — hand the agent a goal and a schedule in plain English ("weekdays at 8am, check my watched sites and write a briefing") and it runs unattended, with saved transcripts.
 - **Document folder RAG** — attach a folder of mixed files and ask questions about them; GPU-batched embeddings index ~500 files in ~7 s, everything in memory, nothing leaves the Mac.
 - **Editable system prompt + persistent memory** — `~/.mlx-serve/system-prompt.md` and `~/.mlx-serve/memory.md`.
@@ -21,36 +21,38 @@ Menu-bar app that wraps the server with a full UI. [Download the latest release]
 - **Server management** — start/stop, live log buffer, restart-on-flag-change banner and version details in **Settings ▸ About MLX-Serve**.
 - **Image / Video / Music / Speech / Sound / 3D generation** — FLUX.2, Krea-2, Mage-Flow, LTX-Video 2.3 / 2.5, MiniMax-H3, ACE-Step, MiniMax Music 3, Qwen3-TTS, Kokoro, Stable Audio 3 and Hunyuan3D, all through the native server.
 
-## Interaction workspaces
+## Interaction page
 
-Use **New** in the sidebar to start an interaction. Choose a model from the dock or with **⌘L**. Supported local models open the
-workspace for their capability: chat, image, video, voice, music, sound or 3D.
-Decision models open their decision interface. Media selection keeps chat model
-selection separate and does not start generation. The model browser remains the
-place to find and download models. Network media models are available from each
-media workspace's model popover.
+Use **New** in the sidebar to start an interaction. Chat, image, video, speech,
+music, sound and 3D models use one transcript and one floating input dock.
+Choose a model in the dock or with **⌘L**. Changing its capability preserves
+the page, conversation and draft. The same model selector can return from a
+media model to a chat model. Selection does not start generation. Open a decision
+model from Models for its separate structured questions and choices.
 
-Generation workspaces put results above a floating input dock in the same centered column. The dock contains
-the prompt, model picker, supported attachments and Generate or Cancel. Open
-**Generation settings** in the toolbar for the current model's quality, size, sampler and other
-parameters. The trailing inspector starts closed and keeps input and output
-visible when opened. The attachment and model popovers preserve model-specific inputs
-and download controls. Voice, Music and Sound keep their own input requirements.
-The Audio toolbar switches between these three workspaces. Prompt action menus
-provide templates and enhancement where supported.
+The selected model determines which attachment slots and parameters are
+available. Open the attachment popover for supported references. Open generation
+settings beside the model selector for quality, dimensions, duration, sampler,
+lyrics and other model-specific inputs. These controls keep their saved defaults
+and capability limits. The transcript and primary prompt stay visible.
 
-Chat and media share the editor's font and insets, model-pill styling and circular
-attachment and action controls. Media prompts grow as you type, then scroll
-within a bounded area. Return inserts a newline; **⌘Return** starts generation
-when the required inputs are ready.
+Sending a media request reserves its generation service for the conversation.
+Preparation appears in the transcript while a download or confirmation is pending.
+The final request prompt is recorded when generation starts. Progress,
+errors and completed output appear in that conversation. Switching models or
+conversations leaves an active generation associated with its original
+conversation. Completed files are referenced by path in saved history; deleting
+or moving a file outside the app produces a missing-file notice in the transcript.
 
-Changing the model within a workspace preserves its draft inputs. Model defaults
-and capability limits still apply to generation parameters.
+The shared prompt grows as you type, then scrolls within a bounded area.
+For media models, Return inserts a newline and **⌘Return** starts generation
+when the required inputs are ready. Stop cancels generation belonging to the
+current conversation, including after a model change. Another conversation using
+the same generation service shows that it is busy and cannot stop its work.
 
-The sidebar stays in place when opening Models, Agents or Tasks. Their lists and
-page controls occupy the main pane. App-wide server, engine, tool and appearance
-preferences stay in **Settings**; parameters for the current generation stay with
-that workspace.
+Models, Agents and Tasks provide management views in the main pane while the
+sidebar stays in place. App-wide server, engine, tool and appearance preferences
+stay in **Settings**. The model browser is the place to find and download models.
 
 Terminal sessions appear alongside conversations and remain running when you switch
 workspaces. A host session runs its coding agent on macOS; a sandbox session
@@ -91,19 +93,19 @@ For model formats, context sizing and speculative decoding, see
 
 ## Image / Video / Music / Speech / Sound / 3D generation
 
-The **Image**, **Video**, **Audio** (speech, music and sound) and **3D** workspaces run [FLUX.2](https://huggingface.co/black-forest-labs) / Krea-2 / Microsoft Mage-Flow, [LTX-Video 2.3 and 2.5](https://github.com/dgrauet/ltx-2-mlx) / [MiniMax-H3](https://huggingface.co/ddalcu/MiniMax-H3-FL2VA-MLX-Serve-8bit), [ACE-Step 1.5](https://huggingface.co/ddalcu/ACE-Step-1.5-XL-Turbo-MLX-Serve-8bit) / MiniMax Music 3, [Qwen3-TTS](https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-Base) / [Kokoro-82M](https://huggingface.co/ddalcu/Kokoro-82M-MLX-Serve), Stable Audio 3, and [Hunyuan3D-2.1](https://huggingface.co/ddalcu/Hunyuan3D-2.1-MLX-Serve-8bit) natively on MLX. Choose a model in its popover. If it is unavailable, use the explicit Download action. Open the attachment popover to choose or drop supported reference files into their slots. Each pane remembers your last-used model, quality, resolution, steps and seed between sessions.
+The interaction page runs [FLUX.2](https://huggingface.co/black-forest-labs) / Krea-2 / Microsoft Mage-Flow, [LTX-Video 2.3 and 2.5](https://github.com/dgrauet/ltx-2-mlx) / [MiniMax-H3](https://huggingface.co/ddalcu/MiniMax-H3-FL2VA-MLX-Serve-8bit), [ACE-Step 1.5](https://huggingface.co/ddalcu/ACE-Step-1.5-XL-Turbo-MLX-Serve-8bit) / MiniMax Music 3, [Qwen3-TTS](https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-Base) / [Kokoro-82M](https://huggingface.co/ddalcu/Kokoro-82M-MLX-Serve), Stable Audio 3, and [Hunyuan3D-2.1](https://huggingface.co/ddalcu/Hunyuan3D-2.1-MLX-Serve-8bit) natively on MLX. Choose an available model in the dock. Use Models to download an unavailable model. Open the attachment popover to choose or drop supported reference files into their slots. Generation settings remember the model's quality, resolution, steps and seed between sessions.
 
-The panes also list checkpoints you added yourself: anything in your model folders with a family the server can run shows under **On This Mac** with that family's controls, and the Model Browser offers community packs of those families, layout-checked before the Download button appears.
+The model selector also lists checkpoints you added yourself: anything in your model folders with a family the server can run uses that family's controls. The Model Browser offers community packs of those families, layout-checked before the Download button appears.
 
-With the relevant media tools enabled, you can also **generate media straight from chat**: ask for an image, a spoken line, a music track or a short clip and it renders inline in the conversation with a progress bar, using bounded preview settings and supported saved defaults for that modality. Use the media workspace for editing, reference inputs and full generation parameters. Double-click any chat image to open it full-size in Preview.
+With a chat model selected and the relevant media tools enabled, you can also ask for an image, a spoken line, a music track or a short clip. The chat model calls the generation tool and its output renders inline with a progress bar, using bounded preview settings and supported saved defaults. Selecting a media model directly gives access to editing, reference inputs and full generation parameters in the same page. Double-click any transcript image to open it full-size in Preview.
 
 And it goes well beyond text-to-X:
 
 - **Edit photos with instructions** — attach a picture, type *"make the hair blue"* or *"remove the monitor in the background"*, and FLUX.2-klein or Mage-Flow Edit changes it while keeping subject, pose, and scene intact (in-context reference conditioning — 0.97 structural correlation measured live). Mage-Flow Edit also composes multiple references ("put the object from image 2 into image 1") and does control maps, restoration and relighting from plain instructions. The source keeps its own aspect ratio, never squished. Works from the OpenAI SDK too: `client.images.edit(image=…, prompt=…)` against `POST /v1/images/edits`.
 - **Image-to-image variations** — every image model (Krea-2 included) takes a source image plus a strength slider, from subtle remix to full re-imagination.
-- **Animate your photos** — drop a picture into the Video pane's First-frame slot and LTX animates forward from it, starting exactly on your image.
+- **Animate your photos** — select an LTX model and drop a picture into the First-frame attachment slot. LTX animates forward from it, starting exactly on your image.
 - **Talking characters** — put spoken lines in quotes in the video prompt, attach a real speech or music clip, or type a line for Qwen3-TTS to voice — the video is generated *against* that soundtrack, performance synced, and the original audio (not a re-synthesis) lands in the mp4.
-- **Clone a voice from seconds of audio** — record or pick a clip in Settings ▸ Voice and Qwen3-TTS speaks in that voice — in the AudioGen panel, in hands-free Voice Mode, everywhere.
+- **Clone a voice from seconds of audio** — record or pick a clip in Settings ▸ Voice and Qwen3-TTS speaks in that voice during direct speech generation and hands-free Voice Mode.
 - **Compose full music tracks** — ACE-Step 1.5 turns a style prompt (and optional lyrics) into a 48 kHz stereo track: a 30-second song renders in about 4 seconds.
 - **Turn a photo into a 3D model** — Hunyuan3D-2.1 converts an image into a watertight GLB mesh, optionally with full PBR textures — drops straight into a game engine or slicer.
 - **Video with its own soundtrack** — MiniMax-H3 (Hailuo 3.0) denoises the clip and a stereo soundtrack together in one pass, so the sound is produced with the video rather than dubbed on after. Describe the scene, then what you want to hear after `overall_soundscape:`. The REF2VA build builds the clip around pictures, clips or audio you attach (`<Picture 1>`, `<Video 1>`, `<Audio 1>` in the prompt); the FL2VA build takes first/last keyframes and chains windows into longer clips. **Turbo** renders in 4 steps instead of 30. It is slow either way: 1344×768 at 124 frames is about 50 minutes on an M4 Max.

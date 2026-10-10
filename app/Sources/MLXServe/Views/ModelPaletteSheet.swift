@@ -1,11 +1,10 @@
 import SwiftUI
 
-/// The global model chooser opens the workspace for the selected model's capabilities.
+/// The global model chooser configures the current interaction.
 struct ModelPaletteSheet: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var server: ServerManager
     @Environment(\.openWindow) private var openWindow
-    @AppStorage("audioGenTab") private var audioTab: AudioGenView.Tab = .voice
 
     @State private var query = ""
     /// Index into the FILTERED rows. Read through `ModelPalette.clamped`, never
@@ -14,37 +13,13 @@ struct ModelPaletteSheet: View {
     @FocusState private var searchFocused: Bool
 
     private var rows: [ModelPaletteRow] {
-        ModelPalette.rows(appleAvailable: AppleFoundationChat.availability.isAvailable,
-                          local: appState.localModels,
-                          lan: server.lanModels(capability: "chat"), mediaModels: server.allModels)
+        appState.interactionModelRows
     }
 
     private var matches: [ModelPaletteRow] { ModelPalette.filtered(rows, query: query) }
 
-    /// Prefer the model selected in the visible workspace.
     private var currentTag: String {
-        if case .create(let experiment) = appState.chatWorkspace {
-            let modality: MediaModality
-            let modelID: String
-            switch experiment {
-            case .image: modality = .image; modelID = ImageGenSettings.load().modelId
-            case .video: modality = .video; modelID = VideoGenSettings.load().modelId
-            case .model3d: modality = .mesh; modelID = Model3DGenSettings.load().modelId
-            case .audio:
-                switch audioTab {
-                case .voice: modality = .voice; modelID = AudioGenSettings.load().modelId
-                case .music: modality = .music; modelID = MusicGenSettings.load().modelId
-                case .sound: modality = .sound; modelID = SoundGenSettings.load().modelId
-                }
-            }
-            return appState.localModels.first {
-                ModelBrowserUse.mediaPresetID(modality: modality, name: $0.name, path: $0.path,
-                                              models: server.allModels) == modelID
-            }?.path ?? ""
-        }
-        return ChatModelSelection.tag(localPath: appState.selectedModelPath,
-                               lanChatModelId: server.lanChatModelId,
-                               apple: appState.useAppleModel)
+        appState.interactionModelTag
     }
 
     var body: some View {

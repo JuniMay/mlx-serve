@@ -28,7 +28,7 @@ final class SidebarSelectionTests: XCTestCase {
     /// moved to. Every non-conversation mode stands the chat rows down.
     func testNoChatIsLitWhileAPaneIsShowing() {
         for workspace: ChatWorkspace in [.tasks, .agents, .settings,
-                                         .models(.recommended), .create(.image)] {
+                                         .models(.recommended)] {
             XCTAssertFalse(
                 SidebarSelection.isConversationSelected(
                     sessionId: chat, activeChatId: chat, workspace: workspace),

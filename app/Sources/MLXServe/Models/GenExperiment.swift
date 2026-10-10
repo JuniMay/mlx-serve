@@ -1,6 +1,6 @@
 import Foundation
 
-/// Media workspaces shared by the tray, session menu, and Tools menu.
+/// Media families offered by model-management and menu controls.
 enum GenExperiment: String, CaseIterable, Identifiable {
     case image, video, audio, model3d
 

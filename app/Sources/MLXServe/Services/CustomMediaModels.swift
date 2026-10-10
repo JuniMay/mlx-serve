@@ -187,7 +187,3 @@ extension AudioModelPreset: CustomizableMediaPreset {}
 extension MusicModelPreset: CustomizableMediaPreset {}
 extension SoundModelPreset: CustomizableMediaPreset {}
 extension Model3DModelPreset: CustomizableMediaPreset {}
-
-// The old pickers' "On This Mac" Section (`CustomModelPickerRows`) retired
-// with them — `MediaModelChooser` draws that section itself from the
-// `onThisMac` list every pane passes it.
